@@ -11,11 +11,11 @@ import (
 )
 
 // TestMalformedRequestBody proves the strict server's own JSON decode step
-// runs (and is mapped to VALIDATION_FAILED) before the still-stubbed Login
-// handler ever runs — a malformed body never reaches the
-// notImplementedResponse stub, which would otherwise answer INTERNAL.
+// runs (and is mapped to VALIDATION_FAILED) before Login — or its
+// middleware — ever runs: a malformed body never reaches auth.Handler.Login
+// or auth.Service.Middleware at all.
 func TestMalformedRequestBody(t *testing.T) {
-	router := NewRouter(testLogger(), nil)
+	router := NewRouter(testLogger(), nil, testAuthService())
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/auth/login", strings.NewReader("{bad"))
 	req.Header.Set("Content-Type", "application/json")

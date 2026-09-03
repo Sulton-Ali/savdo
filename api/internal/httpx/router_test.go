@@ -9,11 +9,25 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/Sulton-Ali/savdo/api/gen"
+	"github.com/Sulton-Ali/savdo/api/internal/auth"
+	"github.com/Sulton-Ali/savdo/api/internal/config"
 )
 
 func testLogger() *slog.Logger {
 	return slog.New(slog.NewJSONHandler(io.Discard, nil))
+}
+
+// testAuthService builds an auth.Service safe to wire into NewRouter for
+// tests that never authenticate a real session — GetHealthz/GetReadyz/
+// Login pass through Middleware's allow-list without touching its
+// db.Queries, and every other operation these tests hit is unauthenticated
+// on purpose (they assert the 401/not-implemented shape, not a successful
+// call), so a nil *db.Queries is never dereferenced.
+func testAuthService() *auth.Service {
+	return auth.NewService(nil, config.Config{}, uuid.New())
 }
 
 func TestHealthz(t *testing.T) {
@@ -41,7 +55,7 @@ func TestHealthz(t *testing.T) {
 		},
 	}
 
-	router := NewRouter(testLogger(), nil)
+	router := NewRouter(testLogger(), nil, testAuthService())
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

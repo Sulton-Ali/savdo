@@ -33,15 +33,6 @@ func (notImplementedResponse) write(w http.ResponseWriter) error {
 	return json.NewEncoder(w).Encode(body)
 }
 
-func (r notImplementedResponse) VisitLoginResponse(w http.ResponseWriter) error  { return r.write(w) }
-func (r notImplementedResponse) VisitLogoutResponse(w http.ResponseWriter) error { return r.write(w) }
-func (r notImplementedResponse) VisitGetMeResponse(w http.ResponseWriter) error  { return r.write(w) }
-func (r notImplementedResponse) VisitListSessionsResponse(w http.ResponseWriter) error {
-	return r.write(w)
-}
-func (r notImplementedResponse) VisitRevokeSessionResponse(w http.ResponseWriter) error {
-	return r.write(w)
-}
 func (r notImplementedResponse) VisitGetShopResponse(w http.ResponseWriter) error { return r.write(w) }
 func (r notImplementedResponse) VisitUpdateShopResponse(w http.ResponseWriter) error {
 	return r.write(w)
@@ -66,36 +57,6 @@ func (r notImplementedResponse) VisitUpdateStaffResponse(w http.ResponseWriter) 
 }
 func (r notImplementedResponse) VisitSetStaffPasswordResponse(w http.ResponseWriter) error {
 	return r.write(w)
-}
-
-// Login authenticates with username and password.
-// Phase 1: replaced by T3/T4/T5.
-func (server) Login(_ context.Context, _ gen.LoginRequestObject) (gen.LoginResponseObject, error) {
-	return notImplementedResponse{}, nil
-}
-
-// Logout revokes the current session.
-// Phase 1: replaced by T3/T4/T5.
-func (server) Logout(_ context.Context, _ gen.LogoutRequestObject) (gen.LogoutResponseObject, error) {
-	return notImplementedResponse{}, nil
-}
-
-// GetMe returns the authenticated user, their shop and their permissions.
-// Phase 1: replaced by T3/T4/T5.
-func (server) GetMe(_ context.Context, _ gen.GetMeRequestObject) (gen.GetMeResponseObject, error) {
-	return notImplementedResponse{}, nil
-}
-
-// ListSessions lists the authenticated user's own sessions.
-// Phase 1: replaced by T3/T4/T5.
-func (server) ListSessions(_ context.Context, _ gen.ListSessionsRequestObject) (gen.ListSessionsResponseObject, error) {
-	return notImplementedResponse{}, nil
-}
-
-// RevokeSession revokes one of the authenticated user's own sessions.
-// Phase 1: replaced by T3/T4/T5.
-func (server) RevokeSession(_ context.Context, _ gen.RevokeSessionRequestObject) (gen.RevokeSessionResponseObject, error) {
-	return notImplementedResponse{}, nil
 }
 
 // GetShop returns the current shop's settings.

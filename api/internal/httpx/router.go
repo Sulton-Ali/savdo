@@ -15,6 +15,7 @@ import (
 
 	"github.com/Sulton-Ali/savdo/api/gen"
 	"github.com/Sulton-Ali/savdo/api/internal/apierr"
+	"github.com/Sulton-Ali/savdo/api/internal/auth"
 )
 
 // NewRouter builds the API's http.Handler: routes registered by the
@@ -22,14 +23,21 @@ import (
 // patterns), under the "/v1" base the spec's `servers` entry declares, all
 // wrapped in panic-recovery, request-id and request-logging middleware
 // (outermost to innermost, in that order). pool backs GET /readyz's DB
-// check; it may be nil in tests that never exercise that route.
-func NewRouter(logger *slog.Logger, pool *pgxpool.Pool) http.Handler {
+// check; it may be nil in tests that never exercise that route. authSvc
+// backs both auth.Service.Middleware — run for every operation, allow-
+// listing only GetHealthz/GetReadyz/Login (internal/auth/middleware.go) —
+// and the five `/auth/*` operations via auth.NewHandler.
+func NewRouter(logger *slog.Logger, pool *pgxpool.Pool, authSvc *auth.Service) http.Handler {
 	mux := http.NewServeMux()
 
-	strictHandler := gen.NewStrictHandlerWithOptions(server{pool: pool}, nil, gen.StrictHTTPServerOptions{
-		RequestErrorHandlerFunc:  writeRequestError,
-		ResponseErrorHandlerFunc: func(w http.ResponseWriter, _ *http.Request, err error) { apierr.Write(w, err) },
-	})
+	strictHandler := gen.NewStrictHandlerWithOptions(
+		server{pool: pool, Handler: auth.NewHandler(authSvc)},
+		[]gen.StrictMiddlewareFunc{authSvc.Middleware},
+		gen.StrictHTTPServerOptions{
+			RequestErrorHandlerFunc:  writeRequestError,
+			ResponseErrorHandlerFunc: func(w http.ResponseWriter, _ *http.Request, err error) { apierr.Write(w, err) },
+		},
+	)
 
 	gen.HandlerWithOptions(strictHandler, gen.StdHTTPServerOptions{
 		BaseURL:          "/v1",
