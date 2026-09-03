@@ -3,7 +3,7 @@
   "root": false,
   "extends": "//",
   "files": {
-    "includes": ["**", "!**/.expo", "!expo-env.d.ts"]
+    "includes": ["**", "!**/.expo", "!expo-env.d.ts", "!**/dist", "!**/web-build"]
   },
   "overrides": [
     {
