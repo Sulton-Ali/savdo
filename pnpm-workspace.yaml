@@ -5,3 +5,4 @@ packages:
   - "packages/*"
 allowBuilds:
   lefthook: true
+minimumReleaseAge: 1440
