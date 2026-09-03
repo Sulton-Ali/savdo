@@ -25,6 +25,26 @@ const (
 	saltLen             = 16
 )
 
+// maxArgonTime, maxArgonMemory and maxArgonThreads bound the parameters
+// Verify will ever pass to argon2.IDKey when re-deriving a hash to check
+// a login against. Hash itself always writes the exact pinned values
+// above, but Verify parses whatever m=/t=/p= a stored hash string
+// contains — and a hash is data, not code Verify controls. If a hash
+// with, say, an absurd memory value ever ended up in the database (a
+// migration bug, a restored backup, a compromised row), verifying a
+// login against it would otherwise make argon2.IDKey try to allocate
+// that much memory on every attempt: a stored denial-of-service that
+// fires the moment anyone — attacker or legitimate user — logs into that
+// one account. These ceilings are deliberately generous relative to the
+// pinned values (room for a future, still-reasonable parameter bump
+// without touching this file) while nowhere near what would hurt the
+// process.
+const (
+	maxArgonTime    uint32 = 10
+	maxArgonMemory  uint32 = 64 * 1024 // 64 MiB
+	maxArgonThreads uint8  = 8
+)
+
 // MinPasswordLength is the shortest password Hash accepts. Enforced here —
 // not left to each caller — so every path that ever sets a password
 // (login has none to set; staff creation and password reset do) gets the
@@ -63,10 +83,21 @@ func Hash(password string) (string, error) {
 // Verify reports whether password matches encoded, a PHC string Hash
 // produced. It re-derives a hash with the parameters and salt embedded in
 // encoded and compares in constant time (crypto/subtle), so neither the
-// early-exit timing nor the result itself leaks which byte differed. A
-// malformed encoded (never produced by Hash, but possible if a hash's
-// storage were ever corrupted) is reported as an error, not as ok=false —
-// callers must not conflate "not this password" with "not a hash at all".
+// early-exit timing nor the result itself leaks which byte differed.
+//
+// A malformed encoded that Verify cannot even parse (never produced by
+// Hash, but possible if a hash's storage were ever corrupted) is reported
+// as an error, not as ok=false — callers must not conflate "not this
+// password" with "not a hash at all". A hash that DOES parse but carries
+// a salt/digest length or a time/memory/thread cost outside this
+// package's pinned envelope (maxArgonTime/maxArgonMemory/maxArgonThreads,
+// saltLen, argonKeyLen above) is different: Verify treats it as ok=false
+// with no error — the same outward result as a wrong password — and,
+// critically, never calls argon2.IDKey with those out-of-envelope values
+// at all. Doing otherwise would let a single hostile row in `users`
+// (however it got there) turn every login attempt against that account
+// into an attempt to run argon2 with attacker-chosen cost, which is a
+// stored denial-of-service, not a mere data-integrity bug.
 func Verify(encoded, password string) (bool, error) {
 	parts := strings.Split(encoded, "$")
 	if len(parts) != 6 || parts[0] != "" || parts[1] != "argon2id" {
@@ -83,22 +114,29 @@ func Verify(encoded, password string) (bool, error) {
 	if _, err := fmt.Sscanf(parts[3], "m=%d,t=%d,p=%d", &memory, &timeCost, &threads); err != nil {
 		return false, fmt.Errorf("auth: parse hash params: %w", err)
 	}
+	if memory == 0 || memory > maxArgonMemory ||
+		timeCost == 0 || timeCost > maxArgonTime ||
+		threads == 0 || threads > maxArgonThreads {
+		return false, nil
+	}
 
 	salt, err := base64.RawStdEncoding.DecodeString(parts[4])
 	if err != nil {
 		return false, fmt.Errorf("auth: decode hash salt: %w", err)
 	}
+	if len(salt) != saltLen {
+		return false, nil
+	}
+
 	want, err := base64.RawStdEncoding.DecodeString(parts[5])
 	if err != nil {
 		return false, fmt.Errorf("auth: decode hash digest: %w", err)
 	}
 	// Every hash this package ever produces has exactly argonKeyLen bytes
 	// of digest (Hash always requests that length); a different length
-	// means encoded is not one of ours, so reject it outright rather than
-	// converting the attacker/corruption-controlled len(want) into the
-	// uint32 argon2.IDKey wants.
+	// means encoded is not one of ours.
 	if len(want) != int(argonKeyLen) {
-		return false, fmt.Errorf("auth: hash digest is %d bytes, want %d", len(want), argonKeyLen)
+		return false, nil
 	}
 
 	got := argon2.IDKey([]byte(password), salt, timeCost, memory, threads, argonKeyLen)

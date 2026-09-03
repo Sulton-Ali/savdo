@@ -3,6 +3,7 @@ package auth
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Sulton-Ali/savdo/api/internal/apierr"
 )
@@ -96,6 +97,87 @@ func TestVerifyRejectsMalformedHash(t *testing.T) {
 	_, err := Verify("not-a-hash-at-all", "anything")
 	if err == nil {
 		t.Fatal("Verify() error = nil, want an error for a malformed hash")
+	}
+}
+
+// TestVerifyRejectsHostileOutOfEnvelopeParams proves Verify never calls
+// argon2.IDKey with parameters outside the pinned envelope
+// (maxArgonMemory/maxArgonTime/maxArgonThreads, saltLen, argonKeyLen) — a
+// hash carrying, say, an absurd memory cost is treated exactly like a
+// wrong password (ok=false, err=nil), not run through argon2 at all. A
+// real IDKey call at these hostile parameters would either take far
+// longer than the assertion below allows or try to allocate gigabytes;
+// this test's near-instant completion is itself the proof IDKey never ran.
+func TestVerifyRejectsHostileOutOfEnvelopeParams(t *testing.T) {
+	genuine, err := Hash("correct horse battery staple")
+	if err != nil {
+		t.Fatalf("Hash() error = %v", err)
+	}
+	parts := strings.Split(genuine, "$")
+	if len(parts) != 6 {
+		t.Fatalf("genuine hash has %d parts, want 6: %q", len(parts), genuine)
+	}
+
+	tests := []struct {
+		name   string
+		params string
+	}{
+		{"memory way over the pinned ceiling", "m=4000000000,t=3,p=4"},
+		{"time way over the pinned ceiling", "m=65536,t=1000000,p=4"},
+		{"threads over the pinned ceiling", "m=65536,t=3,p=200"},
+		{"zero memory", "m=0,t=3,p=4"},
+		{"zero time", "m=65536,t=0,p=4"},
+		{"zero threads", "m=65536,t=3,p=0"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hostile := strings.Join([]string{parts[0], parts[1], parts[2], tt.params, parts[4], parts[5]}, "$")
+
+			start := time.Now()
+			ok, err := Verify(hostile, "correct horse battery staple")
+			elapsed := time.Since(start)
+
+			if err != nil {
+				t.Fatalf("Verify() error = %v, want nil (an out-of-envelope hash is a failed credential, not an error)", err)
+			}
+			if ok {
+				t.Fatal("Verify() = true, want false for an out-of-envelope hash")
+			}
+			if elapsed > 100*time.Millisecond {
+				t.Fatalf("Verify() took %v, want near-instant — argon2.IDKey must never run with out-of-envelope params", elapsed)
+			}
+		})
+	}
+}
+
+// TestVerifyRejectsWrongSaltOrDigestLength proves a hash whose salt or
+// digest length doesn't match the pinned envelope (saltLen, argonKeyLen)
+// is treated as a failed credential, not an error — and, for the salt
+// case, never reaches argon2.IDKey.
+func TestVerifyRejectsWrongSaltOrDigestLength(t *testing.T) {
+	genuine, err := Hash("correct horse battery staple")
+	if err != nil {
+		t.Fatalf("Hash() error = %v", err)
+	}
+	parts := strings.Split(genuine, "$")
+
+	shortSalt := strings.Join([]string{parts[0], parts[1], parts[2], parts[3], "dG9vc2hvcnQ", parts[5]}, "$")
+	ok, err := Verify(shortSalt, "correct horse battery staple")
+	if err != nil {
+		t.Fatalf("Verify(short salt) error = %v, want nil", err)
+	}
+	if ok {
+		t.Fatal("Verify(short salt) = true, want false")
+	}
+
+	shortDigest := strings.Join([]string{parts[0], parts[1], parts[2], parts[3], parts[4], "dG9vc2hvcnQ"}, "$")
+	ok, err = Verify(shortDigest, "correct horse battery staple")
+	if err != nil {
+		t.Fatalf("Verify(short digest) error = %v, want nil", err)
+	}
+	if ok {
+		t.Fatal("Verify(short digest) = true, want false")
 	}
 }
 
