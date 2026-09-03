@@ -1,0 +1,8 @@
+# Git hooks for Savdo. Install with `pnpm install` (runs `lefthook install`
+# via the root package.json "prepare" script), or manually: `pnpm exec lefthook install`.
+#
+# Source: https://github.com/evilmartians/lefthook/blob/master/docs/configuration/run.md
+commit-msg:
+  commands:
+    conventional-commit:
+      run: bash scripts/commit-msg.sh {1}

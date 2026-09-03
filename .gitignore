@@ -15,6 +15,10 @@ infra/.env
 .claude/worktrees/
 .claude/settings.local.json
 
+# lefthook local overrides (per-developer, never shared)
+.lefthook-local/
+lefthook-local.yml
+
 # Go
 api/bin/
 api/tmp/

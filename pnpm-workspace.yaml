@@ -1,0 +1,7 @@
+packages:
+  - "admin"
+  - "web"
+  - "mobile"
+  - "packages/*"
+allowBuilds:
+  lefthook: true
