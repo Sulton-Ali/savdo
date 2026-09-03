@@ -65,7 +65,7 @@ Go stdlib `net/http` · pgx · sqlc · goose SQL migrations · PostgreSQL (`NUME
 `uuid` v7, `timestamptz`) · OpenAPI 3.1 in `contracts/openapi.yaml` → oapi-codegen +
 openapi-typescript/openapi-fetch · media on a disk volume behind a `Storage` interface ·
 TanStack Start + shadcn (`web/`) · Vite + React + Ant Design 6 (`admin/`) · Expo + Expo
-Router + NativeWind + Reusables (`mobile/`); tokens in `packages/ui-tokens` · `go-telegram/bot` + `internal/ai` adapter
+Router + NativeWind + Reusables (`mobile/`) · `packages/ui-tokens` · `go-telegram/bot` + `internal/ai` adapter
 (`api/cmd/bot`) · i18next with JSON in `packages/i18n` · one VPS, Docker Compose, Caddy.
 
 ## Conventions
