@@ -7,11 +7,43 @@
     "loading": "Loading…",
     "error": "Something went wrong",
     "save": "Save",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "comingSoon": "Coming soon",
+    "retry": "Retry"
+  },
+  "errors": {
+    "serviceUnavailable": "Service unavailable. Please try again."
   },
   "lang": {
     "uz": "Oʻzbekcha",
     "ru": "Русский",
-    "en": "English"
+    "en": "English",
+    "switch": "Select language"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "staff": "Staff",
+    "locations": "Locations",
+    "settings": "Settings"
+  },
+  "auth": {
+    "login": {
+      "title": "Sign in",
+      "username": "Username",
+      "password": "Password",
+      "submit": "Sign in"
+    },
+    "errors": {
+      "invalidCredentials": "Incorrect username or password",
+      "rateLimited": "Too many attempts. Please try again later",
+      "retryAfter": "Try again in {{seconds}}s",
+      "generic": "Something went wrong. Please try again"
+    },
+    "logout": "Log out"
+  },
+  "roles": {
+    "owner": "Owner",
+    "manager": "Manager",
+    "cashier": "Cashier"
   }
 }
