@@ -39,7 +39,7 @@ branch — with the reason.
 | openapi-typescript  | v7.13.0  | Types for `packages/api-client`                                                  |
 | openapi-fetch       | v0.17.0  | 6 KB typed client used by web, admin and mobile                                  |
 | i18next             | v26.4.1  | With `react-i18next` v17.0.13 in all three TS apps; JSON in `packages/i18n`      |
-| zod                 | v4.5.4   | Form validation only (API shapes come from the contract)                          |
+| ui-tokens           | ours     | `packages/ui-tokens`: colours, radius, spacing, font as CSS variables + JS export (D-25) |
 
 Alternative considered for i18n: Paraglide (compiler-based, smaller). Rejected for MVP
 because one runtime shared by web, admin **and** React Native keeps the agents on one
@@ -58,8 +58,11 @@ pattern; revisit if bundle size becomes a landing performance issue.
 | TanStack Query           | v5.102.8   | Server state in admin, web and mobile                                                   |
 | Vite                     | v8.2.2     | Admin build; Start uses it under the hood                                               |
 | Tailwind CSS             | v4.3.3     | Both web apps                                                                           |
-| shadcn                   | v4.13.1 (CLI) | Copy-in components for admin; landing uses hand-written Tailwind components for a distinctive look |
-| react-hook-form          | v7.87.0    | Admin forms                                                                             |
+| Ant Design (antd)        | v6.6.2     | **Admin UI kit** (D-25). React 19 native; `uz_UZ`/`ru_RU` locales verified 2026-09-03; theme via `ConfigProvider` from `packages/ui-tokens` |
+| shadcn                   | v4.13.1 (CLI) | **Landing** primitives only (dialog, menu, language switcher); the rest is hand-written Tailwind for a distinctive look |
+| Forms                    | —          | Ant `Form` in the admin; no react-hook-form, no zod (D-26)                              |
+| lucide-react             | pin at T4  | Icon set shared with mobile (`lucide-react-native`)                                     |
+| Inter (font)             | —          | Covers Cyrillic and Uzbek Latin (Oʻ, Gʻ); self-hosted, no Google Fonts call at runtime   |
 | Biome                    | v2.5.11    | Lint + format, replaces ESLint/Prettier (O-07)                                          |
 | Vitest                   | v4.1.11    | Unit tests                                                                              |
 | Playwright               | v1.62.1    | e2e for admin and landing; also the `playwright` MCP for `/phase-done`                  |
@@ -71,6 +74,7 @@ pattern; revisit if bundle size becomes a landing performance issue.
 | Expo SDK      | 57.0.19  | React Native 0.86, **React 19.2.3** (Expo's pin, do not raise), Node ≥ 22.13           |
 | expo-router   | 57.0.17  | File-based routing                                                                      |
 | NativeWind    | v4.2.6   | Tailwind classes in RN                                                                  |
+| react-native-reusables | pin in Phase 5 | shadcn-style copy-in components on NativeWind (D-25); verify version at Phase 5      |
 | eas-cli       | v23.2.0  | Android APK builds (D-12); `expo-secure-store` for the session token                   |
 
 ## Infrastructure
