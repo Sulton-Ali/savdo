@@ -7,6 +7,8 @@ description: Verify a roadmap phase's Done-when bar actually holds by running it
 
 The only procedure allowed to tick a checkbox in `docs/06-ROADMAP.md`.
 
+Executed by a **dispatched Sonnet agent** with the full skill text as its brief — never by the orchestrator itself (D-27). The orchestrator reads the report and relays it to the owner.
+
 **Verification first, ticking second.** A box ticked because the code exists makes the
 roadmap lie, and later agents read the roadmap as truth.
 

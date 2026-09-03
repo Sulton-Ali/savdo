@@ -132,7 +132,7 @@ A phase closes only when its Done-when bar holds end to end, ticked by `/phase-d
 
 **Fleet** (`08-AI-WORKFLOW.md`): the interactive session is the orchestrator on
 **Fable 5.1** — it interviews, decomposes, dispatches with minimum context, tracks; it
-does not execute. Scribe **Haiku** (reads, search, mechanical edits) · implementer, db,
+writes no file (D-27). Scribe **Haiku** (reads, search, mechanical edits) · implementer, db,
 merger **Sonnet** · reviewer **Sonnet**, plus **Opus** in a second fresh session for
 correctness-critical work: `auth`, `stock`, `sales`, the `ai`/`bot` data boundary.
 
