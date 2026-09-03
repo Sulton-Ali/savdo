@@ -1,0 +1,17 @@
+{
+  "app": {
+    "name": "Savdo"
+  },
+  "common": {
+    "hello": "Salom",
+    "loading": "Yuklanmoqda…",
+    "error": "Xatolik yuz berdi",
+    "save": "Saqlash",
+    "cancel": "Bekor qilish"
+  },
+  "lang": {
+    "uz": "Oʻzbekcha",
+    "ru": "Русский",
+    "en": "English"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "app": {
+    "name": "Savdo"
+  },
+  "common": {
+    "hello": "Hello",
+    "loading": "Loading…",
+    "error": "Something went wrong",
+    "save": "Save",
+    "cancel": "Cancel"
+  },
+  "lang": {
+    "uz": "Oʻzbekcha",
+    "ru": "Русский",
+    "en": "English"
+  }
+}
