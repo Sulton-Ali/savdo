@@ -240,3 +240,135 @@ func TestMiddlewareSlidesExpiryWhenSessionIsStale(t *testing.T) {
 		t.Fatalf("LastSeenAt = %v, want it advanced past the backdated %v", got.LastSeenAt, stale)
 	}
 }
+
+// TestMiddlewareCSRFRejectionDoesNotTouchSession proves the CSRF check
+// runs before the sliding-expiry touch: a cookie-authenticated mutating
+// request that is missing the CSRF header must be rejected without ever
+// extending the session it rode in on. Extending it anyway would let a
+// blocked, unauthorized-in-spirit request keep an otherwise-idle session
+// alive indefinitely.
+func TestMiddlewareCSRFRejectionDoesNotTouchSession(t *testing.T) {
+	pool := testdb.New(t)
+	testdb.Truncate(t, pool)
+	q := db.New(pool)
+	ctx := context.Background()
+
+	shop := seedShop(ctx, t, q, "shop-a")
+	seedUser(ctx, t, q, shop.ID, "owner1", "correct-horse-battery", db.UserRoleOwner)
+	svc := NewService(q, testConfig(), shop.ID)
+
+	result, err := svc.Login(ctx, "owner1", "correct-horse-battery", db.SessionClientWeb, "", nil)
+	if err != nil {
+		t.Fatalf("Login() error = %v", err)
+	}
+
+	stale := time.Now().Add(-5 * time.Minute)
+	if _, err := pool.Exec(ctx, `UPDATE sessions SET last_seen_at = $1 WHERE id = $2`, stale, result.Session.ID); err != nil {
+		t.Fatalf("backdate last_seen_at: %v", err)
+	}
+
+	// Capture the value actually stored (Postgres truncates to
+	// microsecond precision, so this is not bit-identical to the Go
+	// `stale` value above) as the "before" baseline, rather than
+	// comparing against `stale` itself.
+	before, err := svc.ListSessions(ctx, shop.ID, result.User.ID)
+	if err != nil || len(before) != 1 {
+		t.Fatalf("read back baseline session state: sessions=%v err=%v", before, err)
+	}
+
+	next := func(_ context.Context, _ http.ResponseWriter, _ *http.Request, _ any) (any, error) {
+		t.Fatal("inner handler must not run when the CSRF check fails")
+		return nil, nil
+	}
+
+	r := httptest.NewRequest(http.MethodPost, "/v1/auth/logout", nil)
+	r.AddCookie(&http.Cookie{Name: CookieName, Value: result.Token, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
+	// Deliberately no X-Requested-With header.
+	rec := httptest.NewRecorder()
+
+	_, err = svc.Middleware(next, "Logout")(ctx, rec, r, nil)
+	if err == nil {
+		t.Fatal("Middleware() error = nil, want Forbidden (CSRF)")
+	}
+	if got := errStatus(t, err); got != 403 {
+		t.Fatalf("status = %d, want 403", got)
+	}
+
+	after, err := svc.ListSessions(ctx, shop.ID, result.User.ID)
+	if err != nil {
+		t.Fatalf("ListSessions() error = %v", err)
+	}
+	if len(after) != 1 {
+		t.Fatalf("len(sessions) = %d, want 1", len(after))
+	}
+	if !after[0].LastSeenAt.Equal(before[0].LastSeenAt) {
+		t.Fatalf("LastSeenAt = %v, want it unchanged at %v (a CSRF-blocked request must not touch the session)", after[0].LastSeenAt, before[0].LastSeenAt)
+	}
+	if !after[0].ExpiresAt.Equal(before[0].ExpiresAt) {
+		t.Fatalf("ExpiresAt = %v, want it unchanged at %v", after[0].ExpiresAt, before[0].ExpiresAt)
+	}
+}
+
+// TestMiddlewareRejectsAnExpiredSessionWithoutTouchingIt proves an expired
+// session (expires_at in the past) is rejected with 401 — the same
+// GetSessionByTokenHash query that authenticates a live session
+// (`... AND s.expires_at > now()`) simply doesn't find an expired one, so
+// Middleware treats it identically to an unknown token — and, because it
+// is never found, is never reached by the sliding-expiry touch either:
+// an expired session must not be silently revived by someone still
+// presenting its old token.
+func TestMiddlewareRejectsAnExpiredSessionWithoutTouchingIt(t *testing.T) {
+	pool := testdb.New(t)
+	testdb.Truncate(t, pool)
+	q := db.New(pool)
+	ctx := context.Background()
+
+	shop := seedShop(ctx, t, q, "shop-a")
+	seedUser(ctx, t, q, shop.ID, "owner1", "correct-horse-battery", db.UserRoleOwner)
+	svc := NewService(q, testConfig(), shop.ID)
+
+	result, err := svc.Login(ctx, "owner1", "correct-horse-battery", db.SessionClientWeb, "", nil)
+	if err != nil {
+		t.Fatalf("Login() error = %v", err)
+	}
+
+	expiredAt := time.Now().Add(-time.Hour)
+	lastSeenBefore := time.Now().Add(-2 * time.Hour)
+	if _, err := pool.Exec(ctx,
+		`UPDATE sessions SET expires_at = $1, last_seen_at = $2 WHERE id = $3`,
+		expiredAt, lastSeenBefore, result.Session.ID,
+	); err != nil {
+		t.Fatalf("expire the session: %v", err)
+	}
+
+	next := func(_ context.Context, _ http.ResponseWriter, _ *http.Request, _ any) (any, error) {
+		t.Fatal("inner handler must not run for an expired session")
+		return nil, nil
+	}
+
+	r := httptest.NewRequest(http.MethodGet, "/v1/auth/me", nil)
+	r.AddCookie(&http.Cookie{Name: CookieName, Value: result.Token, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
+	rec := httptest.NewRecorder()
+
+	_, err = svc.Middleware(next, "GetMe")(ctx, rec, r, nil)
+	if err == nil {
+		t.Fatal("Middleware() error = nil, want Unauthenticated for an expired session")
+	}
+	if got := errStatus(t, err); got != 401 {
+		t.Fatalf("status = %d, want 401", got)
+	}
+
+	// Read the row directly (ListUserSessions has no expiry filter,
+	// unlike GetSessionByTokenHash) to prove it was left exactly as
+	// backdated — no sliding-expiry touch reached it.
+	rows, err := q.ListUserSessions(ctx, db.ListUserSessionsParams{ShopID: shop.ID, UserID: result.User.ID})
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("ListUserSessions: rows=%v err=%v", rows, err)
+	}
+	if !rows[0].ExpiresAt.Equal(expiredAt.Truncate(time.Microsecond)) {
+		t.Fatalf("ExpiresAt = %v, want it unchanged at the expired %v (must not be extended)", rows[0].ExpiresAt, expiredAt)
+	}
+	if !rows[0].LastSeenAt.Equal(lastSeenBefore.Truncate(time.Microsecond)) {
+		t.Fatalf("LastSeenAt = %v, want it unchanged at %v (must not be touched)", rows[0].LastSeenAt, lastSeenBefore)
+	}
+}

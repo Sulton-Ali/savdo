@@ -118,18 +118,34 @@ func csrfError() error {
 }
 
 // clientIP extracts the caller's address for session logging and rate
-// limiting. It only trusts X-Forwarded-For's first hop when prod is true
-// (i.e. cfg.Env == "prod", behind Caddy — docs/03-ARCHITECTURE.md); in
-// dev, or when the header is absent, it falls back to r.RemoteAddr. A
-// value that fails to parse as an IP (a malformed header, a test's
-// "example.com" RemoteAddr) yields nil rather than an error — callers
-// already treat a nil *netip.Addr as "unknown", matching the nullable `ip
-// inet` column.
+// limiting. It only trusts X-Forwarded-For when prod is true (i.e.
+// cfg.Env == "prod", behind Caddy — docs/03-ARCHITECTURE.md); in dev, or
+// when the header is absent, it falls back to r.RemoteAddr. A value that
+// fails to parse as an IP (a malformed header, a test's "example.com"
+// RemoteAddr) yields nil rather than an error — callers already treat a
+// nil *netip.Addr as "unknown", matching the nullable `ip inet` column.
+//
+// X-Forwarded-For is append-only: each proxy in the chain appends the peer
+// address it saw to the end of whatever value it received (RFC 7239 calls
+// this the "for" parameter chain). That means the FIRST entry is whatever
+// the original connecting client put there — attacker-controlled, since
+// nothing stops a client from sending its own X-Forwarded-For with an
+// arbitrary value — while the LAST entry is the address the nearest
+// trusted hop actually observed on its own TCP connection, which a client
+// cannot forge. Reading [0] (the first hop) lets a client bypass the
+// per-IP rate limit and forge sessions.ip by spoofing that header; reading
+// the last hop instead is what a single reverse proxy directly in front
+// of this API requires. This holds only as long as Caddy (Phase 8,
+// docs/07-DEVOPS.md) is configured as that single trusted hop — i.e. it
+// must always append its own observed peer address as the last entry
+// (Caddy's default `reverse_proxy` behavior) rather than passing an
+// upstream value through unchanged — otherwise a client-controlled proxy
+// ahead of Caddy could still forge the last entry.
 func clientIP(r *http.Request, prod bool) *netip.Addr {
 	raw := ""
 	if prod {
 		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			raw = strings.TrimSpace(strings.SplitN(xff, ",", 2)[0])
+			raw = lastForwardedHop(xff)
 		}
 	}
 	if raw == "" {
@@ -147,6 +163,15 @@ func clientIP(r *http.Request, prod bool) *netip.Addr {
 	return &addr
 }
 
+// lastForwardedHop returns the last comma-separated entry of an
+// X-Forwarded-For header value, trimmed — see clientIP's doc comment for
+// why the last entry, not the first, is the one a trusted proxy actually
+// controls.
+func lastForwardedHop(xff string) string {
+	parts := strings.Split(xff, ",")
+	return strings.TrimSpace(parts[len(parts)-1])
+}
+
 // Middleware is the gen.StrictMiddlewareFunc wired into every operation
 // (internal/httpx.NewRouter). For the three allow-listed operations it
 // only stashes requestInfo and passes the request through unauthenticated.
@@ -156,11 +181,16 @@ func clientIP(r *http.Request, prod bool) *netip.Addr {
 //  3. rejects (401 UNAUTHENTICATED) a missing/unknown/expired/revoked
 //     session or an inactive user — the exact same response regardless of
 //     which of those it was, per docs/05-API.md,
-//  4. slides the session's expiry when it has gone quiet for over a
-//     minute (D-29),
-//  5. enforces CSRF on a cookie-authenticated mutating request, and
+//  4. enforces CSRF on a cookie-authenticated mutating request,
+//  5. slides the session's expiry when it has gone quiet for over a
+//     minute (D-29), and
 //  6. attaches the auth.Context the rest of the request reads via
 //     FromContext.
+//
+// CSRF runs before the sliding-expiry touch (authorize, then mutate): a
+// request that fails the CSRF check is rejected outright, so it must never
+// have the side effect of extending the session it rode in on — otherwise
+// a CSRF-blocked request would still keep an otherwise-idle session alive.
 func (s *Service) Middleware(f gen.StrictHandlerFunc, operationID string) gen.StrictHandlerFunc {
 	return func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error) {
 		ctx = withRequestInfo(ctx, requestInfo{
@@ -189,6 +219,10 @@ func (s *Service) Middleware(f gen.StrictHandlerFunc, operationID string) gen.St
 			return nil, apierr.Unauthenticated()
 		}
 
+		if csrfRequired(source, r.Method) && r.Header.Get(csrfHeader) != csrfHeaderValue {
+			return nil, csrfError()
+		}
+
 		if needsTouch(row.LastSeenAt, time.Now()) {
 			newExpiry := time.Now().Add(ttlFor(row.Client, s.cfg))
 			if err := s.q.TouchSession(ctx, db.TouchSessionParams{
@@ -198,10 +232,6 @@ func (s *Service) Middleware(f gen.StrictHandlerFunc, operationID string) gen.St
 			}); err != nil {
 				return nil, fmt.Errorf("auth: touch session: %w", err)
 			}
-		}
-
-		if csrfRequired(source, r.Method) && r.Header.Get(csrfHeader) != csrfHeaderValue {
-			return nil, csrfError()
 		}
 
 		ctx = WithContext(ctx, Context{

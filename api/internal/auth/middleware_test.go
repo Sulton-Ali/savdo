@@ -100,14 +100,32 @@ func TestClientIPUsesRemoteAddrInDev(t *testing.T) {
 	}
 }
 
-func TestClientIPUsesForwardedForFirstHopInProd(t *testing.T) {
+func TestClientIPUsesForwardedForLastHopInProd(t *testing.T) {
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
 	r.RemoteAddr = "203.0.113.5:54321"
 	r.Header.Set("X-Forwarded-For", "198.51.100.9, 10.0.0.1")
 
 	ip := clientIP(r, true)
-	if ip == nil || ip.String() != "198.51.100.9" {
-		t.Fatalf("clientIP(prod) = %v, want 198.51.100.9 (first hop only)", ip)
+	if ip == nil || ip.String() != "10.0.0.1" {
+		t.Fatalf("clientIP(prod) = %v, want 10.0.0.1 (last hop — the trusted proxy's own observation)", ip)
+	}
+}
+
+// TestClientIPIgnoresASpoofedFirstEntry proves a client cannot bypass the
+// per-IP rate limit or forge sessions.ip by prepending an arbitrary
+// address to its own X-Forwarded-For request header: only the last entry
+// — appended by the trusted proxy (Caddy), never copied verbatim from a
+// client-supplied value — is used.
+func TestClientIPIgnoresASpoofedFirstEntry(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.RemoteAddr = "203.0.113.5:54321"
+	// The attacker sends its own forged entry, then Caddy appends the
+	// address it actually saw on the connection.
+	r.Header.Set("X-Forwarded-For", "6.6.6.6, 198.51.100.42")
+
+	ip := clientIP(r, true)
+	if ip == nil || ip.String() != "198.51.100.42" {
+		t.Fatalf("clientIP() = %v, want 198.51.100.42 (the proxy-appended hop); a spoofed first entry must be ignored", ip)
 	}
 }
 
