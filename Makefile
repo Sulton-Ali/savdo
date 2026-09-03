@@ -24,35 +24,15 @@ verify-go: $(GOLANGCI_LINT)
 	cd api && bin/golangci-lint run ./...
 
 ## $(GOLANGCI_LINT): install the pinned golangci-lint binary into api/bin
-## (gitignored) if it is not already there. We do not shell out to the
-## project's own install.sh: its checksum lookup greps the checksums file
-## for the tarball's basename, which is now also a substring of the
-## published "<tarball>.sbom.json" line, so it always compares the wanted
-## hash (2 matches, wrong) against the actual one and fails. Downloading
-## and verifying the release asset directly avoids that upstream bug.
+## (gitignored) if it is not already there, via the project's own official
+## install script fetched at the pinned tag (not @master, and not piped
+## straight into sh).
 $(GOLANGCI_LINT):
 	@mkdir -p api/bin
-	@os="$$(uname -s | tr '[:upper:]' '[:lower:]')"; \
-	arch="$$(uname -m)"; \
-	case "$$arch" in \
-		x86_64) arch=amd64 ;; \
-		aarch64|arm64) arch=arm64 ;; \
-	esac; \
-	asset="golangci-lint-2.13.2-$$os-$$arch"; \
-	base_url="https://github.com/golangci/golangci-lint/releases/download/$(GOLANGCI_LINT_VERSION)"; \
-	tmpdir="$$(mktemp -d)"; \
-	trap 'rm -rf "$$tmpdir"' EXIT; \
-	echo "installing golangci-lint $(GOLANGCI_LINT_VERSION) ($$asset) into api/bin"; \
-	curl -sSfL -o "$$tmpdir/$$asset.tar.gz" "$$base_url/$$asset.tar.gz"; \
-	curl -sSfL -o "$$tmpdir/checksums.txt" "$$base_url/golangci-lint-2.13.2-checksums.txt"; \
-	want="$$(awk -v f="$$asset.tar.gz" '$$2 == f {print $$1}' "$$tmpdir/checksums.txt")"; \
-	got="$$(sha256sum "$$tmpdir/$$asset.tar.gz" | cut -d' ' -f1)"; \
-	if [ -z "$$want" ] || [ "$$want" != "$$got" ]; then \
-		echo "golangci-lint checksum verification failed (want=$$want got=$$got)"; exit 1; \
-	fi; \
-	tar -xzf "$$tmpdir/$$asset.tar.gz" -C "$$tmpdir"; \
-	cp "$$tmpdir/$$asset/golangci-lint" api/bin/golangci-lint; \
-	chmod +x api/bin/golangci-lint
+	@tmpscript="$$(mktemp)"; \
+	trap 'rm -f "$$tmpscript"' EXIT; \
+	curl -sSfL -o "$$tmpscript" "https://raw.githubusercontent.com/golangci/golangci-lint/$(GOLANGCI_LINT_VERSION)/install.sh"; \
+	sh "$$tmpscript" -b api/bin $(GOLANGCI_LINT_VERSION)
 
 ## typecheck: TypeScript project references across the workspace.
 typecheck:
