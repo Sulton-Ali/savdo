@@ -103,7 +103,7 @@ TanStack Start (`web/`) · Vite + React + TanStack Router/Query + shadcn (`admin
 9. No secret, token, password or key in logs, docs, fixtures or commits; passwords
    argon2id, session tokens stored hashed (ADR-005).
 10. The bot's customer mode answers only through its public-read tools (products,
-    prices, availability, hours, contacts); it never sees cost, quantities, customers,
+    prices, availability, hours, address, contacts); it never sees cost, quantities, customers,
     staff or sales (ADR-009).
 11. No new dependency or version bump without owner approval, checked in the registry.
 12. No LLM call outside the bot handler, and never without per-chat and per-shop
