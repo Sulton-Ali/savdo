@@ -31,6 +31,8 @@ orchestrator (Fable 5.1).
 | D-17 | 2026-09-03 | **Agents ask instead of guessing.** Orchestrator interviews the owner for missing details.                                                                                             | `/interview` skill; escalation rules in `AGENTS.md`                                                |
 | D-18 | 2026-09-03 | All docs live under `docs/`; `CLAUDE.md`, `AGENTS.md`, skills and MCP config prepared **before** development starts.                                                                    | Phase 0 deliverable                                                                                |
 | D-19 | 2026-09-03 | **No AI attribution trailers** on commits (`Co-authored-by`, `Claude-Session`, …).                                                                                                     | commit-msg hook in Phase 0                                                                         |
+| D-20 | 2026-09-03 | Keep Karpathy's four guidelines in AGENTS.md verbatim, as a behaviour layer separate from the hard rules. | AGENTS.md § Karpathy guidelines; ADR-004/ADR-009 flexibility explicitly exempted |
+| D-21 | 2026-09-03 | Vendor only 10 skills (+ linked checklists) from addyosmani/agent-skills, verbatim, pinned; no commands, hooks or agents from it. | .claude/skills/VENDORED.md; precedence rule in AGENTS.md § Vendored skills |
 
 ## Decisions made by the orchestrator (owner may overrule)
 

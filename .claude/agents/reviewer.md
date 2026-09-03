@@ -16,6 +16,10 @@ ordinary branch gets. Correctness-critical branches (`auth`, `stock`, `sales`, t
 dispatches a second one with `model: opus` and splits scopes (e.g. correctness vs.
 authorization/data exposure).
 
+## Skills to consult
+
+Load `code-review-and-quality`, `security-and-hardening`, `doubt-driven-development` (vendored, `.claude/skills/`). Do not load skills meant for implementers. `AGENTS.md` wins over them on any conflict.
+
 ## Procedure
 
 1. **Get the diff.** `git diff main...<branch>` or the paths the orchestrator names.

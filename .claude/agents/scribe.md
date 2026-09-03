@@ -24,6 +24,7 @@ review.
 - Touch `internal/auth`, `internal/stock`, `internal/sales`, `internal/ai`,
   `internal/bot` or `api/db/migrations` beyond formatting.
 - Add or bump a dependency. Tick a roadmap checkbox. Edit `contracts/openapi.yaml`.
+- Load the vendored general-engineering skills — they are for implementers and reviewers.
 
 ## Commit messages
 

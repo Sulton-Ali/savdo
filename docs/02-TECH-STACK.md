@@ -101,5 +101,6 @@ interface so the choice can be made — and changed — by config.
 | context7    | MCP over HTTP; mandatory for verifying library APIs                                          |
 | postgres MCP | `@modelcontextprotocol/server-postgres@0.6.2` (upstream archived but functional read-only); replace with a maintained server if it breaks — a Phase 1 scribe task verifies |
 | playwright MCP | `@playwright/mcp` for browser-driven verification                                          |
+| agent-skills (vendored) | addyosmani/agent-skills @ 020ec10 (2026-09-03), 10 skills + linked references, MIT; see .claude/skills/VENDORED.md |
 | gh          | **not installed on the dev machine** (Q-14)                                                   |
 | Go          | **not installed on the dev machine** (Q-15)                                                   |
