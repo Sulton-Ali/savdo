@@ -9,10 +9,19 @@
     "save": "Save",
     "cancel": "Cancel",
     "comingSoon": "Coming soon",
-    "retry": "Retry"
+    "retry": "Retry",
+    "loadMore": "Load more"
   },
   "errors": {
-    "serviceUnavailable": "Service unavailable. Please try again."
+    "serviceUnavailable": "Service unavailable. Please try again.",
+    "forbidden": "You don't have permission to do this.",
+    "notFound": "Not found.",
+    "generic": "Something went wrong. Please try again.",
+    "field": {
+      "required": "This field is required",
+      "invalid": "This value is invalid",
+      "conflict": "This value is already in use"
+    }
   },
   "lang": {
     "uz": "Oʻzbekcha",
@@ -45,5 +54,69 @@
     "owner": "Owner",
     "manager": "Manager",
     "cashier": "Cashier"
+  },
+  "dashboard": {
+    "welcome": "Welcome, {{name}}"
+  },
+  "staff": {
+    "title": "Staff",
+    "add": "Add staff",
+    "edit": "Edit staff",
+    "setPassword": "Set password",
+    "columns": {
+      "username": "Username",
+      "fullName": "Full name",
+      "phone": "Phone",
+      "role": "Role",
+      "active": "Active",
+      "lastLogin": "Last login"
+    },
+    "fields": {
+      "username": "Username",
+      "password": "Password",
+      "fullName": "Full name",
+      "phone": "Phone",
+      "role": "Role",
+      "locale": "Language",
+      "newPassword": "New password"
+    },
+    "phoneHint": "e.g. +998901234567",
+    "confirmDeactivate": "Deactivate {{name}}?",
+    "never": "Never"
+  },
+  "locations": {
+    "title": "Locations",
+    "add": "Add location",
+    "edit": "Edit location",
+    "columns": {
+      "name": "Name",
+      "kind": "Kind",
+      "default": "Default",
+      "active": "Active"
+    },
+    "fields": {
+      "name": "Name",
+      "kind": "Kind",
+      "isDefault": "Default location",
+      "isActive": "Active"
+    }
+  },
+  "settings": {
+    "title": "Settings",
+    "save": "Save",
+    "saved": "Settings saved",
+    "fields": {
+      "name": "Shop name",
+      "slug": "Slug",
+      "currency": "Currency",
+      "timezone": "Timezone",
+      "defaultLocale": "Default language",
+      "allowNegativeStock": "Allow negative stock",
+      "updateCostOnPurchase": "Update cost on purchase"
+    },
+    "kinds": {
+      "store": "Store",
+      "warehouse": "Warehouse"
+    }
   }
 }

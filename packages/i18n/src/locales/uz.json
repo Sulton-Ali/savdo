@@ -9,10 +9,19 @@
     "save": "Saqlash",
     "cancel": "Bekor qilish",
     "comingSoon": "Tez orada",
-    "retry": "Qayta urinish"
+    "retry": "Qayta urinish",
+    "loadMore": "Yana yuklash"
   },
   "errors": {
-    "serviceUnavailable": "Xizmat vaqtincha ishlamayapti. Qayta urinib ko‘ring."
+    "serviceUnavailable": "Xizmat vaqtincha ishlamayapti. Qayta urinib ko‘ring.",
+    "forbidden": "Bu amal uchun ruxsatingiz yo‘q.",
+    "notFound": "Topilmadi.",
+    "generic": "Xatolik yuz berdi. Qayta urinib ko‘ring.",
+    "field": {
+      "required": "Bu maydon to‘ldirilishi shart",
+      "invalid": "Qiymat noto‘g‘ri",
+      "conflict": "Bu qiymat allaqachon band"
+    }
   },
   "lang": {
     "uz": "Oʻzbekcha",
@@ -45,5 +54,69 @@
     "owner": "Egasi",
     "manager": "Menejer",
     "cashier": "Kassir"
+  },
+  "dashboard": {
+    "welcome": "Xush kelibsiz, {{name}}"
+  },
+  "staff": {
+    "title": "Xodimlar",
+    "add": "Xodim qo‘shish",
+    "edit": "Xodimni tahrirlash",
+    "setPassword": "Parolni o‘rnatish",
+    "columns": {
+      "username": "Foydalanuvchi nomi",
+      "fullName": "F.I.Sh.",
+      "phone": "Telefon",
+      "role": "Rol",
+      "active": "Faol",
+      "lastLogin": "Oxirgi kirish"
+    },
+    "fields": {
+      "username": "Foydalanuvchi nomi",
+      "password": "Parol",
+      "fullName": "F.I.Sh.",
+      "phone": "Telefon",
+      "role": "Rol",
+      "locale": "Til",
+      "newPassword": "Yangi parol"
+    },
+    "phoneHint": "masalan, +998901234567",
+    "confirmDeactivate": "{{name}} faolsizlantirilsinmi?",
+    "never": "Hech qachon"
+  },
+  "locations": {
+    "title": "Filiallar",
+    "add": "Filial qo‘shish",
+    "edit": "Filialni tahrirlash",
+    "columns": {
+      "name": "Nomi",
+      "kind": "Turi",
+      "default": "Asosiy",
+      "active": "Faol"
+    },
+    "fields": {
+      "name": "Nomi",
+      "kind": "Turi",
+      "isDefault": "Asosiy filial",
+      "isActive": "Faol"
+    }
+  },
+  "settings": {
+    "title": "Sozlamalar",
+    "save": "Saqlash",
+    "saved": "Sozlamalar saqlandi",
+    "fields": {
+      "name": "Do‘kon nomi",
+      "slug": "Slug",
+      "currency": "Valyuta",
+      "timezone": "Vaqt zonasi",
+      "defaultLocale": "Standart til",
+      "allowNegativeStock": "Manfiy qoldiqqa ruxsat berish",
+      "updateCostOnPurchase": "Xaridda tannarxni yangilash"
+    },
+    "kinds": {
+      "store": "Do‘kon",
+      "warehouse": "Ombor"
+    }
   }
 }
