@@ -69,7 +69,7 @@ fi
 
 # 5. No hand-rolled fetch() in app source outside the generated api client.
 fetch_hits=""
-for dir in admin/src web/src mobile/app; do
+for dir in admin/src web/src mobile/src; do
   if [ -d "$dir" ]; then
     hits="$(grep -rnE 'fetch\(' "$dir" 2>/dev/null | grep -v 'packages/api-client' || true)"
     if [ -n "$hits" ]; then

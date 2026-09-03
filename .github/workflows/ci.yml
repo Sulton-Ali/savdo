@@ -1,0 +1,59 @@
+name: ci
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: api/go.mod
+          cache: true
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Prepare local env
+        run: cp infra/.env.example infra/.env
+
+      - name: Start local infra
+        run: make dev-infra
+
+      - name: Run the gate
+        run: make verify
+
+      - name: Build apps
+        run: pnpm -r --if-present build
+
+      - name: Export mobile (Android)
+        run: pnpm --filter mobile export:android
+
+      - name: Stop local infra
+        if: always()
+        run: make dev-infra-down
