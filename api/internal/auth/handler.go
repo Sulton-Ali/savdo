@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"unicode/utf8"
 
 	"github.com/Sulton-Ali/savdo/api/gen"
 	"github.com/Sulton-Ali/savdo/api/internal/apierr"
@@ -55,10 +56,11 @@ func (h *Handler) Login(ctx context.Context, req gen.LoginRequestObject) (gen.Lo
 
 // maxLoginUsernameLength and maxLoginPasswordLength mirror the
 // `maxLength` constraints on LoginRequest.username/.password in
-// contracts/openapi.yaml. oapi-codegen's generated types carry no runtime
-// validation for those constraints (confirmed: regenerating after adding
-// them changed nothing in gen/api.gen.go), so the contract's bound and
-// this bound must be kept in sync by hand — this is also part of the
+// contracts/openapi.yaml — which, per the OpenAPI/JSON Schema spec,
+// counts characters, not bytes. oapi-codegen's generated types carry no
+// runtime validation for those constraints (confirmed: regenerating after
+// adding them changed nothing in gen/api.gen.go), so the contract's bound
+// and this bound must be kept in sync by hand — this is also part of the
 // API's defense against attacker-controlled rate-limiter keys and
 // oversized argon2 input growing unboundedly (see ratelimit.go's own
 // length cap for the second layer of that defense).
@@ -69,8 +71,11 @@ const (
 
 // validateLoginRequest returns a field->reason map for a malformed login
 // body — an empty or over-long username/password, or a client value other
-// than the two the SessionClient enum defines. oapi-codegen only
-// guarantees the request decoded as JSON, not that its fields are
+// than the two the SessionClient enum defines. Lengths are counted in
+// Unicode characters (utf8.RuneCountInString), matching the contract's
+// `maxLength` semantics — not bytes, so a Cyrillic or CJK username isn't
+// penalized for using more bytes per character than ASCII. oapi-codegen
+// only guarantees the request decoded as JSON, not that its fields are
 // meaningful or bounded (hard rule 6 covers the shape; content validation
 // is still this handler's job).
 func validateLoginRequest(body *gen.LoginRequest) map[string]string {
@@ -78,13 +83,13 @@ func validateLoginRequest(body *gen.LoginRequest) map[string]string {
 	switch {
 	case body.Username == "":
 		fields["username"] = "required"
-	case len(body.Username) > maxLoginUsernameLength:
+	case utf8.RuneCountInString(body.Username) > maxLoginUsernameLength:
 		fields["username"] = fmt.Sprintf("must be at most %d characters", maxLoginUsernameLength)
 	}
 	switch {
 	case body.Password == "":
 		fields["password"] = "required"
-	case len(body.Password) > maxLoginPasswordLength:
+	case utf8.RuneCountInString(body.Password) > maxLoginPasswordLength:
 		fields["password"] = fmt.Sprintf("must be at most %d characters", maxLoginPasswordLength)
 	}
 	switch body.Client {

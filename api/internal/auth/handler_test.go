@@ -52,6 +52,21 @@ func TestValidateLoginRequest(t *testing.T) {
 			body:       gen.LoginRequest{Username: "owner1", Password: "correct-horse", Client: gen.SessionClient("desktop")},
 			wantFields: []string{"client"},
 		},
+		{
+			// Cyrillic letters are 2 bytes each in UTF-8, so 40 of them
+			// is 80 bytes — well over maxLoginUsernameLength (64) if
+			// counted in bytes, but exactly at the character limit.
+			// maxLength (the contract's and this one) counts characters,
+			// not bytes.
+			name:       "40-char Cyrillic username (80 bytes) is within the character limit",
+			body:       gen.LoginRequest{Username: strings.Repeat("а", 40), Password: "correct-horse", Client: gen.Web},
+			wantFields: nil,
+		},
+		{
+			name:       "65-char Cyrillic username exceeds the character limit",
+			body:       gen.LoginRequest{Username: strings.Repeat("а", 65), Password: "correct-horse", Client: gen.Web},
+			wantFields: []string{"username"},
+		},
 	}
 
 	for _, tt := range tests {
@@ -66,5 +81,28 @@ func TestValidateLoginRequest(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestValidateLoginRequestCountsCharactersNotBytes pins down the exact
+// scenario a byte-counting regression would break: a 40-character
+// Cyrillic username is 80 bytes, comfortably over
+// maxLoginUsernameLength(64) in bytes but exactly at the character limit.
+func TestValidateLoginRequestCountsCharactersNotBytes(t *testing.T) {
+	username := strings.Repeat("а", 40)
+	if got := len(username); got != 80 {
+		t.Fatalf("test setup: len(username) in bytes = %d, want 80 (40 Cyrillic chars x 2 bytes)", got)
+	}
+
+	body := &gen.LoginRequest{Username: username, Password: "correct-horse", Client: gen.Web}
+	if fields := validateLoginRequest(body); len(fields) != 0 {
+		t.Fatalf("validateLoginRequest() = %v, want no fields flagged for a 40-character (80-byte) username", fields)
+	}
+
+	tooLong := strings.Repeat("а", 65)
+	body = &gen.LoginRequest{Username: tooLong, Password: "correct-horse", Client: gen.Web}
+	fields := validateLoginRequest(body)
+	if _, ok := fields["username"]; !ok {
+		t.Fatalf("validateLoginRequest() = %v, want username flagged for a 65-character username", fields)
 	}
 }

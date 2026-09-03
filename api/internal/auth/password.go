@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"golang.org/x/crypto/argon2"
 
@@ -56,10 +57,14 @@ const MinPasswordLength = 8
 // `$argon2id$v=19$m=65536,t=3,p=4$<salt>$<hash>`, salt and hash each
 // base64 (unpadded, standard alphabet — the PHC string format's own
 // convention) and freshly randomized per call (crypto/rand). It rejects a
-// password shorter than MinPasswordLength with a *apierr.Error the caller
-// can return unwrapped as the request's response.
+// password shorter than MinPasswordLength — counted in Unicode
+// characters (utf8.RuneCountInString), matching the contract's
+// `minLength`/`maxLength` semantics on StaffCreate/SetStaffPassword, not
+// bytes, so a password made of multi-byte characters isn't scored by an
+// unrelated byte count — with a *apierr.Error the caller can return
+// unwrapped as the request's response.
 func Hash(password string) (string, error) {
-	if len(password) < MinPasswordLength {
+	if utf8.RuneCountInString(password) < MinPasswordLength {
 		return "", apierr.Validation(map[string]string{
 			"password": fmt.Sprintf("must be at least %d characters", MinPasswordLength),
 		})

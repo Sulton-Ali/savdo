@@ -190,6 +190,34 @@ func TestLoginRejectsWrongPasswordUnknownUserAndInactiveUserWithIdenticalBodies(
 	}
 }
 
+// TestLoginUsernameLengthIsCountedInCharactersNotBytes proves the full
+// request path end to end: a 40-character Cyrillic username (80 bytes)
+// passes length validation and reaches the real credential check (401,
+// unknown user — never 400), while a 65-character one is rejected by
+// validation (400) before any credential check runs.
+func TestLoginUsernameLengthIsCountedInCharactersNotBytes(t *testing.T) {
+	f := newAuthTestFixture(t, nil)
+
+	withinLimit := strings.Repeat("а", 40) // 40 chars, 80 bytes
+	rec := f.loginAs(t, withinLimit, "whatever-password", "web")
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("40-char Cyrillic username: status = %d, want 401 (validation should pass; the account just doesn't exist), body = %s", rec.Code, rec.Body.String())
+	}
+
+	overLimit := strings.Repeat("а", 65) // 65 chars, 130 bytes
+	rec = f.loginAs(t, overLimit, "whatever-password", "web")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("65-char Cyrillic username: status = %d, want 400 (validation should reject it), body = %s", rec.Code, rec.Body.String())
+	}
+	var body gen.Error
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body.Error.Code != gen.VALIDATIONFAILED {
+		t.Fatalf("error.code = %q, want %q", body.Error.Code, gen.VALIDATIONFAILED)
+	}
+}
+
 func TestGetMeWithBogusBearerIsUnauthenticated(t *testing.T) {
 	f := newAuthTestFixture(t, nil)
 
