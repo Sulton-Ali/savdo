@@ -28,10 +28,11 @@ savdo/
 ├── contracts/openapi.yaml  THE API contract (ADR-002)
 ├── packages/
 │   ├── api-client/         openapi-typescript + openapi-fetch (generated, committed)
-│   └── i18n/               uz/ru/en JSON, shared by web, admin, mobile
+│   ├── i18n/               uz/ru/en JSON, shared by web, admin, mobile
+│   └── ui-tokens/          colours, radius, font — Ant theme, landing CSS, NativeWind read it
 ├── web/                    TanStack Start — public landing (SSR)
 ├── admin/                  Vite + React SPA — admin panel
-├── mobile/                 Expo — mobile admin
+├── mobile/                 Expo — mobile admin (source in mobile/src/app)
 ├── infra/                  docker-compose.yml, Caddyfile, .env.example, backup script
 ├── docs/
 ├── .claude/                agents, skills, settings
