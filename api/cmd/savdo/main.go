@@ -8,7 +8,9 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib" // registers the "pgx" database/sql driver
@@ -38,6 +40,8 @@ func run(args []string) error {
 		return runMigrate(args[1:])
 	case "seed":
 		return runSeed(args[1:])
+	case "reset-owner-password":
+		return runResetOwnerPassword(args[1:])
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
@@ -101,8 +105,9 @@ func runMigrate(args []string) error {
 }
 
 // openPool opens a pgxpool.Pool against dsn, verifying connectivity first
-// (internal/db.NewPool), for the subcommands that run sqlc-generated
-// queries rather than driving goose directly like runMigrate does.
+// (internal/db.NewPool), for the two subcommands (seed, reset-owner-password)
+// that run sqlc-generated queries rather than driving goose directly like
+// runMigrate does.
 func openPool(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 	pool, err := apidb.NewPool(ctx, dsn)
 	if err != nil {
@@ -152,4 +157,63 @@ func runSeed(args []string) error {
 		fmt.Printf("%s: %s (%s)\n", entity.Kind, entity.Name, status)
 	}
 	return nil
+}
+
+func runResetOwnerPassword(args []string) error {
+	fs := flag.NewFlagSet("reset-owner-password", flag.ContinueOnError)
+	shopSlug := fs.String("shop-slug", seed.DefaultShopSlug, "shop slug whose owner to reset")
+	passwordStdin := fs.Bool("password-stdin", false, "read the new password from stdin")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	// Only --password-stdin is implemented. An interactive, no-echo prompt
+	// needs golang.org/x/term, which is not a dependency of this module
+	// (AGENTS.md hard rule 11: no new dependency without owner approval) —
+	// so, rather than silently echoing a typed password to the terminal,
+	// this subcommand refuses to run without --password-stdin.
+	if !*passwordStdin {
+		return fmt.Errorf("reset-owner-password: --password-stdin is required " +
+			"(no interactive prompt: golang.org/x/term is not yet a dependency of this module)")
+	}
+
+	password, err := readPasswordStdin(os.Stdin)
+	if err != nil {
+		return err
+	}
+
+	dsn, err := databaseURL()
+	if err != nil {
+		return err
+	}
+
+	ctx := context.Background()
+	pool, err := openPool(ctx, dsn)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+
+	result, err := seed.ResetOwnerPassword(ctx, pool, *shopSlug, password)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("owner password updated, %d sessions revoked\n", result.RevokedSessions)
+	return nil
+}
+
+// readPasswordStdin reads the whole of r as the new password, trimming a
+// trailing line ending (so `printf 'pw\n' | savdo ...` and a file with no
+// trailing newline both work) and never echoing or logging what it read.
+func readPasswordStdin(r io.Reader) (string, error) {
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return "", fmt.Errorf("read password from stdin: %w", err)
+	}
+	password := strings.TrimRight(string(data), "\r\n")
+	if password == "" {
+		return "", fmt.Errorf("no password read from stdin")
+	}
+	return password, nil
 }
