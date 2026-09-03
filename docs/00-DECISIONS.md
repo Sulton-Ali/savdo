@@ -54,6 +54,9 @@ Routine technical calls taken during bootstrap so work can start. Each is an ADR
 | O-05 | Vertical slices: each catalog/stock/sales phase ships API **and** admin web screens together            | Owner can test each phase; matches D-08 (admin web first)                                                |
 | O-06 | Bot and API are two binaries in one Go module sharing `internal/`                                       | Bot can be restarted/deployed alone; no duplicated domain code                                          |
 | O-07 | Biome instead of ESLint + Prettier for TypeScript                                                        | One tool, fast, fewer configs for agents to get wrong                                                    |
+| O-08 | pnpm `minimumReleaseAge` 1440 minutes (24 h) in `pnpm-workspace.yaml` | Supply-chain hygiene: hours-old releases cannot be resolved; pnpm 11 otherwise auto-writes ad-hoc excludes |
+| O-09 | goose is a library inside the `savdo` CLI, not a `go tool` binary | Avoids compiling every goose DB driver; migrations run through one code path locally and in prod |
+| O-10 | TypeScript pinned per package: 7.0.2 where the toolchain supports it, 6.0.3 for `packages/api-client` and `mobile` | openapi-typescript 7.13 and Expo SDK 57 do not support TS 7 yet; generated types check clean under both |
 
 ## Open questions
 
@@ -75,6 +78,9 @@ Blocking questions are marked **[blocks Phase N]**. The orchestrator asks them v
 | Q-11 | Who resets a forgotten password before Telegram OTP exists (Phase 7)?                                                                                      | Phase 1            | Draft: owner resets staff passwords from the admin; owner password reset via CLI command on the server                                |
 | Q-12 | Product images: max count per product, and do variants have their own photos?                                                                              | Phase 2            | Draft: up to 8 per product, optional per-variant image                                                                                |
 | Q-13 | Bot audience: customers only, or also a staff mode (e.g. "how many blue XL left?") behind Telegram login?                                                  | Phase 7            | Draft: customer mode in MVP; staff mode backlog                                                                                       |
+| Q-16 | Brand colour and font for `packages/ui-tokens` (placeholder teal `#0f766e`, Inter)? | Phase 2 | Owner picks; tokens drive Ant Design theme, landing CSS and NativeWind |
+| Q-17 | Mobile test runner: add `jest-expo` (new dependency) so `mobile` has unit tests? | Phase 5 | Expo's default template ships no runner; hard rule 11 needs owner approval |
+| Q-18 | Android package id: keep placeholder `uz.savdo.app`? | Phase 5 | Must be final before the first EAS/APK build |
 
 ## Post-MVP backlog (agreed out of scope for now)
 

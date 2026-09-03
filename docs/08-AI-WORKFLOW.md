@@ -88,6 +88,7 @@ decomposition was wrong; the fix belongs in the task.
    checkout until its merges land.
 5. **Contract changes serialize.** Only one branch edits `contracts/openapi.yaml` at a
    time; the orchestrator sequences them because every client depends on it.
+6. **Shared local services.** One Compose project and one API port serve every worktree — see `07-DEVOPS.md` § Shared local services. Never take the stack down while another agent may be using it.
 
 ## Rules (non-negotiable, restated from `AGENTS.md`)
 
@@ -130,6 +131,10 @@ entries are added by `/phase-done` when a review catches one.
   movements through the service.
 - **Client totals.** Trusting `total` from the request in a sale.
 - **Guessing instead of asking.** A reasonable-looking assumption on an open Q-xx.
+- **Replacing an official installer on an unverified claim.** T2 swapped golangci-lint's install script for a custom download citing a checksum bug that did not exist (the reviewer ran the script). Verify a bug by reproducing it at the pinned version before working around it.
+- **Generated or build output reaching the linter.** `routeTree.gen.ts` and `mobile/dist` both broke `biome ci` after a build. Every generated file gets an explicit Biome exclusion in the same task that introduces it.
+- **Prescriptive briefs that are out of date.** The T6 brief told the implementer to add legacy Metro settings; the implementer correctly followed current Expo docs instead. Briefs say "verify against the docs", not "add these keys".
+- **Taking the shared stack down.** A parallel task ran `make dev-infra-down` while another was verifying. See operating constraint 6.
 
 ## Tooling
 
