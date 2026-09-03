@@ -3,3 +3,194 @@
 //   sqlc v1.31.1
 
 package db
+
+import (
+	"database/sql/driver"
+	"fmt"
+	"net/netip"
+	"time"
+
+	"github.com/google/uuid"
+)
+
+type LocationKind string
+
+const (
+	LocationKindStore     LocationKind = "store"
+	LocationKindWarehouse LocationKind = "warehouse"
+)
+
+func (e *LocationKind) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = LocationKind(s)
+	case string:
+		*e = LocationKind(s)
+	default:
+		return fmt.Errorf("unsupported scan type for LocationKind: %T", src)
+	}
+	return nil
+}
+
+type NullLocationKind struct {
+	LocationKind LocationKind `json:"location_kind"`
+	Valid        bool         `json:"valid"` // Valid is true if LocationKind is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullLocationKind) Scan(value interface{}) error {
+	if value == nil {
+		ns.LocationKind, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.LocationKind.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullLocationKind) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.LocationKind), nil
+}
+
+type SessionClient string
+
+const (
+	SessionClientWeb    SessionClient = "web"
+	SessionClientMobile SessionClient = "mobile"
+)
+
+func (e *SessionClient) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = SessionClient(s)
+	case string:
+		*e = SessionClient(s)
+	default:
+		return fmt.Errorf("unsupported scan type for SessionClient: %T", src)
+	}
+	return nil
+}
+
+type NullSessionClient struct {
+	SessionClient SessionClient `json:"session_client"`
+	Valid         bool          `json:"valid"` // Valid is true if SessionClient is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullSessionClient) Scan(value interface{}) error {
+	if value == nil {
+		ns.SessionClient, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.SessionClient.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullSessionClient) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.SessionClient), nil
+}
+
+type UserRole string
+
+const (
+	UserRoleOwner   UserRole = "owner"
+	UserRoleManager UserRole = "manager"
+	UserRoleCashier UserRole = "cashier"
+)
+
+func (e *UserRole) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = UserRole(s)
+	case string:
+		*e = UserRole(s)
+	default:
+		return fmt.Errorf("unsupported scan type for UserRole: %T", src)
+	}
+	return nil
+}
+
+type NullUserRole struct {
+	UserRole UserRole `json:"user_role"`
+	Valid    bool     `json:"valid"` // Valid is true if UserRole is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullUserRole) Scan(value interface{}) error {
+	if value == nil {
+		ns.UserRole, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.UserRole.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullUserRole) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.UserRole), nil
+}
+
+type Location struct {
+	ID        uuid.UUID    `json:"id"`
+	ShopID    uuid.UUID    `json:"shop_id"`
+	Name      string       `json:"name"`
+	Kind      LocationKind `json:"kind"`
+	IsDefault bool         `json:"is_default"`
+	IsActive  bool         `json:"is_active"`
+	CreatedAt time.Time    `json:"created_at"`
+	UpdatedAt time.Time    `json:"updated_at"`
+}
+
+type Session struct {
+	ID         uuid.UUID     `json:"id"`
+	ShopID     uuid.UUID     `json:"shop_id"`
+	UserID     uuid.UUID     `json:"user_id"`
+	TokenHash  []byte        `json:"token_hash"`
+	Client     SessionClient `json:"client"`
+	UserAgent  *string       `json:"user_agent"`
+	Ip         *netip.Addr   `json:"ip"`
+	ExpiresAt  time.Time     `json:"expires_at"`
+	LastSeenAt time.Time     `json:"last_seen_at"`
+	RevokedAt  *time.Time    `json:"revoked_at"`
+	CreatedAt  time.Time     `json:"created_at"`
+}
+
+type Shop struct {
+	ID                   uuid.UUID `json:"id"`
+	Slug                 string    `json:"slug"`
+	Name                 string    `json:"name"`
+	Currency             string    `json:"currency"`
+	Timezone             string    `json:"timezone"`
+	DefaultLocale        string    `json:"default_locale"`
+	AllowNegativeStock   bool      `json:"allow_negative_stock"`
+	UpdateCostOnPurchase bool      `json:"update_cost_on_purchase"`
+	NextSaleNumber       int64     `json:"next_sale_number"`
+	AiDailyTokenBudget   *int32    `json:"ai_daily_token_budget"`
+	CreatedAt            time.Time `json:"created_at"`
+	UpdatedAt            time.Time `json:"updated_at"`
+}
+
+type User struct {
+	ID           uuid.UUID  `json:"id"`
+	ShopID       uuid.UUID  `json:"shop_id"`
+	Username     string     `json:"username"`
+	PasswordHash string     `json:"password_hash"`
+	FullName     string     `json:"full_name"`
+	Phone        *string    `json:"phone"`
+	Role         UserRole   `json:"role"`
+	Locale       string     `json:"locale"`
+	IsActive     bool       `json:"is_active"`
+	LastLoginAt  *time.Time `json:"last_login_at"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+}

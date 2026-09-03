@@ -10,3 +10,43 @@ sql:
         sql_package: "pgx/v5"
         emit_json_tags: true
         emit_pointers_for_null_types: true
+        overrides:
+          # uuid -> google/uuid.UUID. Every uuid *column* in the schema so
+          # far (id, shop_id, user_id, ...) is NOT NULL, but sqlc.narg cursor
+          # parameters (ListUsers/ListLocations) are nullable uuid, so both
+          # variants are declared for a consistent uuid.UUID / *uuid.UUID
+          # pair (never pgtype.UUID).
+          - db_type: "uuid"
+            nullable: false
+            go_type:
+              import: "github.com/google/uuid"
+              type: "UUID"
+          - db_type: "uuid"
+            nullable: true
+            go_type:
+              import: "github.com/google/uuid"
+              type: "UUID"
+              pointer: true
+          # inet -> stdlib net/netip.Addr. sessions.ip is nullable;
+          # emit_pointers_for_null_types turns that into *netip.Addr without
+          # a second override.
+          - db_type: "inet"
+            go_type:
+              import: "net/netip"
+              type: "Addr"
+          # timestamptz -> time.Time (stdlib), not pgtype.Timestamptz: pgx/v5's
+          # default for this type ignores emit_pointers_for_null_types (that
+          # flag only affects types without a native pgx wrapper), so it has
+          # to be spelled out for both nullability cases to get a plain
+          # time.Time / *time.Time pair everywhere in the schema.
+          - db_type: "timestamptz"
+            nullable: false
+            go_type:
+              import: "time"
+              type: "Time"
+          - db_type: "timestamptz"
+            nullable: true
+            go_type:
+              import: "time"
+              type: "Time"
+              pointer: true
