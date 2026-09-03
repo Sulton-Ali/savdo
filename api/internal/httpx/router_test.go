@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/Sulton-Ali/savdo/api/gen"
 )
 
 func testLogger() *slog.Logger {
@@ -19,16 +21,19 @@ func TestHealthz(t *testing.T) {
 		name           string
 		method         string
 		wantStatus     int
-		wantBody       map[string]string
+		wantBody       *gen.Healthz
 		wantAllowedHdr bool
 	}{
 		{
 			name:       "GET returns ok",
 			method:     http.MethodGet,
 			wantStatus: http.StatusOK,
-			wantBody:   map[string]string{"status": "ok"},
+			wantBody:   &gen.Healthz{Status: gen.Ok},
 		},
 		{
+			// The generated std-http-server mux (Go 1.22 method+path
+			// patterns) responds 405 with an Allow header when a path it
+			// knows is hit with a method it doesn't serve.
 			name:           "POST is not allowed",
 			method:         http.MethodPost,
 			wantStatus:     http.StatusMethodNotAllowed,
@@ -54,12 +59,12 @@ func TestHealthz(t *testing.T) {
 					t.Fatalf("Content-Type = %q, want application/json", ct)
 				}
 
-				var got map[string]string
+				var got gen.Healthz
 				if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 					t.Fatalf("decode body: %v", err)
 				}
-				if got["status"] != tt.wantBody["status"] {
-					t.Fatalf("body = %v, want %v", got, tt.wantBody)
+				if got != *tt.wantBody {
+					t.Fatalf("body = %+v, want %+v", got, *tt.wantBody)
 				}
 			}
 

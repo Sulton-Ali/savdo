@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/oapi-codegen/oapi-codegen/v2.8.0/configuration-schema.json
+package: gen
+output: gen/api.gen.go
+generate:
+  models: true
+  std-http-server: true
+  strict-server: true
+output-options:
+  # ErrorCode, Error and Decimal are not yet referenced by any path (only
+  # healthz exists so far) but ADR-002 wants them generated now so future
+  # modules import the same Go types instead of hand-declaring them.
+  skip-prune: true

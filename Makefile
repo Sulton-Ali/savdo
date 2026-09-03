@@ -40,13 +40,13 @@ typecheck:
 
 ## generate: oapi-codegen + sqlc (Go) and openapi-typescript (TS client).
 generate:
+	cd api && go tool oapi-codegen -config oapi-codegen.yaml ../contracts/openapi.yaml
 	cd api && go tool sqlc generate
-	# oapi-codegen (contracts/openapi.yaml -> api/gen) is wired in T3.
-	pnpm --filter @savdo/api-client --if-present generate
+	pnpm --filter @savdo/api-client generate
 
 ## generate-check: generated code must be committed and fresh.
 generate-check: generate
-	git diff --exit-code -- api/gen packages/api-client api/internal/db
+	git diff --exit-code -- api/gen api/internal/db packages/api-client/src/schema.d.ts
 
 ## test: Go tests (unit + testcontainers) and TS tests (Vitest).
 test: test-go test-ts
