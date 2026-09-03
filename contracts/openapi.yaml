@@ -1,0 +1,151 @@
+openapi: 3.1.0
+
+info:
+  title: Savdo API
+  version: 0.1.0
+  description: >
+    Savdo ("trade" in Uzbek) — a light ERP + CRM for small shops. This
+    contract is the single source of truth (ADR-002): `make generate`
+    produces the Go server interface/types (oapi-codegen) and the
+    TypeScript types + typed fetch client (`@savdo/api-client`) from it.
+    Nobody hand-declares a request/response shape on either side.
+
+servers:
+  - url: /v1
+    description: >
+      All paths below are relative to this prefix, e.g. `GET /healthz`
+      here is served at `GET /v1/healthz`.
+
+tags:
+  - name: ops
+    description: Health and other operational endpoints.
+
+paths:
+  /healthz:
+    get:
+      operationId: getHealthz
+      tags: [ops]
+      summary: Liveness check.
+      description: Reports the process is up. Does not touch the database.
+      responses:
+        "200":
+          description: The process is up.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Healthz"
+
+components:
+  schemas:
+    Healthz:
+      type: object
+      description: Response body for `GET /healthz`.
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum: [ok]
+
+    ErrorCode:
+      type: string
+      description: >
+        Machine-readable error codes (ADR-013). A client translates a code
+        to a display sentence; the API never returns one. Adding a new
+        error code means adding it here first.
+      enum:
+        - VALIDATION_FAILED
+        - UNAUTHENTICATED
+        - FORBIDDEN
+        - NOT_FOUND
+        - CONFLICT
+        - RATE_LIMITED
+        - INTERNAL
+
+    Error:
+      type: object
+      description: The error envelope every non-2xx JSON response uses (ADR-013).
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          required:
+            - code
+          properties:
+            code:
+              $ref: "#/components/schemas/ErrorCode"
+            details:
+              type: object
+              description: Optional machine-readable context, shape depends on `code`.
+
+    Decimal:
+      type: string
+      format: decimal
+      pattern: '^-?\d+(\.\d+)?$'
+      description: money and quantities as decimal strings (ADR-007)
+
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      description: Maximum number of items to return.
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+
+    Cursor:
+      name: cursor
+      in: query
+      description: Opaque cursor from a previous page's `nextCursor`.
+      required: false
+      schema:
+        type: string
+
+    AcceptLanguage:
+      name: Accept-Language
+      in: header
+      description: Preferred response locale.
+      required: false
+      schema:
+        type: string
+        enum: [uz, ru, en]
+
+  responses:
+    Unauthenticated:
+      description: The request has no valid session or bearer token.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+    Forbidden:
+      description: The authenticated caller may not perform this action.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+    NotFound:
+      description: The resource does not exist (or is outside the caller's shop).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+    RateLimited:
+      description: Too many requests.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+    Internal:
+      description: An unexpected error occurred.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
