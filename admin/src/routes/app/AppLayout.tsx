@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { AuthProvider, useAuth } from "../../auth/AuthContext";
+import { useMe } from "../../auth/useMe";
 import { LanguageSwitcher } from "../../components/LanguageSwitcher";
 import { authenticatedRoute } from "./authenticatedRoute";
 
@@ -14,12 +15,24 @@ interface NavItem {
   key: string;
   icon: ReactNode;
   label: ReactNode;
-  ownerOnly: boolean;
+  /** A `me.permissions` capability string (ADR-010), or `null` for an item
+   * every authenticated user sees regardless of role. */
+  permission: string | null;
 }
 
 function AppShell() {
   const { t } = useTranslation();
-  const { me, isOwner, logout } = useAuth();
+  const { me: routeMe, can, logout } = useAuth();
+  // `routeMe` is the `beforeLoad` snapshot from when this route match was
+  // last (re)loaded — it does not update on its own when `["auth", "me"]`
+  // is invalidated (e.g. after a settings save). Read the live query for
+  // display so the shop name/user in the shell stay current; fall back to
+  // the route snapshot for the very first render, before this subscription
+  // has a value of its own (it won't in practice, since `beforeLoad`
+  // already primed the same cache entry, but this keeps the shell correct
+  // even if that entry were ever evicted).
+  const { data: liveMe } = useMe();
+  const me = liveMe ?? routeMe;
   const pathname = useRouterState({ select: (state) => state.location.pathname });
 
   const navItems: NavItem[] = [
@@ -27,25 +40,25 @@ function AppShell() {
       key: "/",
       icon: <LayoutDashboard size={16} />,
       label: <Link to="/">{t("nav.dashboard")}</Link>,
-      ownerOnly: false,
+      permission: null,
     },
     {
       key: "/staff",
       icon: <Users size={16} />,
       label: <Link to="/staff">{t("nav.staff")}</Link>,
-      ownerOnly: true,
+      permission: "staff.manage",
     },
     {
       key: "/locations",
       icon: <MapPin size={16} />,
       label: <Link to="/locations">{t("nav.locations")}</Link>,
-      ownerOnly: true,
+      permission: "locations.manage",
     },
     {
       key: "/settings",
       icon: <Settings size={16} />,
       label: <Link to="/settings">{t("nav.settings")}</Link>,
-      ownerOnly: true,
+      permission: "shop.settings",
     },
   ];
 
@@ -57,7 +70,7 @@ function AppShell() {
           mode="inline"
           selectedKeys={[pathname]}
           items={navItems
-            .filter((item) => isOwner || !item.ownerOnly)
+            .filter((item) => item.permission === null || can(item.permission))
             .map(({ key, icon, label }) => ({ key, icon, label }))}
         />
       </Sider>

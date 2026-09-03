@@ -22,5 +22,10 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     setupFiles: ["./src/test/setup.ts"],
+    // The router-level tests mount a full RouterProvider tree (beforeLoad,
+    // route context, Ant Design motion) and have been observed to exceed
+    // Vitest's 5s default under machine load; give them headroom.
+    testTimeout: 15000,
+    hookTimeout: 15000,
   },
 });

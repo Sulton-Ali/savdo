@@ -1,7 +1,7 @@
 import type { components } from "@savdo/api-client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 type Me = components["schemas"]["Me"];
@@ -10,10 +10,10 @@ function buildMe(permissions: string[]): Me {
   return {
     user: {
       id: "u1",
-      username: "owner",
-      fullName: "Test User",
+      username: "cashier",
+      fullName: "Test Cashier",
       phone: null,
-      role: permissions.length > 0 ? "owner" : "cashier",
+      role: "cashier",
       locale: "en",
       isActive: true,
       lastLoginAt: null,
@@ -39,23 +39,38 @@ vi.mock("../../../auth/api", () => ({
   fetchMe: () => fetchMeMock(),
 }));
 
+vi.mock("../../../lib/api", () => ({
+  api: {
+    GET: vi.fn(async () => ({
+      data: { items: [], nextCursor: null },
+      error: undefined,
+      response: new Response(null, { status: 200 }),
+    })),
+    POST: vi.fn(),
+    PATCH: vi.fn(),
+  },
+}));
+
 import { i18next } from "../../../i18n";
 import { rootRoute } from "../../root";
 import { authenticatedRoute } from "../authenticatedRoute";
 import { dashboardRoute } from "../dashboardRoute";
+import { staffRoute } from "../staffRoute";
 
-function buildRouterAndClient() {
+function buildRouter(initialEntry: string) {
   const queryClient = new QueryClient();
-  const routeTree = rootRoute.addChildren([authenticatedRoute.addChildren([dashboardRoute])]);
+  const routeTree = rootRoute.addChildren([
+    authenticatedRoute.addChildren([dashboardRoute, staffRoute]),
+  ]);
   const router = createRouter({
     routeTree,
     context: { queryClient },
-    history: createMemoryHistory({ initialEntries: ["/"] }),
+    history: createMemoryHistory({ initialEntries: [initialEntry] }),
   });
   return { router, queryClient };
 }
 
-describe("AppLayout navigation", () => {
+describe("staffRoute beforeLoad", () => {
   beforeAll(async () => {
     await i18next.changeLanguage("en");
   });
@@ -67,35 +82,31 @@ describe("AppLayout navigation", () => {
     cleanup();
   });
 
-  it("shows the Staff nav item when the user has staff.manage", async () => {
-    fetchMeMock.mockResolvedValueOnce(
-      buildMe(["staff.manage", "locations.manage", "shop.settings"]),
-    );
-    const { router, queryClient } = buildRouterAndClient();
+  it("redirects to / when the user lacks staff.manage", async () => {
+    fetchMeMock.mockResolvedValueOnce(buildMe([]));
+    const { router, queryClient } = buildRouter("/staff");
     render(
       <QueryClientProvider client={queryClient}>
         <RouterProvider router={router} />
       </QueryClientProvider>,
     );
 
-    await waitFor(() => expect(screen.getByText("Test Shop")).toBeTruthy());
-    expect(screen.getByText("Staff")).toBeTruthy();
-    expect(screen.getByText("Locations")).toBeTruthy();
-    expect(screen.getByText("Settings")).toBeTruthy();
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe("/");
+    });
   });
 
-  it("hides the Staff, Locations and Settings nav items without the matching permissions", async () => {
-    fetchMeMock.mockResolvedValueOnce(buildMe([]));
-    const { router, queryClient } = buildRouterAndClient();
+  it("loads /staff when the user has staff.manage", async () => {
+    fetchMeMock.mockResolvedValueOnce(buildMe(["staff.manage"]));
+    const { router, queryClient } = buildRouter("/staff");
     render(
       <QueryClientProvider client={queryClient}>
         <RouterProvider router={router} />
       </QueryClientProvider>,
     );
 
-    await waitFor(() => expect(screen.getByText("Test Shop")).toBeTruthy());
-    expect(screen.queryByText("Staff")).toBeNull();
-    expect(screen.queryByText("Locations")).toBeNull();
-    expect(screen.queryByText("Settings")).toBeNull();
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe("/staff");
+    });
   });
 });

@@ -1,10 +1,12 @@
 import { createRoute } from "@tanstack/react-router";
 
 import { authenticatedRoute } from "./authenticatedRoute";
-import { ComingSoonPage } from "./ComingSoonPage";
+import { requirePermission } from "./requirePermission";
+import { SettingsPage } from "./SettingsPage";
 
 export const settingsRoute = createRoute({
   getParentRoute: () => authenticatedRoute,
   path: "/settings",
-  component: () => <ComingSoonPage titleKey="nav.settings" />,
+  beforeLoad: ({ context }) => requirePermission(context.me, "shop.settings"),
+  component: SettingsPage,
 });

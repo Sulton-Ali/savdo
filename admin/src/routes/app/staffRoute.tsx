@@ -1,10 +1,12 @@
 import { createRoute } from "@tanstack/react-router";
 
 import { authenticatedRoute } from "./authenticatedRoute";
-import { ComingSoonPage } from "./ComingSoonPage";
+import { requirePermission } from "./requirePermission";
+import { StaffPage } from "./StaffPage";
 
 export const staffRoute = createRoute({
   getParentRoute: () => authenticatedRoute,
   path: "/staff",
-  component: () => <ComingSoonPage titleKey="nav.staff" />,
+  beforeLoad: ({ context }) => requirePermission(context.me, "staff.manage"),
+  component: StaffPage,
 });
