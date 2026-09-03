@@ -137,7 +137,7 @@ entries are added by `/phase-done` when a review catches one.
 | ------------------- | --------------------------------------------------------------------------------------- |
 | `AGENTS.md`         | Source of truth for agent behaviour; `CLAUDE.md` delegates to it                        |
 | `.claude/agents/`   | `implementer`, `reviewer`, `db`, `merger`, `scribe` with per-role tool restrictions      |
-| `.claude/skills/`   | `/interview`, `/adr`, `/phase-start`, `/api-change`, `/phase-review`, `/phase-done`, `/new-module` |
+| `.claude/skills/`   | `/interview`, `/adr`, `/phase-start`, `/api-change`, `/phase-review`, `/phase-done`, `/new-module` + 10 vendored general skills (see `VENDORED.md`) |
 | `.claude/settings.json` | Permission allow/ask/deny lists so agents run the routine commands without prompts |
 | `.mcp.json`         | `context7` (docs), `postgres` (read-only inspection), `playwright` (browser verification) |
 

@@ -40,6 +40,10 @@ looks wrong may simply be newer than you are.
   `fetch` by hand. UI strings from `@savdo/i18n`.
 - Never declare a request/response shape by hand on either side (ADR-002).
 
+## Skills to consult
+
+Load `test-driven-development`, `incremental-implementation`, `source-driven-development` and `context-engineering` (vendored, `.claude/skills/`). Add `api-and-interface-design` when your task touches `contracts/openapi.yaml`, and `frontend-ui-engineering` plus `performance-optimization` when it touches `web/`, `admin/` or `mobile/`. `AGENTS.md` wins over them on any conflict.
+
 ## The rules that get violated most
 
 1. Every business query filters by `shop_id` from the auth context (ADR-004).

@@ -20,6 +20,10 @@ read the section you are changing and § Rules for agents before touching anythi
 
 **Never edit a migration that has merged.** Fix forward.
 
+## Skills to consult
+
+Load `test-driven-development` (vendored, `.claude/skills/`). `AGENTS.md` wins over it on any conflict.
+
 ## Hard rules
 
 - `shop_id uuid not null references shops(id)` on every business table; every query

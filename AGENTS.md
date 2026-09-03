@@ -49,22 +49,74 @@ safe:
 words, explain jargon the first time it appears. Docs, code and comments stay in normal
 technical English.
 
-## Karpathy guidelines (compact)
+## Karpathy guidelines
 
-Behavioural defaults for LLM coding. Bias: caution over speed; for trivial tasks, use
-judgement. They reinforce the operating mode — they never override `docs/` or the hard
-rules below.
+Behavioural defaults for LLM coding, taken verbatim from the
+[karpathy-guidelines skill](https://github.com/multica-ai/andrej-karpathy-skills)
+(MIT), derived from [Andrej Karpathy's observations](https://x.com/karpathy/status/2015883857489522876)
+on LLM coding pitfalls. They bias toward caution over speed; for trivial tasks, use
+judgement. They reinforce the operating mode above — they never override `docs/` or the
+hard rules below.
 
-1. **Think before coding.** State assumptions; if unsure, ask. Surface multiple
-   interpretations and trade-offs — do not pick silently. Name confusion and stop.
-2. **Simplicity first.** Minimum code that solves the ask. No speculative features,
-   single-use abstractions or unrequested flexibility. If it could be a third of the
-   size, rewrite it.
-3. **Surgical changes.** Touch only what the task requires. Match existing style. Clean
-   up only orphans your change created; mention other dead code, do not delete it.
-4. **Goal-driven execution.** Turn the ask into a checkable outcome (a test, a command,
-   a Done-when behaviour). Plan multi-step work as step → verify. Loop until the check
-   passes — "make it work" is not a goal.
+**Savdo note on rule 2.** The tenant-ready schema (ADR-004) and the provider-agnostic
+LLM adapter (ADR-009) are flexibility the owner asked for (D-02, D-09). They are not
+"speculative configurability" — do not argue them away under this rule.
+
+### 1. Think Before Coding
+
+**Don't assume. Don't hide confusion. Surface tradeoffs.**
+
+Before implementing:
+- State your assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them - don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing. Ask.
+
+### 2. Simplicity First
+
+**Minimum code that solves the problem. Nothing speculative.**
+
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
+
+Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+
+### 3. Surgical Changes
+
+**Touch only what you must. Clean up only your own mess.**
+
+When editing existing code:
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+- If you notice unrelated dead code, mention it - don't delete it.
+
+When your changes create orphans:
+- Remove imports/variables/functions that YOUR changes made unused.
+- Don't remove pre-existing dead code unless asked.
+
+The test: Every changed line should trace directly to the user's request.
+
+### 4. Goal-Driven Execution
+
+**Define success criteria. Loop until verified.**
+
+Transform tasks into verifiable goals:
+- "Add validation" → "Write tests for invalid inputs, then make them pass"
+- "Fix the bug" → "Write a test that reproduces it, then make it pass"
+- "Refactor X" → "Ensure tests pass before and after"
+
+For multi-step tasks, state a brief plan:
+```
+1. [Step] → verify: [check]
+2. [Step] → verify: [check]
+3. [Step] → verify: [check]
+```
+
+Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
 ## Docs map
 
@@ -155,6 +207,23 @@ rules below.
     never from memory — check the registry.
 12. **Never call an LLM from a request path other than the bot's own handler**, and
     never without the per-shop and per-user rate limit in place (ADR-009).
+
+## Vendored skills (Addy Osmani's agent-skills)
+
+Ten general-engineering skills are vendored verbatim under `.claude/skills/` from
+[addyosmani/agent-skills](https://github.com/addyosmani/agent-skills), pinned in
+`.claude/skills/VENDORED.md` and `docs/02-TECH-STACK.md`. They are reference knowledge,
+not process: **`AGENTS.md` and the Savdo skills win when they conflict.** In particular,
+Savdo uses branches merged `--no-ff` by a separate session, not trunk-based direct
+commits, and the review/merge separation is never collapsed into one session.
+
+| Role        | Consults                                                                                                              |
+| ----------- | --------------------------------------------------------------------------------------------------------------------- |
+| implementer | `test-driven-development`, `incremental-implementation`, `source-driven-development`, `context-engineering`; plus `api-and-interface-design` on contract work and `frontend-ui-engineering` / `performance-optimization` on web and mobile work |
+| db          | `test-driven-development`                                                                                              |
+| reviewer    | `code-review-and-quality`, `security-and-hardening`, `doubt-driven-development`                                       |
+| merger      | none                                                                                                                   |
+| scribe      | none — keep Haiku's context small                                                                                      |
 
 ## Escalate to the owner
 
