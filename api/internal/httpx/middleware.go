@@ -18,9 +18,12 @@ const requestIDKey contextKey = iota
 // can be correlated with the log line the request logger writes.
 func requestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		idStr := uuid.NewString()
-		if id, err := uuid.NewV7(); err == nil {
-			idStr = id.String()
+		id, err := uuid.NewV7()
+		idStr := id.String()
+		if err != nil {
+			// Extremely unlikely (crypto/rand failure); fall back to a
+			// random v4 id rather than leaving requests uncorrelated.
+			idStr = uuid.NewString()
 		}
 
 		w.Header().Set("X-Request-Id", idStr)
