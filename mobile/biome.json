@@ -1,0 +1,20 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.11/schema.json",
+  "root": false,
+  "extends": "//",
+  "files": {
+    "includes": ["**", "!**/.expo", "!expo-env.d.ts", "!**/dist", "!**/web-build"]
+  },
+  "overrides": [
+    {
+      "includes": ["**/*.css"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noUnknownAtRules": "off"
+          }
+        }
+      }
+    }
+  ]
+}
