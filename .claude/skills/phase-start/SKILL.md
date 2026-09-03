@@ -46,4 +46,4 @@ Turns a roadmap phase into tasks an implementer can execute without guessing.
 ## Output
 
 A numbered task list in dispatch order with the seven fields, then "open questions for
-the owner" if any. Do not implement. Do not tick anything.
+the owner" if any. Do not implement. Do not tick anything. Do not edit any file — the plan is a message, and any doc change it needs is dispatched.

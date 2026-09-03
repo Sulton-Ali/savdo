@@ -24,7 +24,7 @@ questions into recorded decisions before any work depends on them.
    architecture-shaping first. Read answers literally: "Other" text may change scope or
    decline to decide.
 
-4. **Record.** For each answer append a `D-xx` row to `docs/00-DECISIONS.md` (date,
+4. **Record — via the scribe.** Dispatch the scribe with the exact rows: for each answer append a `D-xx` row to `docs/00-DECISIONS.md` (date,
    decision, consequence), remove or mark the `Q-xx` as answered, and if the decision
    is technical, run `/adr` or update the affected doc section in the same commit.
    "I don't know" stays a Q-xx with a note on how the design defers it.

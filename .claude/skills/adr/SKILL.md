@@ -12,7 +12,7 @@ description: Record, amend or reverse an Architecture Decision Record in docs/03
 2. **Check for an existing ADR** on the topic in `docs/03-ARCHITECTURE.md`. Amend it
    (append "Amended <date>: …") rather than creating a duplicate; reversing one needs
    the owner's explicit words quoted.
-3. **Write it** with the next number, format **Context → Decision → Consequences**, five
+3. **Dispatch the scribe to write it** (exact text supplied by the orchestrator) with the next number, format **Context → Decision → Consequences**, five
    to fifteen lines. Name the alternatives considered in one line each.
 4. **Cross-link**: add an `O-xx` (orchestrator) or `D-xx` (owner) row in
    `docs/00-DECISIONS.md` referencing the ADR; update `AGENTS.md` § Hard rules or

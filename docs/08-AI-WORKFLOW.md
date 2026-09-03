@@ -9,7 +9,7 @@ agents. The process is a deliverable in itself, so it is written down here and m
 | Role              | Model            | Does                                                                                                                                     | Never does                                                          |
 | ----------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
 | **Owner** (human) | —                | Sets scope, answers interview questions, approves architecture/dependencies/money, accepts or rejects a closed phase                     | Write code; run the loop by hand                                    |
-| **Orchestrator**  | Fable 5.1        | **The interactive session.** Interviews the owner, reasons, decomposes, dispatches with minimum context, sequences, tracks the roadmap    | Implement, test, merge. An orchestrator that codes has stopped orchestrating |
+| **Orchestrator**  | Fable 5.1        | **The interactive session.** Interviews the owner, reasons, decomposes, dispatches with minimum context, sequences, tracks the roadmap    | Write any file — code, tests, docs, decision rows, checkboxes. An orchestrator that edits has stopped orchestrating (D-27) |
 | **Implementer**   | Sonnet 5         | Code + tests for exactly one scoped task                                                                                                 | Touch files outside its brief; tick boxes; merge                    |
 | **db**            | Sonnet 5         | goose migrations, sqlc queries, seeds; knows the schema traps                                                                            | Edit a merged migration; UPDATE `stock_levels`                      |
 | **Reviewer**      | Sonnet 5 / Opus 5 | Reviews a diff against docs, ADRs and the phase bar; findings only. Critical modules: Sonnet **and** Opus, fresh sessions, split scopes | Fix what it finds                                                   |
@@ -156,6 +156,4 @@ Tracked honestly in the phase log, including the numbers that look bad:
 | Escalations per phase                        | non-zero, falling | Zero means agents are guessing                                       |
 | Correctness-critical defects reaching `main` | 0                 | The only category with no acceptable rate                            |
 
-**Phase 0 (in progress, 2026-09-03):** bootstrap docs written by the orchestrator under
-an owner-approved exception (they encode the interview). Human-written production lines
-= 0. Escalations: Q-14 (`gh` missing), Q-15 (Go missing).
+**Phase 0 (in progress, 2026-09-03):** bootstrap docs were written by the orchestrator under a one-time owner exception; that exception was revoked on 2026-09-04 (D-27) — from then on even doc edits are dispatched. Human-written production lines = 0. Escalations: Q-14 (`gh` missing), Q-15 (Go missing), both closed. Review catches so far: compaction over the D-22 budget (orchestrator's own branch); a false upstream-bug claim in T2's lint installer (refuted by the reviewer running the script).
