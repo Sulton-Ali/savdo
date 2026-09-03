@@ -15,14 +15,14 @@ the same phase (O-05), so the owner can test each increment.
 
 - [x] Discovery interview rounds 1–4 recorded in `00-DECISIONS.md`
 - [x] `AGENTS.md`, `CLAUDE.md`, docs 01–08, agents, skills, MCP, settings
-- [ ] Owner answers Q-14 (GitHub) and Q-15 (Go install); remote `Sulton-Ali/savdo` exists (answered 2026-09-03; box ticked by /phase-done)
-- [ ] Monorepo scaffold: `api/` Go module with `cmd/api` hello server, `contracts/openapi.yaml` with `/healthz`, `packages/{i18n,api-client}`, `admin/`, `web/`, `mobile/` minimal apps that build
-- [ ] Root `Makefile`: `verify`, `generate`, `dev-infra`, `dev-infra-down`, `migrate`, `seed`, `api`, `bot`
-- [ ] `make generate` pipeline: oapi-codegen (Go) + openapi-typescript/openapi-fetch (TS) + sqlc, Go tools pinned via `go tool` in `go.mod` (D-24); freshness check in `verify`
-- [ ] `infra/docker-compose.yml` with Postgres (pinned), `infra/.env.example`, goose wired
-- [ ] Biome, golangci-lint, Vitest, Go test configs; `lefthook` commit-msg hook (Conventional Commits, rejects attribution trailers)
-- [ ] GitHub Actions `ci.yml` running `make verify` on PR and push to `main`
-- [ ] `.github/pull_request_template.md` with the merge checklist
+- [x] Owner answers Q-14 (GitHub) and Q-15 (Go install); remote `Sulton-Ali/savdo` exists (answered 2026-09-03; box ticked by /phase-done)
+- [x] Monorepo scaffold: `api/` Go module with `cmd/api` hello server, `contracts/openapi.yaml` with `/healthz`, `packages/{i18n,api-client}`, `admin/`, `web/`, `mobile/` minimal apps that build
+- [x] Root `Makefile`: `verify`, `generate`, `dev-infra`, `dev-infra-down`, `migrate`, `seed`, `api`, `bot`
+- [x] `make generate` pipeline: oapi-codegen (Go) + openapi-typescript/openapi-fetch (TS) + sqlc, Go tools pinned via `go tool` in `go.mod` (D-24); freshness check in `verify`
+- [x] `infra/docker-compose.yml` with Postgres (pinned), `infra/.env.example`, goose wired
+- [x] Biome, golangci-lint, Vitest, Go test configs; `lefthook` commit-msg hook (Conventional Commits, rejects attribution trailers)
+- [x] GitHub Actions `ci.yml` running `make verify` on PR and push to `main`
+- [x] `.github/pull_request_template.md` with the merge checklist
 
 **Done when:** on a fresh clone with Go, Node, pnpm and Docker installed, `make dev-infra
 && make verify` is green; `make api` serves `GET /v1/healthz`; `pnpm --filter admin dev`,
@@ -176,3 +176,4 @@ offline mobile mode · bot staff mode · printed receipts · accounting exports.
 
 | Phase | Closed | Verified by | Deferred |
 | ----- | ------ | ----------- | -------- |
+| 0 — Bootstrap | 2026-09-04 | fresh clone, make dev-infra && make verify exit 0, healthz 200, admin proxy + shell, web SSR "API: ok", Expo Metro boot + Android export, CI run 33800653774 success | On-device mobile screen verified by the owner with Expo Go at acceptance; lucide-react pin to Phase 1; jest-expo (Q-17), brand colour (Q-16), Android package id (Q-18) open |
