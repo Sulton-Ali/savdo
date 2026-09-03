@@ -9,6 +9,7 @@
       "!**/node_modules",
       "!api",
       "!packages/api-client/src/schema.d.ts",
+      "!web/src/routeTree.gen.ts",
       "!.claude",
       "!.mcp.json"
     ]
