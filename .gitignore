@@ -1,0 +1,43 @@
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Secrets — never committed
+.env
+.env.*
+!.env.example
+infra/.env
+
+# Agent worktrees and local overrides
+.claude/worktrees/
+.claude/settings.local.json
+
+# Go
+api/bin/
+api/tmp/
+*.test
+*.out
+coverage/
+
+# Node / pnpm
+node_modules/
+dist/
+build/
+.output/
+.vinxi/
+.tanstack/
+*.tsbuildinfo
+.pnpm-store/
+
+# Expo
+mobile/.expo/
+mobile/android/
+mobile/ios/
+*.apk
+*.aab
+
+# Data volumes (local)
+infra/data/
