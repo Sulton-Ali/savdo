@@ -33,6 +33,7 @@ green on `main`.
 
 ## Phase 1 — Core API + admin shell (auth, shop, staff, locations)
 
+- [ ] Owner answered Q-11 (D-28), session policy (D-29), seed content (D-30), dependencies (D-31) — 2026-09-04
 - [ ] Config, slog logging, request id, error mapping, `/readyz`
 - [ ] Migrations 0001–0003: `shops`, `users`, `sessions`, `locations`, enums
 - [ ] `auth`: argon2id passwords, opaque sessions, login/logout/me, rate limit on login
