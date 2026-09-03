@@ -42,9 +42,6 @@ func (r notImplementedResponse) VisitListSessionsResponse(w http.ResponseWriter)
 func (r notImplementedResponse) VisitRevokeSessionResponse(w http.ResponseWriter) error {
 	return r.write(w)
 }
-func (r notImplementedResponse) VisitGetReadyzResponse(w http.ResponseWriter) error {
-	return r.write(w)
-}
 func (r notImplementedResponse) VisitGetShopResponse(w http.ResponseWriter) error { return r.write(w) }
 func (r notImplementedResponse) VisitUpdateShopResponse(w http.ResponseWriter) error {
 	return r.write(w)
@@ -98,13 +95,6 @@ func (server) ListSessions(_ context.Context, _ gen.ListSessionsRequestObject) (
 // RevokeSession revokes one of the authenticated user's own sessions.
 // Phase 1: replaced by T3/T4/T5.
 func (server) RevokeSession(_ context.Context, _ gen.RevokeSessionRequestObject) (gen.RevokeSessionResponseObject, error) {
-	return notImplementedResponse{}, nil
-}
-
-// GetReadyz reports whether the API's dependencies (the database) are
-// reachable. Phase 1: replaced by T3/T4/T5, once cmd/api holds a pgx pool
-// to check.
-func (server) GetReadyz(_ context.Context, _ gen.GetReadyzRequestObject) (gen.GetReadyzResponseObject, error) {
 	return notImplementedResponse{}, nil
 }
 

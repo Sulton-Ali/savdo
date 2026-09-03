@@ -89,6 +89,17 @@ func New(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
+// DSN returns the connection string for the shared test container,
+// starting it first (exactly like New) if it is not already up. Callers
+// that need a raw connection string rather than a ready pool — such as
+// internal/db.NewPool's own tests — connect to the same database New
+// returns a pool for.
+func DSN(t *testing.T) string {
+	t.Helper()
+	New(t)
+	return dsn
+}
+
 func start() (*pgxpool.Pool, string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()

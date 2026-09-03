@@ -25,10 +25,9 @@ func TestUnimplementedOperations(t *testing.T) {
 		{"getShop", http.MethodGet, "/v1/shop"},
 		{"listLocations", http.MethodGet, "/v1/locations"},
 		{"listStaff", http.MethodGet, "/v1/staff"},
-		{"getReadyz", http.MethodGet, "/v1/readyz"},
 	}
 
-	router := NewRouter(testLogger())
+	router := NewRouter(testLogger(), nil)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
