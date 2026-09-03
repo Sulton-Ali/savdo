@@ -15,7 +15,7 @@ the same phase (O-05), so the owner can test each increment.
 
 - [x] Discovery interview rounds 1–4 recorded in `00-DECISIONS.md`
 - [x] `AGENTS.md`, `CLAUDE.md`, docs 01–08, agents, skills, MCP, settings
-- [ ] Owner answers Q-14 (GitHub) and Q-15 (Go install); remote `Sulton-Ali/savdo` exists
+- [ ] Owner answers Q-14 (GitHub) and Q-15 (Go install); remote `Sulton-Ali/savdo` exists (answered 2026-09-03; box ticked by /phase-done)
 - [ ] Monorepo scaffold: `api/` Go module with `cmd/api` hello server, `contracts/openapi.yaml` with `/healthz`, `packages/{i18n,api-client}`, `admin/`, `web/`, `mobile/` minimal apps that build
 - [ ] Root `Makefile`: `verify`, `generate`, `dev-infra`, `dev-infra-down`, `migrate`, `seed`, `api`, `bot`
 - [ ] `make generate` pipeline: oapi-codegen (Go) + openapi-typescript/openapi-fetch (TS) + sqlc; freshness check in `verify`

@@ -34,6 +34,7 @@ orchestrator (Fable 5.1).
 | D-20 | 2026-09-03 | Keep Karpathy's four guidelines in AGENTS.md as a behaviour layer separate from the hard rules. Amended by D-22: one line per principle, full text linked. | AGENTS.md § Karpathy guidelines; ADR-004/ADR-009 flexibility explicitly exempted |
 | D-21 | 2026-09-03 | Vendor only 10 skills (+ linked checklists) from addyosmani/agent-skills, verbatim, pinned; no commands, hooks or agents from it. | .claude/skills/VENDORED.md; precedence rule in AGENTS.md § Vendored skills |
 | D-22 | 2026-09-03 | **Always-loaded context stays compact.** `CLAUDE.md` + `AGENTS.md` target ≤ 10 KB together and hold only rules, pointers and orientation; detail lives in `docs/`, agent definitions and skills, loaded on demand. | AGENTS.md rewritten from 17.5 KB to ~9 KB; Karpathy principles as one-liners (amends D-20); vendored-skill role table lives only in agent definitions |
+| D-23 | 2026-09-03 | **Develop locally until the MVP is complete.** Remote `github.com/Sulton-Ali/savdo` (private) is for sync and CI only. Production deployment happens once, after the owner confirms everything is ready (Phase 8). Q-14/Q-15 closed: Go 1.27 and `gh` installed natively. | No deploy workflow, no VPS, no real users before Phase 8; pushes to `main` are a sync, not a release |
 
 ## Decisions made by the orchestrator (owner may overrule)
 
@@ -70,8 +71,6 @@ Blocking questions are marked **[blocks Phase N]**. The orchestrator asks them v
 | Q-11 | Who resets a forgotten password before Telegram OTP exists (Phase 7)?                                                                                      | Phase 1            | Draft: owner resets staff passwords from the admin; owner password reset via CLI command on the server                                |
 | Q-12 | Product images: max count per product, and do variants have their own photos?                                                                              | Phase 2            | Draft: up to 8 per product, optional per-variant image                                                                                |
 | Q-13 | Bot audience: customers only, or also a staff mode (e.g. "how many blue XL left?") behind Telegram login?                                                  | Phase 7            | Draft: customer mode in MVP; staff mode backlog                                                                                       |
-| Q-14 | GitHub remote: `gh` CLI is not installed on this machine. Install it, or should the owner create the repo and give the URL?                                | Phase 0            | Orchestrator can create it once `gh auth login` is done                                                                               |
-| Q-15 | Go toolchain is not installed locally. Install natively (recommended for agents' speed) or run everything in Docker?                                       | Phase 0            | Native install: `sudo pacman -S go` on CachyOS                                                                                        |
 
 ## Post-MVP backlog (agreed out of scope for now)
 
