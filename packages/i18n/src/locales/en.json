@@ -8,7 +8,11 @@
     "error": "Something went wrong",
     "save": "Save",
     "cancel": "Cancel",
-    "comingSoon": "Coming soon"
+    "comingSoon": "Coming soon",
+    "retry": "Retry"
+  },
+  "errors": {
+    "serviceUnavailable": "Service unavailable. Please try again."
   },
   "lang": {
     "uz": "Oʻzbekcha",
@@ -32,6 +36,7 @@
     "errors": {
       "invalidCredentials": "Incorrect username or password",
       "rateLimited": "Too many attempts. Please try again later",
+      "retryAfter": "Try again in {{seconds}}s",
       "generic": "Something went wrong. Please try again"
     },
     "logout": "Log out"

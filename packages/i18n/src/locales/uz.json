@@ -8,7 +8,11 @@
     "error": "Xatolik yuz berdi",
     "save": "Saqlash",
     "cancel": "Bekor qilish",
-    "comingSoon": "Tez orada"
+    "comingSoon": "Tez orada",
+    "retry": "Qayta urinish"
+  },
+  "errors": {
+    "serviceUnavailable": "Xizmat vaqtincha ishlamayapti. Qayta urinib ko‘ring."
   },
   "lang": {
     "uz": "Oʻzbekcha",
@@ -32,6 +36,7 @@
     "errors": {
       "invalidCredentials": "Foydalanuvchi nomi yoki parol noto‘g‘ri",
       "rateLimited": "Juda ko‘p urinish. Birozdan so‘ng qayta urinib ko‘ring",
+      "retryAfter": "{{seconds}} soniyadan keyin qayta urining",
       "generic": "Xatolik yuz berdi. Qayta urinib ko‘ring"
     },
     "logout": "Chiqish"
