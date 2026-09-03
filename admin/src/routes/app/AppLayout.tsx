@@ -14,12 +14,14 @@ interface NavItem {
   key: string;
   icon: ReactNode;
   label: ReactNode;
-  ownerOnly: boolean;
+  /** A `me.permissions` capability string (ADR-010), or `null` for an item
+   * every authenticated user sees regardless of role. */
+  permission: string | null;
 }
 
 function AppShell() {
   const { t } = useTranslation();
-  const { me, isOwner, logout } = useAuth();
+  const { me, can, logout } = useAuth();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
 
   const navItems: NavItem[] = [
@@ -27,25 +29,25 @@ function AppShell() {
       key: "/",
       icon: <LayoutDashboard size={16} />,
       label: <Link to="/">{t("nav.dashboard")}</Link>,
-      ownerOnly: false,
+      permission: null,
     },
     {
       key: "/staff",
       icon: <Users size={16} />,
       label: <Link to="/staff">{t("nav.staff")}</Link>,
-      ownerOnly: true,
+      permission: "staff.manage",
     },
     {
       key: "/locations",
       icon: <MapPin size={16} />,
       label: <Link to="/locations">{t("nav.locations")}</Link>,
-      ownerOnly: true,
+      permission: "locations.manage",
     },
     {
       key: "/settings",
       icon: <Settings size={16} />,
       label: <Link to="/settings">{t("nav.settings")}</Link>,
-      ownerOnly: true,
+      permission: "shop.settings",
     },
   ];
 
@@ -57,7 +59,7 @@ function AppShell() {
           mode="inline"
           selectedKeys={[pathname]}
           items={navItems
-            .filter((item) => isOwner || !item.ownerOnly)
+            .filter((item) => item.permission === null || can(item.permission))
             .map(({ key, icon, label }) => ({ key, icon, label }))}
         />
       </Sider>
