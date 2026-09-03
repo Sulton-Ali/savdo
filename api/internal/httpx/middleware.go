@@ -2,16 +2,34 @@ package httpx
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/Sulton-Ali/savdo/api/internal/apierr"
 )
 
 type contextKey int
 
 const requestIDKey contextKey = iota
+
+// recoverer turns a panic anywhere downstream (including inside a handler's
+// own service call) into a mapped 500 INTERNAL response instead of
+// crashing the process or leaking a Go stack trace to the client. It is the
+// outermost middleware, so it also protects requestID and requestLogger.
+func recoverer(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				apierr.Write(w, fmt.Errorf("panic: %v", rec))
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
+}
 
 // requestID assigns a time-ordered (UUID v7) request id to every request,
 // stores it on the context and echoes it back as a response header so it
@@ -26,7 +44,7 @@ func requestID(next http.Handler) http.Handler {
 			idStr = uuid.NewString()
 		}
 
-		w.Header().Set("X-Request-Id", idStr)
+		w.Header().Set(apierr.RequestIDHeader, idStr)
 		ctx := context.WithValue(r.Context(), requestIDKey, idStr)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
