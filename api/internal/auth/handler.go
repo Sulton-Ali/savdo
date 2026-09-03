@@ -53,18 +53,39 @@ func (h *Handler) Login(ctx context.Context, req gen.LoginRequestObject) (gen.Lo
 	return gen.Login200JSONResponse(resp), nil
 }
 
+// maxLoginUsernameLength and maxLoginPasswordLength mirror the
+// `maxLength` constraints on LoginRequest.username/.password in
+// contracts/openapi.yaml. oapi-codegen's generated types carry no runtime
+// validation for those constraints (confirmed: regenerating after adding
+// them changed nothing in gen/api.gen.go), so the contract's bound and
+// this bound must be kept in sync by hand — this is also part of the
+// API's defense against attacker-controlled rate-limiter keys and
+// oversized argon2 input growing unboundedly (see ratelimit.go's own
+// length cap for the second layer of that defense).
+const (
+	maxLoginUsernameLength = 64
+	maxLoginPasswordLength = 128
+)
+
 // validateLoginRequest returns a field->reason map for a malformed login
-// body — an empty username/password, or a client value other than the two
-// the SessionClient enum defines. oapi-codegen only guarantees the request
-// decoded as JSON, not that its fields are meaningful (hard rule 6 covers
-// the shape; content validation is still this handler's job).
+// body — an empty or over-long username/password, or a client value other
+// than the two the SessionClient enum defines. oapi-codegen only
+// guarantees the request decoded as JSON, not that its fields are
+// meaningful or bounded (hard rule 6 covers the shape; content validation
+// is still this handler's job).
 func validateLoginRequest(body *gen.LoginRequest) map[string]string {
 	fields := map[string]string{}
-	if body.Username == "" {
+	switch {
+	case body.Username == "":
 		fields["username"] = "required"
+	case len(body.Username) > maxLoginUsernameLength:
+		fields["username"] = fmt.Sprintf("must be at most %d characters", maxLoginUsernameLength)
 	}
-	if body.Password == "" {
+	switch {
+	case body.Password == "":
 		fields["password"] = "required"
+	case len(body.Password) > maxLoginPasswordLength:
+		fields["password"] = fmt.Sprintf("must be at most %d characters", maxLoginPasswordLength)
 	}
 	switch body.Client {
 	case gen.Web, gen.Mobile:
