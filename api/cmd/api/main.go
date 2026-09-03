@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Sulton-Ali/savdo/api/internal/config"
+	"github.com/Sulton-Ali/savdo/api/internal/db"
 	"github.com/Sulton-Ali/savdo/api/internal/httpx"
 )
 
@@ -31,8 +33,20 @@ func run() error {
 	logger := newLogger(cfg.LogLevel)
 	slog.SetDefault(logger)
 
-	// DATABASE_URL is not opened here — cmd/api has no DB access until
-	// Phase 1 wires a pool and GET /readyz.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	// Open the pool and verify connectivity now, so an unreachable
+	// database fails startup immediately instead of surfacing as a wall of
+	// per-request errors once traffic arrives (docs/03-ARCHITECTURE.md §
+	// Cross-cutting: Health). Never log cfg.DatabaseURL: it carries the DB
+	// password.
+	pool, err := db.NewPool(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return fmt.Errorf("connect to database: %w", err)
+	}
+	defer pool.Close()
+
 	srv := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           httpx.NewRouter(logger),
@@ -41,9 +55,6 @@ func run() error {
 		WriteTimeout:      15 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	serveErr := make(chan error, 1)
 	go func() {
