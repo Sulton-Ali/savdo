@@ -29,20 +29,30 @@ const (
 // maxArgonTime, maxArgonMemory and maxArgonThreads bound the parameters
 // Verify will ever pass to argon2.IDKey when re-deriving a hash to check
 // a login against. Hash itself always writes the exact pinned values
-// above, but Verify parses whatever m=/t=/p= a stored hash string
-// contains — and a hash is data, not code Verify controls. If a hash
-// with, say, an absurd memory value ever ended up in the database (a
-// migration bug, a restored backup, a compromised row), verifying a
-// login against it would otherwise make argon2.IDKey try to allocate
-// that much memory on every attempt: a stored denial-of-service that
-// fires the moment anyone — attacker or legitimate user — logs into that
-// one account. These ceilings are deliberately generous relative to the
-// pinned values (room for a future, still-reasonable parameter bump
-// without touching this file) while nowhere near what would hurt the
-// process.
+// above (argonTime/argonMemory/argonThreads), but Verify parses whatever
+// m=/t=/p= a stored hash string contains — and a hash is data, not code
+// Verify controls. If a hash with, say, an absurd memory value ever ended
+// up in the database (a migration bug, a restored backup, a compromised
+// row), verifying a login against it would otherwise make argon2.IDKey
+// try to allocate that much memory on every attempt: a stored
+// denial-of-service that fires the moment anyone — attacker or
+// legitimate user — logs into that one account.
+//
+// These ceilings are deliberately, and independently, looser than the
+// pinned values above — not a mirror of them. maxArgonMemory in
+// particular gives real headroom (4x argonMemory) over the pinned 64
+// MiB: a hash at, say, 128 MiB is above what Hash writes today but still
+// well inside a memory budget this process can afford, so Verify runs
+// IDKey on it for real rather than refusing outright — the ceiling exists
+// to stop a hostile hash from demanding gigabytes, not to reject every
+// value that merely differs from today's pinned default. Bumping
+// argonTime/argonMemory/argonThreads (a future, still-reasonable
+// parameter tuning) therefore does NOT require touching this block in
+// lockstep; only a bump that would approach or exceed one of these
+// ceilings does.
 const (
 	maxArgonTime    uint32 = 10
-	maxArgonMemory  uint32 = 64 * 1024 // 64 MiB
+	maxArgonMemory  uint32 = 256 * 1024 // 256 MiB — 4x the pinned 64 MiB
 	maxArgonThreads uint8  = 8
 )
 

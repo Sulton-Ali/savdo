@@ -1,9 +1,14 @@
 package auth
 
 import (
+	"crypto/rand"
+	"encoding/base64"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/crypto/argon2"
 
 	"github.com/Sulton-Ali/savdo/api/internal/apierr"
 )
@@ -178,6 +183,53 @@ func TestVerifyRejectsWrongSaltOrDigestLength(t *testing.T) {
 	}
 	if ok {
 		t.Fatal("Verify(short digest) = true, want false")
+	}
+}
+
+// TestVerifyRunsIDKeyForMemoryWithinTheCeilingEvenAbovePinned proves
+// maxArgonMemory is a real ceiling with headroom above argonMemory, not a
+// mirror of it: a hash at 128 MiB — above the 64 MiB Hash itself ever
+// writes, but comfortably inside the 256 MiB ceiling — must still be
+// verified for real (argon2.IDKey actually runs and the result depends on
+// whether the password matches), rather than being refused outright the
+// way TestVerifyRejectsHostileOutOfEnvelopeParams's cases (which exceed
+// the ceiling) are.
+func TestVerifyRunsIDKeyForMemoryWithinTheCeilingEvenAbovePinned(t *testing.T) {
+	const withinCeilingMemory = 128 * 1024 // 128 MiB: > argonMemory, < maxArgonMemory
+	if withinCeilingMemory <= argonMemory {
+		t.Fatal("test setup: withinCeilingMemory must be above the pinned argonMemory")
+	}
+	if withinCeilingMemory >= maxArgonMemory {
+		t.Fatal("test setup: withinCeilingMemory must be below maxArgonMemory")
+	}
+
+	password := "correct horse battery staple"
+	salt := make([]byte, saltLen)
+	if _, err := rand.Read(salt); err != nil {
+		t.Fatalf("generate salt: %v", err)
+	}
+	digest := argon2.IDKey([]byte(password), salt, argonTime, withinCeilingMemory, argonThreads, argonKeyLen)
+	hostile := fmt.Sprintf(
+		"$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s",
+		argon2.Version, withinCeilingMemory, argonTime, argonThreads,
+		base64.RawStdEncoding.EncodeToString(salt),
+		base64.RawStdEncoding.EncodeToString(digest),
+	)
+
+	ok, err := Verify(hostile, password)
+	if err != nil {
+		t.Fatalf("Verify(correct password) error = %v, want nil", err)
+	}
+	if !ok {
+		t.Fatal("Verify(correct password) = false, want true: m=128MiB is within the ceiling, so IDKey should have actually run and matched")
+	}
+
+	ok, err = Verify(hostile, "a completely wrong password")
+	if err != nil {
+		t.Fatalf("Verify(wrong password) error = %v, want nil", err)
+	}
+	if ok {
+		t.Fatal("Verify(wrong password) = true, want false — a genuine mismatch, not a bounds rejection")
 	}
 }
 
