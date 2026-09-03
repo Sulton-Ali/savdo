@@ -185,6 +185,46 @@ func TestServiceLoginRateLimitsByIPAndUsername(t *testing.T) {
 	}
 }
 
+// TestServiceLoginRateLimitsByUsernameCaseInsensitively proves that
+// varying the case of a username (or padding it with whitespace) cannot
+// be used to get extra login attempts past the per-username limiter —
+// users.username is citext, so "Owner1" and "owner1" are the same account
+// as far as GetUserByUsername is concerned, and the limiter must agree.
+func TestServiceLoginRateLimitsByUsernameCaseInsensitively(t *testing.T) {
+	pool := testdb.New(t)
+	testdb.Truncate(t, pool)
+	ctx := context.Background()
+	q := db.New(pool)
+
+	shop := seedShop(ctx, t, q, "shop-a")
+	seedUser(ctx, t, q, shop.ID, "owner1", "correct-horse-battery", db.UserRoleOwner)
+
+	cfg := testConfig()
+	cfg.LoginRateUserPerMin = 2
+	svc := NewService(q, cfg, shop.ID)
+
+	variants := []string{"owner1", "Owner1", "OWNER1", "  owner1  "}
+	for i, username := range variants[:2] {
+		_, err := svc.Login(ctx, username, "wrong-password", db.SessionClientWeb, "", nil)
+		if err == nil || errStatus(t, err) != 401 {
+			t.Fatalf("attempt %d (username=%q): want 401 (still under the rate limit), got %v", i+1, username, err)
+		}
+	}
+
+	// The limit is 2/min; both were consumed above (regardless of case),
+	// so every further variant must be rate limited, not treated as a
+	// fresh bucket.
+	for _, username := range variants[2:] {
+		_, err := svc.Login(ctx, username, "wrong-password", db.SessionClientWeb, "", nil)
+		if err == nil {
+			t.Fatalf("username=%q: error = nil, want RateLimited (case/whitespace variation must share the same bucket)", username)
+		}
+		if got := errStatus(t, err); got != 429 {
+			t.Fatalf("username=%q status = %d, want 429", username, got)
+		}
+	}
+}
+
 func TestServiceRevokeSessionIsIdempotent(t *testing.T) {
 	pool := testdb.New(t)
 	testdb.Truncate(t, pool)

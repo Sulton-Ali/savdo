@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -68,6 +69,16 @@ func ipKey(ip *netip.Addr) string {
 	return ip.String()
 }
 
+// userLimiterKey normalizes username for the per-username rate limiter.
+// users.username is citext (case-insensitive) — GetUserByUsername already
+// matches "Owner1" and "owner1" to the same row — so the limiter must key
+// on the same normalized form; otherwise an attacker could multiply their
+// allowed attempts against one account by varying the case of the
+// username on each request.
+func userLimiterKey(username string) string {
+	return strings.ToLower(strings.TrimSpace(username))
+}
+
 // retryAfterSeconds rounds d up to a whole number of seconds for the 429
 // response's Retry-After (defined in seconds by HTTP, and apierr.RateLimited
 // takes an int).
@@ -95,7 +106,7 @@ func (s *Service) Login(ctx context.Context, username, password string, client d
 	if ok, retryAfter := s.ipLimiter.allow(ipKey(ip), now); !ok {
 		return LoginResult{}, apierr.RateLimited(retryAfterSeconds(retryAfter))
 	}
-	if ok, retryAfter := s.userLimiter.allow(username, now); !ok {
+	if ok, retryAfter := s.userLimiter.allow(userLimiterKey(username), now); !ok {
 		return LoginResult{}, apierr.RateLimited(retryAfterSeconds(retryAfter))
 	}
 
