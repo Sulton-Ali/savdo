@@ -99,6 +99,10 @@
       "kind": "Turi",
       "isDefault": "Asosiy filial",
       "isActive": "Faol"
+    },
+    "kinds": {
+      "store": "Do‘kon",
+      "warehouse": "Ombor"
     }
   },
   "settings": {
@@ -113,10 +117,6 @@
       "defaultLocale": "Standart til",
       "allowNegativeStock": "Manfiy qoldiqqa ruxsat berish",
       "updateCostOnPurchase": "Xaridda tannarxni yangilash"
-    },
-    "kinds": {
-      "store": "Do‘kon",
-      "warehouse": "Ombor"
     }
   }
 }

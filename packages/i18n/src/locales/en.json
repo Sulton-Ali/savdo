@@ -99,6 +99,10 @@
       "kind": "Kind",
       "isDefault": "Default location",
       "isActive": "Active"
+    },
+    "kinds": {
+      "store": "Store",
+      "warehouse": "Warehouse"
     }
   },
   "settings": {
@@ -113,10 +117,6 @@
       "defaultLocale": "Default language",
       "allowNegativeStock": "Allow negative stock",
       "updateCostOnPurchase": "Update cost on purchase"
-    },
-    "kinds": {
-      "store": "Store",
-      "warehouse": "Warehouse"
     }
   }
 }

@@ -103,7 +103,7 @@ export function LocationsPage() {
     {
       title: t("locations.columns.kind"),
       dataIndex: "kind",
-      render: (kind: Location["kind"]) => <Tag>{t(`settings.kinds.${kind}`)}</Tag>,
+      render: (kind: Location["kind"]) => <Tag>{t(`locations.kinds.${kind}`)}</Tag>,
     },
     {
       title: t("locations.columns.default"),
@@ -185,7 +185,7 @@ export function LocationsPage() {
             <Select
               options={LOCATION_KINDS.map((kind) => ({
                 value: kind,
-                label: t(`settings.kinds.${kind}`),
+                label: t(`locations.kinds.${kind}`),
               }))}
             />
           </Form.Item>
@@ -222,7 +222,7 @@ export function LocationsPage() {
               <Select
                 options={LOCATION_KINDS.map((kind) => ({
                   value: kind,
-                  label: t(`settings.kinds.${kind}`),
+                  label: t(`locations.kinds.${kind}`),
                 }))}
               />
             </Form.Item>

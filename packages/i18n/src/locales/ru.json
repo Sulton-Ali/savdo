@@ -99,6 +99,10 @@
       "kind": "Тип",
       "isDefault": "Филиал по умолчанию",
       "isActive": "Активен"
+    },
+    "kinds": {
+      "store": "Магазин",
+      "warehouse": "Склад"
     }
   },
   "settings": {
@@ -113,10 +117,6 @@
       "defaultLocale": "Язык по умолчанию",
       "allowNegativeStock": "Разрешить отрицательный остаток",
       "updateCostOnPurchase": "Обновлять себестоимость при закупке"
-    },
-    "kinds": {
-      "store": "Магазин",
-      "warehouse": "Склад"
     }
   }
 }
