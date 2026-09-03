@@ -28,7 +28,6 @@ accepts or rejects a closed phase.
 - **Never tick a roadmap box** — only `/phase-done` does, after running the Done-when bar.
 - **Reviewers report, never fix. No agent merges its own work.**
 - **Verify versions and APIs against the registry or context7**, never training data.
-  The stack is current as of 2026-09; code that looks wrong may just be newer than you.
 
 Talk to the owner in plain English (CEFR B1/B2). Docs, code and comments in normal
 technical English.
@@ -44,7 +43,7 @@ hard rules.
    instead of picking silently; if unclear, stop and ask.
 2. **Simplicity first.** Minimum code that solves the ask; nothing speculative, no
    single-use abstractions, no unrequested configurability. (ADR-004 tenant-readiness
-   and the ADR-009 LLM adapter are owner-requested, not speculative.)
+   and the ADR-009 LLM adapter are owner-requested: D-02, D-09.)
 3. **Surgical changes.** Touch only what the task needs; match existing style; clean up
    only orphans your change made; mention other dead code, don't delete it.
 4. **Goal-driven execution.** Turn the ask into a verifiable check (test, command,
@@ -52,7 +51,7 @@ hard rules.
 
 ## Docs map
 
-`00-DECISIONS` owner decisions D-xx and open questions Q-xx (read before assuming scope)
+`00-DECISIONS` owner decisions D-xx and open questions Q-xx
 · `01-OVERVIEW` pitch, personas, non-goals · `02-TECH-STACK` pinned versions
 · `03-ARCHITECTURE` layout, flows, ADR-001…014 · `04-DATA-MODEL` schema, ledgers,
 permission matrix, rules · `05-API` conventions and endpoint catalogue
@@ -67,8 +66,7 @@ Go stdlib `net/http` · pgx · sqlc · goose SQL migrations · PostgreSQL (`NUME
 openapi-typescript/openapi-fetch · media on a disk volume behind a `Storage` interface ·
 TanStack Start (`web/`) · Vite + React + TanStack Router/Query + shadcn (`admin/`) · Expo
 + Expo Router + NativeWind (`mobile/`) · `go-telegram/bot` + `internal/ai` adapter
-(`api/cmd/bot`) · i18next with JSON in `packages/i18n` · pnpm, Biome, Vitest,
-Playwright, golangci-lint, testcontainers-go, Make · one VPS, Docker Compose, Caddy.
+(`api/cmd/bot`) · i18next with JSON in `packages/i18n` · one VPS, Docker Compose, Caddy.
 
 ## Conventions
 
@@ -92,7 +90,7 @@ Playwright, golangci-lint, testcontainers-go, Make · one VPS, Docker Compose, C
 1. Every business-table query filters by `shop_id` from the auth context, never from
    the request (ADR-004).
 2. Never `UPDATE stock_levels` directly; stock changes are `stock_movements` written by
-   `stock.Service.Move` in one transaction (ADR-006).
+   `stock.Service.Move` in one transaction; levels are rebuildable from movements (ADR-006).
 3. Never mutate a completed sale; corrections are a void or a return with their own
    movements (ADR-014).
 4. Money is `NUMERIC(14,2)` / decimal, never float; currency from the shop row (ADR-007).
@@ -104,10 +102,12 @@ Playwright, golangci-lint, testcontainers-go, Make · one VPS, Docker Compose, C
 8. Never trust client totals or quantities; compute server-side.
 9. No secret, token, password or key in logs, docs, fixtures or commits; passwords
    argon2id, session tokens stored hashed (ADR-005).
-10. The bot's customer mode answers only through its public-read tools; it never sees
-    cost, quantities, customers, staff or sales (ADR-009).
+10. The bot's customer mode answers only through its public-read tools (products,
+    prices, availability, hours, contacts); it never sees cost, quantities, customers,
+    staff or sales (ADR-009).
 11. No new dependency or version bump without owner approval, checked in the registry.
-12. No LLM call outside the bot handler, and never without rate limits (ADR-009).
+12. No LLM call outside the bot handler, and never without per-chat and per-shop
+    limits (ADR-009).
 
 ## Vendored skills
 
@@ -150,8 +150,6 @@ make generate      # oapi-codegen + sqlc + openapi-typescript; commit the output
 make dev-infra | dev-infra-down | migrate | seed | api | bot
 pnpm --filter admin dev · pnpm --filter web dev · pnpm --filter mobile start
 ```
-
-Current phase: **Phase 0 — Bootstrap** (2026-09-03). No application code yet.
 
 ## MCP
 

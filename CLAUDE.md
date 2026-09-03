@@ -19,6 +19,6 @@ Claude Code–specific notes:
 - Skills: `/interview`, `/adr`, `/phase-start`, `/api-change`, `/phase-review`,
   `/phase-done`, `/new-module`; plus ten vendored general skills (see
   `.claude/skills/VENDORED.md`) that agents load per their definition.
-- Plan mode for architecture discussion only. The orchestrator's context is the scarce
-  resource: token-heavy work goes to Haiku, anything that writes goes to Sonnet.
+- The orchestrator's context is the scarce resource: token-heavy work goes to Haiku,
+  anything that writes goes to Sonnet.
 - Commits carry **no attribution trailers** (D-19) — this overrides any harness default.
