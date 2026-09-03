@@ -1,6 +1,9 @@
 SHELL := /usr/bin/env bash
 COMPOSE := docker compose -f infra/docker-compose.yml
 
+GOLANGCI_LINT_VERSION := v2.13.2
+GOLANGCI_LINT := api/bin/golangci-lint
+
 .PHONY: verify format-check lint typecheck generate generate-check test guards \
         verify-go test-go test-ts \
         dev-infra dev-infra-down migrate seed api bot
@@ -11,25 +14,45 @@ verify: format-check lint typecheck generate-check test guards
 ## format-check: Biome (TS) + gofmt (Go), check only, no writes.
 format-check:
 	pnpm exec biome ci .
-	@if [ -f api/go.mod ]; then \
-		unformatted="$$(gofmt -l ./api)"; \
-		if [ -n "$$unformatted" ]; then \
-			echo "gofmt: files not formatted:"; echo "$$unformatted"; exit 1; \
-		fi; \
-	else \
-		echo "skip: api/ not scaffolded yet (Phase 0 T2)"; \
-	fi
+	cd api && test -z "$$(gofmt -l .)"
 
 ## lint: golangci-lint (Go). Biome's lint pass already ran as part of
 ## `biome ci` in format-check, so it is not repeated here.
 lint: verify-go
 
-verify-go:
-	@if [ -f api/go.mod ]; then \
-		cd api && go tool golangci-lint run ./...; \
-	else \
-		echo "skip: api/ not scaffolded yet (Phase 0 T2)"; \
-	fi
+verify-go: $(GOLANGCI_LINT)
+	cd api && bin/golangci-lint run ./...
+
+## $(GOLANGCI_LINT): install the pinned golangci-lint binary into api/bin
+## (gitignored) if it is not already there. We do not shell out to the
+## project's own install.sh: its checksum lookup greps the checksums file
+## for the tarball's basename, which is now also a substring of the
+## published "<tarball>.sbom.json" line, so it always compares the wanted
+## hash (2 matches, wrong) against the actual one and fails. Downloading
+## and verifying the release asset directly avoids that upstream bug.
+$(GOLANGCI_LINT):
+	@mkdir -p api/bin
+	@os="$$(uname -s | tr '[:upper:]' '[:lower:]')"; \
+	arch="$$(uname -m)"; \
+	case "$$arch" in \
+		x86_64) arch=amd64 ;; \
+		aarch64|arm64) arch=arm64 ;; \
+	esac; \
+	asset="golangci-lint-2.13.2-$$os-$$arch"; \
+	base_url="https://github.com/golangci/golangci-lint/releases/download/$(GOLANGCI_LINT_VERSION)"; \
+	tmpdir="$$(mktemp -d)"; \
+	trap 'rm -rf "$$tmpdir"' EXIT; \
+	echo "installing golangci-lint $(GOLANGCI_LINT_VERSION) ($$asset) into api/bin"; \
+	curl -sSfL -o "$$tmpdir/$$asset.tar.gz" "$$base_url/$$asset.tar.gz"; \
+	curl -sSfL -o "$$tmpdir/checksums.txt" "$$base_url/golangci-lint-2.13.2-checksums.txt"; \
+	want="$$(awk -v f="$$asset.tar.gz" '$$2 == f {print $$1}' "$$tmpdir/checksums.txt")"; \
+	got="$$(sha256sum "$$tmpdir/$$asset.tar.gz" | cut -d' ' -f1)"; \
+	if [ -z "$$want" ] || [ "$$want" != "$$got" ]; then \
+		echo "golangci-lint checksum verification failed (want=$$want got=$$got)"; exit 1; \
+	fi; \
+	tar -xzf "$$tmpdir/$$asset.tar.gz" -C "$$tmpdir"; \
+	cp "$$tmpdir/$$asset/golangci-lint" api/bin/golangci-lint; \
+	chmod +x api/bin/golangci-lint
 
 ## typecheck: TypeScript project references across the workspace.
 typecheck:
@@ -37,11 +60,8 @@ typecheck:
 
 ## generate: oapi-codegen + sqlc (Go) and openapi-typescript (TS client).
 generate:
-	@if [ -f api/go.mod ]; then \
-		cd api && go generate ./...; \
-	else \
-		echo "skip: api/ not scaffolded yet (Phase 0 T2)"; \
-	fi
+	cd api && go tool sqlc generate
+	# oapi-codegen (contracts/openapi.yaml -> api/gen) is wired in T3.
 	pnpm --filter @savdo/api-client --if-present generate
 
 ## generate-check: generated code must be committed and fresh.
@@ -52,11 +72,7 @@ generate-check: generate
 test: test-go test-ts
 
 test-go:
-	@if [ -f api/go.mod ]; then \
-		cd api && go test ./...; \
-	else \
-		echo "skip: api/ not scaffolded yet (Phase 0 T2)"; \
-	fi
+	cd api && go test ./...
 
 test-ts:
 	pnpm -r --if-present test
@@ -75,34 +91,28 @@ dev-infra:
 dev-infra-down:
 	$(COMPOSE) down
 
-## migrate: run goose SQL migrations against DATABASE_URL.
+## migrate: run goose SQL migrations (via the savdo CLI) against DATABASE_URL.
 migrate:
-	@if [ -f api/go.mod ]; then \
-		cd api && go tool goose up; \
-	else \
-		echo "skip: api/ not scaffolded yet (Phase 0 T2)"; \
-	fi
+	@set -a; . infra/.env; set +a; \
+	cd api && go run ./cmd/savdo migrate up
 
 ## seed: load development seed data.
 seed:
-	@if [ -f api/go.mod ]; then \
+	@if [ -d api/cmd/seed ]; then \
 		cd api && go run ./cmd/seed; \
 	else \
-		echo "skip: api/ not scaffolded yet (Phase 0 T2)"; \
+		echo "skip: cmd/seed not implemented yet (Phase 1)"; \
 	fi
 
 ## api: run the API server.
 api:
-	@if [ -f api/go.mod ]; then \
-		cd api && go run ./cmd/api; \
-	else \
-		echo "skip: api/ not scaffolded yet (Phase 0 T2)"; \
-	fi
+	@set -a; . infra/.env; set +a; \
+	cd api && go run ./cmd/api
 
 ## bot: run the Telegram bot.
 bot:
-	@if [ -f api/go.mod ]; then \
+	@if [ -d api/cmd/bot ]; then \
 		cd api && go run ./cmd/bot; \
 	else \
-		echo "skip: api/ not scaffolded yet (Phase 0 T2)"; \
+		echo "skip: cmd/bot not implemented yet (Phase 7)"; \
 	fi
