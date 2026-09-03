@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Alert, Button, Card, Form, Input, Tag } from "antd";
+import { Alert, Button, Card, Form, Input } from "antd";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -69,7 +69,9 @@ export function LoginPage() {
             showIcon
             message={t(`auth.errors.${errorKey}`)}
             description={
-              retryAfterSeconds != null ? <Tag>{`~${retryAfterSeconds}s`}</Tag> : undefined
+              retryAfterSeconds != null
+                ? t("auth.errors.retryAfter", { seconds: retryAfterSeconds })
+                : undefined
             }
           />
         )}

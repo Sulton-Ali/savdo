@@ -122,6 +122,6 @@ describe("LoginPage", () => {
     fireEvent.click(screen.getByRole("button", { name: /sign in/i }));
 
     expect(await screen.findByText(/too many attempts/i)).toBeTruthy();
-    expect(await screen.findByText("~30s")).toBeTruthy();
+    expect(await screen.findByText("Try again in 30s")).toBeTruthy();
   });
 });
