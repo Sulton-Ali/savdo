@@ -32,10 +32,22 @@ const maxKeyLen = 64
 // running it on every allow() call would itself become the bottleneck
 // under a distributed attack hammering many distinct keys. evict only
 // actually runs when the map has grown large enough to matter or enough
-// time has passed since the last sweep — whichever comes first.
+// time has passed since the last sweep — whichever comes first — subject
+// to minEvictGap below.
+//
+// minEvictGap is a hard floor under both of those triggers. Without it,
+// once the map is sitting above evictSizeThreshold, the size disjunct
+// alone would re-fire on *every single* allow() call for as long as the
+// map stays that large: eviction only removes keys older than staleAfter,
+// so a sustained attack using many fresh (non-stale) keys keeps the map
+// above the threshold indefinitely, and "size > threshold" would
+// otherwise re-trigger the O(n) scan on every call — defeating the whole
+// point of amortizing it. minEvictGap guarantees at least this long
+// between two scans regardless of which condition tripped.
 const (
 	evictInterval      = 10 * time.Second
 	evictSizeThreshold = 10_000
+	minEvictGap        = 1 * time.Second
 )
 
 // loginLimiter is a fixed-window counter keyed by an arbitrary string (an
@@ -75,7 +87,7 @@ func (l *loginLimiter) allow(key string, now time.Time) (ok bool, retryAfter tim
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	if len(l.counts) > evictSizeThreshold || now.Sub(l.lastEvict) >= evictInterval {
+	if l.shouldEvict(now) {
 		l.evict(now)
 		l.lastEvict = now
 	}
@@ -96,6 +108,17 @@ func (l *loginLimiter) allow(key string, now time.Time) (ok bool, retryAfter tim
 
 	w.count++
 	return true, 0
+}
+
+// shouldEvict decides whether evict should run now, given the two triggers
+// (map size, elapsed time) and the minEvictGap floor under both of them.
+// Called with l.mu already held.
+func (l *loginLimiter) shouldEvict(now time.Time) bool {
+	sinceLastEvict := now.Sub(l.lastEvict)
+	if sinceLastEvict < minEvictGap {
+		return false
+	}
+	return len(l.counts) > evictSizeThreshold || sinceLastEvict >= evictInterval
 }
 
 // evict drops windows old enough that they can no longer affect a future

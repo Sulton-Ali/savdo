@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -106,6 +107,47 @@ func TestLoginLimiterEvictionIsThrottled(t *testing.T) {
 	l.allow("carol", now.Add(evictInterval+time.Millisecond))
 	if _, exists := l.counts["alice"]; exists {
 		t.Fatal("expected alice's stale window to be evicted once evictInterval elapsed")
+	}
+}
+
+// TestLoginLimiterEvictionHasAMinimumGapEvenAboveSizeThreshold proves the
+// size trigger alone cannot make evict re-run on every call: once the map
+// is above evictSizeThreshold, two allow() calls within minEvictGap of
+// each other must produce exactly one evict, not two. Without the floor,
+// a sustained attack using many fresh (non-stale, so never actually
+// evicted) keys would keep the map above the threshold forever, making
+// every single allow() call pay for a full O(n) scan — exactly the cost
+// evictInterval/evictSizeThreshold exist to amortize away.
+func TestLoginLimiterEvictionHasAMinimumGapEvenAboveSizeThreshold(t *testing.T) {
+	l := newLoginLimiter(1000)
+	now := time.Now()
+
+	// Populate more than evictSizeThreshold fresh (non-stale) entries
+	// directly, so the size trigger is active for the whole test — evict
+	// itself never removes any of them (they're all "now", not stale).
+	for i := 0; i < evictSizeThreshold+10; i++ {
+		l.counts[strconv.Itoa(i)] = &window{start: now, count: 1}
+	}
+
+	l.allow("first", now)
+	firstEvict := l.lastEvict
+	if firstEvict.IsZero() {
+		t.Fatal("expected the first call (lastEvict was the zero value) to run evict")
+	}
+
+	// Second call well within minEvictGap: must NOT trigger another scan,
+	// even though the map is still (and will remain) above the size
+	// threshold.
+	l.allow("second", now.Add(minEvictGap/2))
+	if !l.lastEvict.Equal(firstEvict) {
+		t.Fatalf("lastEvict changed on a 2nd call within minEvictGap (%v -> %v); the size trigger must not re-fire before the floor elapses", firstEvict, l.lastEvict)
+	}
+
+	// Once minEvictGap has elapsed, the size trigger is allowed to fire
+	// again.
+	l.allow("third", now.Add(minEvictGap+time.Millisecond))
+	if l.lastEvict.Equal(firstEvict) {
+		t.Fatal("lastEvict did not advance once minEvictGap elapsed with the map still above the size threshold")
 	}
 }
 
