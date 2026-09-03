@@ -1,0 +1,251 @@
+package auth
+
+import (
+	"crypto/rand"
+	"encoding/base64"
+	"fmt"
+	"strings"
+	"testing"
+	"time"
+
+	"golang.org/x/crypto/argon2"
+
+	"github.com/Sulton-Ali/savdo/api/internal/apierr"
+)
+
+func TestHashVerifyRoundTrip(t *testing.T) {
+	hash, err := Hash("correct horse battery staple")
+	if err != nil {
+		t.Fatalf("Hash() error = %v", err)
+	}
+
+	ok, err := Verify(hash, "correct horse battery staple")
+	if err != nil {
+		t.Fatalf("Verify() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("Verify() = false, want true for the correct password")
+	}
+}
+
+func TestVerifyRejectsWrongPassword(t *testing.T) {
+	hash, err := Hash("correct horse battery staple")
+	if err != nil {
+		t.Fatalf("Hash() error = %v", err)
+	}
+
+	ok, err := Verify(hash, "wrong password entirely")
+	if err != nil {
+		t.Fatalf("Verify() error = %v", err)
+	}
+	if ok {
+		t.Fatal("Verify() = true, want false for a wrong password")
+	}
+}
+
+func TestHashProducesThePHCFormat(t *testing.T) {
+	hash, err := Hash("correct horse battery staple")
+	if err != nil {
+		t.Fatalf("Hash() error = %v", err)
+	}
+
+	parts := strings.Split(hash, "$")
+	if len(parts) != 6 {
+		t.Fatalf("hash has %d $-separated parts, want 6: %q", len(parts), hash)
+	}
+	if parts[0] != "" || parts[1] != "argon2id" {
+		t.Fatalf("hash prefix = %q/%q, want empty/argon2id", parts[0], parts[1])
+	}
+	if parts[2] != "v=19" {
+		t.Fatalf("version segment = %q, want v=19", parts[2])
+	}
+	if parts[3] != "m=65536,t=3,p=4" {
+		t.Fatalf("params segment = %q, want m=65536,t=3,p=4", parts[3])
+	}
+	if parts[4] == "" || parts[5] == "" {
+		t.Fatalf("salt or hash segment empty: %q", hash)
+	}
+}
+
+func TestHashSaltsEveryCall(t *testing.T) {
+	h1, err := Hash("same password")
+	if err != nil {
+		t.Fatalf("Hash() error = %v", err)
+	}
+	h2, err := Hash("same password")
+	if err != nil {
+		t.Fatalf("Hash() error = %v", err)
+	}
+	if h1 == h2 {
+		t.Fatal("two Hash() calls for the same password produced identical output — salt is not random")
+	}
+}
+
+func TestHashRejectsShortPasswords(t *testing.T) {
+	_, err := Hash("short1")
+	if err == nil {
+		t.Fatal("Hash() error = nil, want a validation error for a 6-character password")
+	}
+	apiErr, ok := err.(*apierr.Error)
+	if !ok {
+		t.Fatalf("Hash() error type = %T, want *apierr.Error", err)
+	}
+	if apiErr.Status != 400 {
+		t.Fatalf("Hash() error status = %d, want 400", apiErr.Status)
+	}
+	if _, hasField := apiErr.Details["fields"].(map[string]string)["password"]; !hasField {
+		t.Fatalf("Hash() error details = %+v, want a \"password\" field", apiErr.Details)
+	}
+}
+
+func TestVerifyRejectsMalformedHash(t *testing.T) {
+	_, err := Verify("not-a-hash-at-all", "anything")
+	if err == nil {
+		t.Fatal("Verify() error = nil, want an error for a malformed hash")
+	}
+}
+
+// TestVerifyRejectsHostileOutOfEnvelopeParams proves Verify never calls
+// argon2.IDKey with parameters outside the pinned envelope
+// (maxArgonMemory/maxArgonTime/maxArgonThreads, saltLen, argonKeyLen) — a
+// hash carrying, say, an absurd memory cost is treated exactly like a
+// wrong password (ok=false, err=nil), not run through argon2 at all. A
+// real IDKey call at these hostile parameters would either take far
+// longer than the assertion below allows or try to allocate gigabytes;
+// this test's near-instant completion is itself the proof IDKey never ran.
+func TestVerifyRejectsHostileOutOfEnvelopeParams(t *testing.T) {
+	genuine, err := Hash("correct horse battery staple")
+	if err != nil {
+		t.Fatalf("Hash() error = %v", err)
+	}
+	parts := strings.Split(genuine, "$")
+	if len(parts) != 6 {
+		t.Fatalf("genuine hash has %d parts, want 6: %q", len(parts), genuine)
+	}
+
+	tests := []struct {
+		name   string
+		params string
+	}{
+		{"memory way over the pinned ceiling", "m=4000000000,t=3,p=4"},
+		{"time way over the pinned ceiling", "m=65536,t=1000000,p=4"},
+		{"threads over the pinned ceiling", "m=65536,t=3,p=200"},
+		{"zero memory", "m=0,t=3,p=4"},
+		{"zero time", "m=65536,t=0,p=4"},
+		{"zero threads", "m=65536,t=3,p=0"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hostile := strings.Join([]string{parts[0], parts[1], parts[2], tt.params, parts[4], parts[5]}, "$")
+
+			start := time.Now()
+			ok, err := Verify(hostile, "correct horse battery staple")
+			elapsed := time.Since(start)
+
+			if err != nil {
+				t.Fatalf("Verify() error = %v, want nil (an out-of-envelope hash is a failed credential, not an error)", err)
+			}
+			if ok {
+				t.Fatal("Verify() = true, want false for an out-of-envelope hash")
+			}
+			if elapsed > 100*time.Millisecond {
+				t.Fatalf("Verify() took %v, want near-instant — argon2.IDKey must never run with out-of-envelope params", elapsed)
+			}
+		})
+	}
+}
+
+// TestVerifyRejectsWrongSaltOrDigestLength proves a hash whose salt or
+// digest length doesn't match the pinned envelope (saltLen, argonKeyLen)
+// is treated as a failed credential, not an error — and, for the salt
+// case, never reaches argon2.IDKey.
+func TestVerifyRejectsWrongSaltOrDigestLength(t *testing.T) {
+	genuine, err := Hash("correct horse battery staple")
+	if err != nil {
+		t.Fatalf("Hash() error = %v", err)
+	}
+	parts := strings.Split(genuine, "$")
+
+	shortSalt := strings.Join([]string{parts[0], parts[1], parts[2], parts[3], "dG9vc2hvcnQ", parts[5]}, "$")
+	ok, err := Verify(shortSalt, "correct horse battery staple")
+	if err != nil {
+		t.Fatalf("Verify(short salt) error = %v, want nil", err)
+	}
+	if ok {
+		t.Fatal("Verify(short salt) = true, want false")
+	}
+
+	shortDigest := strings.Join([]string{parts[0], parts[1], parts[2], parts[3], parts[4], "dG9vc2hvcnQ"}, "$")
+	ok, err = Verify(shortDigest, "correct horse battery staple")
+	if err != nil {
+		t.Fatalf("Verify(short digest) error = %v, want nil", err)
+	}
+	if ok {
+		t.Fatal("Verify(short digest) = true, want false")
+	}
+}
+
+// TestVerifyRunsIDKeyForMemoryWithinTheCeilingEvenAbovePinned proves
+// maxArgonMemory is a real ceiling with headroom above argonMemory, not a
+// mirror of it: a hash at 128 MiB — above the 64 MiB Hash itself ever
+// writes, but comfortably inside the 256 MiB ceiling — must still be
+// verified for real (argon2.IDKey actually runs and the result depends on
+// whether the password matches), rather than being refused outright the
+// way TestVerifyRejectsHostileOutOfEnvelopeParams's cases (which exceed
+// the ceiling) are.
+func TestVerifyRunsIDKeyForMemoryWithinTheCeilingEvenAbovePinned(t *testing.T) {
+	const withinCeilingMemory = 128 * 1024 // 128 MiB: > argonMemory, < maxArgonMemory
+	if withinCeilingMemory <= argonMemory {
+		t.Fatal("test setup: withinCeilingMemory must be above the pinned argonMemory")
+	}
+	if withinCeilingMemory >= maxArgonMemory {
+		t.Fatal("test setup: withinCeilingMemory must be below maxArgonMemory")
+	}
+
+	password := "correct horse battery staple"
+	salt := make([]byte, saltLen)
+	if _, err := rand.Read(salt); err != nil {
+		t.Fatalf("generate salt: %v", err)
+	}
+	digest := argon2.IDKey([]byte(password), salt, argonTime, withinCeilingMemory, argonThreads, argonKeyLen)
+	hostile := fmt.Sprintf(
+		"$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s",
+		argon2.Version, withinCeilingMemory, argonTime, argonThreads,
+		base64.RawStdEncoding.EncodeToString(salt),
+		base64.RawStdEncoding.EncodeToString(digest),
+	)
+
+	ok, err := Verify(hostile, password)
+	if err != nil {
+		t.Fatalf("Verify(correct password) error = %v, want nil", err)
+	}
+	if !ok {
+		t.Fatal("Verify(correct password) = false, want true: m=128MiB is within the ceiling, so IDKey should have actually run and matched")
+	}
+
+	ok, err = Verify(hostile, "a completely wrong password")
+	if err != nil {
+		t.Fatalf("Verify(wrong password) error = %v, want nil", err)
+	}
+	if ok {
+		t.Fatal("Verify(wrong password) = true, want false — a genuine mismatch, not a bounds rejection")
+	}
+}
+
+func TestDummyHashIsAValidHashNoRealPasswordMatches(t *testing.T) {
+	hash := dummyHash()
+
+	ok, err := Verify(hash, "some guess an attacker might try")
+	if err != nil {
+		t.Fatalf("Verify(dummyHash, ...) error = %v, want no error (dummyHash must be well-formed)", err)
+	}
+	if ok {
+		t.Fatal("Verify(dummyHash, ...) = true, want false: nothing should match the dummy hash")
+	}
+
+	// Calling dummyHash twice must return the same value (computed once).
+	if dummyHash() != hash {
+		t.Fatal("dummyHash() is not stable across calls")
+	}
+}

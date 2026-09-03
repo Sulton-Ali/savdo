@@ -27,6 +27,7 @@ func TestLoad(t *testing.T) {
 				LoginRateIPPerMin:   10,
 				LoginRateUserPerMin: 5,
 				CookieSecure:        false,
+				ShopSlug:            "savdo-demo",
 			},
 		},
 		{
@@ -46,6 +47,7 @@ func TestLoad(t *testing.T) {
 				"LOGIN_RATE_IP_PER_MIN":   "20",
 				"LOGIN_RATE_USER_PER_MIN": "3",
 				"COOKIE_SECURE":           "false",
+				"SHOP_SLUG":               "acme-shop",
 			},
 			want: Config{
 				Addr:                ":9090",
@@ -59,6 +61,7 @@ func TestLoad(t *testing.T) {
 				// COOKIE_SECURE explicitly "false" must win over the prod
 				// default of true.
 				CookieSecure: false,
+				ShopSlug:     "acme-shop",
 			},
 		},
 		{
@@ -77,6 +80,7 @@ func TestLoad(t *testing.T) {
 				LoginRateIPPerMin:   10,
 				LoginRateUserPerMin: 5,
 				CookieSecure:        true,
+				ShopSlug:            "savdo-demo",
 			},
 		},
 	}

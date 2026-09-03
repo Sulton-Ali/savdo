@@ -34,6 +34,13 @@ type Config struct {
 	// envDefault tag: Load applies the dev/prod-dependent default itself,
 	// below, only when the variable was not set at all.
 	CookieSecure bool `env:"COOKIE_SECURE"`
+
+	// ShopSlug names the one shop this single-shop MVP serves
+	// (docs/03-ARCHITECTURE.md § Auth spec: "Shop resolution"). cmd/api
+	// resolves it to a shop id once at startup via GetShopBySlug and
+	// fails fast if no such shop exists. A future multi-tenant version
+	// replaces this with per-request host/slug resolution (ADR-004).
+	ShopSlug string `env:"SHOP_SLUG" envDefault:"savdo-demo"`
 }
 
 // Load parses the environment into a Config, applying defaults. It fails

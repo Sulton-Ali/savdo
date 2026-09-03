@@ -12,6 +12,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
+	"github.com/Sulton-Ali/savdo/api/internal/auth"
 	"github.com/Sulton-Ali/savdo/api/internal/config"
 	"github.com/Sulton-Ali/savdo/api/internal/db"
 	"github.com/Sulton-Ali/savdo/api/internal/httpx"
@@ -47,9 +50,27 @@ func run() error {
 	}
 	defer pool.Close()
 
+	queries := db.New(pool)
+
+	// Resolve the one shop this MVP serves (docs/03-ARCHITECTURE.md §
+	// Auth spec: "Shop resolution"). A future multi-tenant version
+	// replaces this with per-request host/slug resolution (ADR-004); for
+	// now, failing fast here — rather than lazily on the first request —
+	// means a misconfigured or unseeded deployment never serves traffic
+	// at all.
+	shop, err := queries.GetShopBySlug(ctx, cfg.ShopSlug)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("no shop with slug %q — run `savdo seed`", cfg.ShopSlug)
+		}
+		return fmt.Errorf("load shop %q: %w", cfg.ShopSlug, err)
+	}
+
+	authSvc := auth.NewService(queries, cfg, shop.ID)
+
 	srv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           httpx.NewRouter(logger, pool),
+		Handler:           httpx.NewRouter(logger, pool, authSvc),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      15 * time.Second,

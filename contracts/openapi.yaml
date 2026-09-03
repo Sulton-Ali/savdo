@@ -737,8 +737,10 @@ components:
       properties:
         username:
           type: string
+          maxLength: 64
         password:
           type: string
+          maxLength: 128
         client:
           $ref: "#/components/schemas/SessionClient"
 
@@ -788,9 +790,11 @@ components:
       properties:
         username:
           type: string
+          maxLength: 64
         password:
           type: string
           minLength: 8
+          maxLength: 128
         fullName:
           type: string
         phone:
@@ -823,6 +827,7 @@ components:
         password:
           type: string
           minLength: 8
+          maxLength: 128
 
   parameters:
     Limit:
