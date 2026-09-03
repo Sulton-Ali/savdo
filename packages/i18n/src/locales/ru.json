@@ -7,11 +7,38 @@
     "loading": "Загрузка…",
     "error": "Произошла ошибка",
     "save": "Сохранить",
-    "cancel": "Отмена"
+    "cancel": "Отмена",
+    "comingSoon": "Скоро появится"
   },
   "lang": {
     "uz": "Oʻzbekcha",
     "ru": "Русский",
-    "en": "English"
+    "en": "English",
+    "switch": "Выберите язык"
+  },
+  "nav": {
+    "dashboard": "Панель управления",
+    "staff": "Сотрудники",
+    "locations": "Филиалы",
+    "settings": "Настройки"
+  },
+  "auth": {
+    "login": {
+      "title": "Вход в систему",
+      "username": "Имя пользователя",
+      "password": "Пароль",
+      "submit": "Войти"
+    },
+    "errors": {
+      "invalidCredentials": "Неверное имя пользователя или пароль",
+      "rateLimited": "Слишком много попыток. Повторите позже",
+      "generic": "Произошла ошибка. Попробуйте снова"
+    },
+    "logout": "Выйти"
+  },
+  "roles": {
+    "owner": "Владелец",
+    "manager": "Менеджер",
+    "cashier": "Кассир"
   }
 }

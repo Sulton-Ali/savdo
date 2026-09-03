@@ -7,11 +7,38 @@
     "loading": "Yuklanmoqda…",
     "error": "Xatolik yuz berdi",
     "save": "Saqlash",
-    "cancel": "Bekor qilish"
+    "cancel": "Bekor qilish",
+    "comingSoon": "Tez orada"
   },
   "lang": {
     "uz": "Oʻzbekcha",
     "ru": "Русский",
-    "en": "English"
+    "en": "English",
+    "switch": "Tilni tanlang"
+  },
+  "nav": {
+    "dashboard": "Boshqaruv paneli",
+    "staff": "Xodimlar",
+    "locations": "Filiallar",
+    "settings": "Sozlamalar"
+  },
+  "auth": {
+    "login": {
+      "title": "Tizimga kirish",
+      "username": "Foydalanuvchi nomi",
+      "password": "Parol",
+      "submit": "Kirish"
+    },
+    "errors": {
+      "invalidCredentials": "Foydalanuvchi nomi yoki parol noto‘g‘ri",
+      "rateLimited": "Juda ko‘p urinish. Birozdan so‘ng qayta urinib ko‘ring",
+      "generic": "Xatolik yuz berdi. Qayta urinib ko‘ring"
+    },
+    "logout": "Chiqish"
+  },
+  "roles": {
+    "owner": "Egasi",
+    "manager": "Menejer",
+    "cashier": "Kassir"
   }
 }
