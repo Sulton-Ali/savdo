@@ -15,8 +15,10 @@ linters:
       - gen/
       - internal/db/
     rules:
-      # Local dev DSNs in tests (e.g. postgres://savdo:savdo@...) are not
-      # secrets; they match infra/.env.example on purpose.
+      # gosec G101 flags local dev DSNs in tests (e.g. postgres://savdo:savdo@...)
+      # as hardcoded credentials; they match infra/.env.example on purpose.
+      # Only G101 is excluded here — other gosec checks stay active in tests.
       - path: _test\.go
         linters:
           - gosec
+        text: "G101"
