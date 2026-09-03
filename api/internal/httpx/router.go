@@ -11,6 +11,8 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/Sulton-Ali/savdo/api/gen"
 	"github.com/Sulton-Ali/savdo/api/internal/apierr"
 )
@@ -19,11 +21,12 @@ import (
 // generated strict handler onto a stdlib ServeMux (Go 1.22 method+path
 // patterns), under the "/v1" base the spec's `servers` entry declares, all
 // wrapped in panic-recovery, request-id and request-logging middleware
-// (outermost to innermost, in that order).
-func NewRouter(logger *slog.Logger) http.Handler {
+// (outermost to innermost, in that order). pool backs GET /readyz's DB
+// check; it may be nil in tests that never exercise that route.
+func NewRouter(logger *slog.Logger, pool *pgxpool.Pool) http.Handler {
 	mux := http.NewServeMux()
 
-	strictHandler := gen.NewStrictHandlerWithOptions(server{}, nil, gen.StrictHTTPServerOptions{
+	strictHandler := gen.NewStrictHandlerWithOptions(server{pool: pool}, nil, gen.StrictHTTPServerOptions{
 		RequestErrorHandlerFunc:  writeRequestError,
 		ResponseErrorHandlerFunc: func(w http.ResponseWriter, _ *http.Request, err error) { apierr.Write(w, err) },
 	})

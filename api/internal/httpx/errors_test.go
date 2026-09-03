@@ -15,7 +15,7 @@ import (
 // handler ever runs — a malformed body never reaches the
 // notImplementedResponse stub, which would otherwise answer INTERNAL.
 func TestMalformedRequestBody(t *testing.T) {
-	router := NewRouter(testLogger())
+	router := NewRouter(testLogger(), nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/auth/login", strings.NewReader("{bad"))
 	req.Header.Set("Content-Type", "application/json")
