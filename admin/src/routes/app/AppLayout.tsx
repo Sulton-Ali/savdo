@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { AuthProvider, useAuth } from "../../auth/AuthContext";
+import { useMe } from "../../auth/useMe";
 import { LanguageSwitcher } from "../../components/LanguageSwitcher";
 import { authenticatedRoute } from "./authenticatedRoute";
 
@@ -21,7 +22,17 @@ interface NavItem {
 
 function AppShell() {
   const { t } = useTranslation();
-  const { me, can, logout } = useAuth();
+  const { me: routeMe, can, logout } = useAuth();
+  // `routeMe` is the `beforeLoad` snapshot from when this route match was
+  // last (re)loaded — it does not update on its own when `["auth", "me"]`
+  // is invalidated (e.g. after a settings save). Read the live query for
+  // display so the shop name/user in the shell stay current; fall back to
+  // the route snapshot for the very first render, before this subscription
+  // has a value of its own (it won't in practice, since `beforeLoad`
+  // already primed the same cache entry, but this keeps the shell correct
+  // even if that entry were ever evicted).
+  const { data: liveMe } = useMe();
+  const me = liveMe ?? routeMe;
   const pathname = useRouterState({ select: (state) => state.location.pathname });
 
   const navItems: NavItem[] = [

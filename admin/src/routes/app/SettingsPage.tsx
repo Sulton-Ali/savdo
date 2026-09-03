@@ -1,5 +1,6 @@
 import { locales } from "@savdo/i18n";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "@tanstack/react-router";
 import { App, Button, Card, Form, Input, Select, Skeleton, Switch } from "antd";
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
@@ -30,6 +31,7 @@ export function SettingsPage() {
   const { t } = useTranslation();
   const { notification } = App.useApp();
   const queryClient = useQueryClient();
+  const router = useRouter();
   const [form] = Form.useForm<SettingsFormValues>();
 
   const { data: shop, isPending } = useQuery({ queryKey: ["shop"], queryFn: fetchShop });
@@ -54,6 +56,12 @@ export function SettingsPage() {
     onSuccess: async (updated) => {
       queryClient.setQueryData(["shop"], updated);
       await queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
+      // The sider reads `me.shop.name` from a live `useMe()` subscription
+      // (AppLayout), which the invalidate above already refreshes. Also
+      // re-run `beforeLoad` so `authenticatedRoute`'s route context — the
+      // `me` used for permission checks — is not left holding a stale
+      // snapshot from before this save.
+      await router.invalidate();
       notification.success({ title: t("settings.saved") });
     },
     onError: (error) => {

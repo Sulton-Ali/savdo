@@ -1,4 +1,10 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  createMemoryHistory,
+  createRoute,
+  createRouter,
+  RouterProvider,
+} from "@tanstack/react-router";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { App as AntApp } from "antd";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -9,6 +15,7 @@ vi.mock("../../../lib/api", () => ({
 
 import { i18next } from "../../../i18n";
 import { api } from "../../../lib/api";
+import { rootRoute } from "../../root";
 import { SettingsPage } from "../SettingsPage";
 
 const mockedApi = vi.mocked(api, { deep: true });
@@ -24,12 +31,28 @@ const shop = {
   updateCostOnPurchase: true,
 };
 
+/**
+ * `SettingsPage` calls `useRouter()` (to `router.invalidate()` after a save,
+ * so `authenticatedRoute`'s `beforeLoad` snapshot isn't left stale), which
+ * requires a `RouterProvider` ancestor — a minimal single-route tree stands
+ * in for the full `authenticatedRoute` chain the app actually uses.
+ */
 function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const settingsTestRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/",
+    component: SettingsPage,
+  });
+  const router = createRouter({
+    routeTree: rootRoute.addChildren([settingsTestRoute]),
+    context: { queryClient },
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+  });
   return render(
     <QueryClientProvider client={queryClient}>
       <AntApp>
-        <SettingsPage />
+        <RouterProvider router={router} />
       </AntApp>
     </QueryClientProvider>,
   );
