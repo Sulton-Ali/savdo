@@ -28,7 +28,7 @@ func TestHealthz(t *testing.T) {
 			name:       "GET returns ok",
 			method:     http.MethodGet,
 			wantStatus: http.StatusOK,
-			wantBody:   &gen.Healthz{Status: gen.Ok},
+			wantBody:   &gen.Healthz{Status: gen.HealthzStatusOk},
 		},
 		{
 			// The generated std-http-server mux (Go 1.22 method+path

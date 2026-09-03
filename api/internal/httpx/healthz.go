@@ -12,7 +12,8 @@ import (
 type server struct{}
 
 // GetHealthz reports the process is up. It does not touch the database —
-// that is GET /readyz, added once cmd/api opens a pool (Phase 1).
+// that is GET /readyz, contract-defined in Phase 1 (T1) and implemented
+// once cmd/api opens a pool (T3/T4/T5).
 func (server) GetHealthz(_ context.Context, _ gen.GetHealthzRequestObject) (gen.GetHealthzResponseObject, error) {
-	return gen.GetHealthz200JSONResponse(gen.Healthz{Status: gen.Ok}), nil
+	return gen.GetHealthz200JSONResponse(gen.Healthz{Status: gen.HealthzStatusOk}), nil
 }

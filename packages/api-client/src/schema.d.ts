@@ -24,6 +24,243 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/readyz": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Readiness check.
+         * @description Reports whether the API's dependencies (currently the database) are reachable. Used by the orchestrator/deploy tooling, not by clients.
+         */
+        get: operations["getReadyz"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Authenticate with username and password.
+         * @description For `client: web`, sets the `savdo_session` cookie and omits `token`. For `client: mobile`, returns `token` for the caller to send as `Authorization: Bearer <token>`; no cookie is set (D-29).
+         */
+        post: operations["login"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revoke the current session. */
+        post: operations["logout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The authenticated user, their shop and their permissions. */
+        get: operations["getMe"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The authenticated user's own sessions. */
+        get: operations["listSessions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/sessions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revoke one of the authenticated user's own sessions.
+         * @description Revoking the caller's own current session behaves like `POST /auth/logout`. Revoking a session belonging to another user is not possible here — the owner revokes staff sessions by deactivating the staff member (`PATCH /staff/{id}`).
+         */
+        delete: operations["revokeSession"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/shop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The current shop's settings. */
+        get: operations["getShop"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update shop settings.
+         * @description Owner only.
+         */
+        patch: operations["updateShop"];
+        trace?: never;
+    };
+    "/locations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the shop's locations. */
+        get: operations["listLocations"];
+        put?: never;
+        /**
+         * Create a location.
+         * @description Owner only.
+         */
+        post: operations["createLocation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/locations/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update a location.
+         * @description Owner only.
+         */
+        patch: operations["updateLocation"];
+        trace?: never;
+    };
+    "/staff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the shop's staff.
+         * @description Owner only.
+         */
+        get: operations["listStaff"];
+        put?: never;
+        /**
+         * Create a staff member (manager or cashier).
+         * @description Owner only. The password is set here; see D-28 for resets.
+         */
+        post: operations["createStaff"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/staff/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update a staff member.
+         * @description Owner only.
+         */
+        patch: operations["updateStaff"];
+        trace?: never;
+    };
+    "/staff/{id}/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set a staff member's password.
+         * @description Owner only (D-28). There is no self-service "forgot password" until Phase 7's Telegram OTP flow.
+         */
+        post: operations["setStaffPassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -32,6 +269,15 @@ export interface components {
         Healthz: {
             /** @enum {string} */
             status: "ok";
+        };
+        /** @description Response body for `GET /readyz` (200 and 503 share this shape). */
+        Readiness: {
+            /** @enum {string} */
+            status: "ok" | "degraded";
+            checks: {
+                /** @enum {string} */
+                db: "ok" | "error";
+            };
         };
         /**
          * @description Machine-readable error codes (ADR-013). A client translates a code to a display sentence; the API never returns one. Adding a new error code means adding it here first.
@@ -42,7 +288,7 @@ export interface components {
         Error: {
             error: {
                 code: components["schemas"]["ErrorCode"];
-                /** @description Optional machine-readable context, shape depends on `code`. */
+                /** @description Optional machine-readable context, shape depends on `code`. For `VALIDATION_FAILED` this is `{ "fields": { "<field>": "<reason>" } }`. */
                 details?: Record<string, never>;
             };
         };
@@ -51,6 +297,152 @@ export interface components {
          * @description money and quantities as decimal strings (ADR-007)
          */
         Decimal: string;
+        /**
+         * @description A UI/data locale (ADR-012).
+         * @enum {string}
+         */
+        Locale: "uz" | "ru" | "en";
+        /**
+         * @description A user's role (04-DATA-MODEL.md § 7 Permissions).
+         * @enum {string}
+         */
+        Role: "owner" | "manager" | "cashier";
+        /**
+         * @description The roles the owner can assign when creating or editing a staff member. `owner` is not assignable — there is exactly one owner, seeded (D-30).
+         * @enum {string}
+         */
+        StaffRole: "manager" | "cashier";
+        /**
+         * @description Which client created a session (D-29).
+         * @enum {string}
+         */
+        SessionClient: "web" | "mobile";
+        /** @enum {string} */
+        LocationKind: "store" | "warehouse";
+        User: {
+            /** Format: uuid */
+            id: string;
+            username: string;
+            fullName: string;
+            phone: string | null;
+            role: components["schemas"]["Role"];
+            locale: components["schemas"]["Locale"];
+            isActive: boolean;
+            /** Format: date-time */
+            lastLoginAt: string | null;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        /** @description Cursor-paginated envelope for `GET /staff`. */
+        UserList: {
+            items: components["schemas"]["User"][];
+            nextCursor: string | null;
+        };
+        Shop: {
+            /** Format: uuid */
+            id: string;
+            slug: string;
+            name: string;
+            /** @description ISO 4217 currency code, one per shop (ADR-007). `UZS` in MVP. */
+            currency: string;
+            /** @description IANA timezone name, e.g. `Asia/Tashkent`. */
+            timezone: string;
+            defaultLocale: components["schemas"]["Locale"];
+            allowNegativeStock: boolean;
+            updateCostOnPurchase: boolean;
+        };
+        /** @description Partial update — only provided fields change. */
+        ShopPatch: {
+            name?: string;
+            timezone?: string;
+            defaultLocale?: components["schemas"]["Locale"];
+            allowNegativeStock?: boolean;
+            updateCostOnPurchase?: boolean;
+        };
+        Location: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            kind: components["schemas"]["LocationKind"];
+            isDefault: boolean;
+            isActive: boolean;
+        };
+        /** @description Cursor-paginated envelope for `GET /locations`. */
+        LocationList: {
+            items: components["schemas"]["Location"][];
+            nextCursor: string | null;
+        };
+        LocationCreate: {
+            name: string;
+            kind: components["schemas"]["LocationKind"];
+            isDefault?: boolean;
+        };
+        /** @description Partial update — only provided fields change. */
+        LocationPatch: {
+            name?: string;
+            kind?: components["schemas"]["LocationKind"];
+            isDefault?: boolean;
+            isActive?: boolean;
+        };
+        Session: {
+            /** Format: uuid */
+            id: string;
+            client: components["schemas"]["SessionClient"];
+            userAgent: string | null;
+            ip: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            lastSeenAt: string;
+            /**
+             * Format: date-time
+             * @description Recomputed on every authenticated use, sliding per `client` (D-29): 30 days for `mobile`, 7 days for `web`.
+             */
+            expiresAt: string;
+            /** @description Whether this is the session the request was authenticated with. */
+            current: boolean;
+        };
+        /** @description Cursor-paginated envelope for `GET /auth/sessions`. */
+        SessionList: {
+            items: components["schemas"]["Session"][];
+            nextCursor: string | null;
+        };
+        LoginRequest: {
+            username: string;
+            password: string;
+            client: components["schemas"]["SessionClient"];
+        };
+        LoginResponse: {
+            user: components["schemas"]["User"];
+            session: components["schemas"]["Session"];
+            /** @description Bearer token for `client: mobile` only. Absent for `client: web`, which authenticates with the `savdo_session` cookie instead. */
+            token?: string;
+        };
+        Me: {
+            user: components["schemas"]["User"];
+            shop: components["schemas"]["Shop"];
+            /** @description Machine-readable capability strings the UI uses to show/hide actions. The API remains the enforcement point (ADR-010). */
+            permissions: string[];
+        };
+        StaffCreate: {
+            username: string;
+            password: string;
+            fullName: string;
+            phone?: string;
+            role: components["schemas"]["StaffRole"];
+            locale?: components["schemas"]["Locale"];
+        };
+        /** @description Partial update — only provided fields change. */
+        StaffPatch: {
+            fullName?: string;
+            phone?: string | null;
+            role?: components["schemas"]["StaffRole"];
+            isActive?: boolean;
+            locale?: components["schemas"]["Locale"];
+        };
+        SetStaffPassword: {
+            password: string;
+        };
     };
     responses: {
         /** @description The request has no valid session or bearer token. */
@@ -73,6 +465,24 @@ export interface components {
         };
         /** @description The resource does not exist (or is outside the caller's shop). */
         NotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description The request body failed validation. */
+        ValidationFailed: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description The request conflicts with the current state of the resource (e.g. a duplicate username, phone or location name within the shop). */
+        Conflict: {
             headers: {
                 [name: string]: unknown;
             };
@@ -131,6 +541,397 @@ export interface operations {
                     "application/json": components["schemas"]["Healthz"];
                 };
             };
+        };
+    };
+    getReadyz: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description All checks passed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Readiness"];
+                };
+            };
+            /** @description One or more checks failed. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Readiness"];
+                };
+            };
+        };
+    };
+    login: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoginRequest"];
+            };
+        };
+        responses: {
+            /** @description Authenticated. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoginResponse"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    logout: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Session revoked. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthenticated"];
+        };
+    };
+    getMe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Me"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+        };
+    };
+    listSessions: {
+        parameters: {
+            query?: {
+                /** @description Maximum number of items to return. */
+                limit?: components["parameters"]["Limit"];
+                /** @description Opaque cursor from a previous page's `nextCursor`. */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionList"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+        };
+    };
+    revokeSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revoked. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthenticated"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getShop: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Shop"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+        };
+    };
+    updateShop: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ShopPatch"];
+            };
+        };
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Shop"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    listLocations: {
+        parameters: {
+            query?: {
+                /** @description Maximum number of items to return. */
+                limit?: components["parameters"]["Limit"];
+                /** @description Opaque cursor from a previous page's `nextCursor`. */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocationList"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+        };
+    };
+    createLocation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LocationCreate"];
+            };
+        };
+        responses: {
+            /** @description Created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Location"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    updateLocation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LocationPatch"];
+            };
+        };
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Location"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    listStaff: {
+        parameters: {
+            query?: {
+                /** @description Maximum number of items to return. */
+                limit?: components["parameters"]["Limit"];
+                /** @description Opaque cursor from a previous page's `nextCursor`. */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserList"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createStaff: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaffCreate"];
+            };
+        };
+        responses: {
+            /** @description Created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["User"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    updateStaff: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaffPatch"];
+            };
+        };
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["User"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    setStaffPassword: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetStaffPassword"];
+            };
+        };
+        responses: {
+            /** @description Password set. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
 }

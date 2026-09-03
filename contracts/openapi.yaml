@@ -16,9 +16,17 @@ servers:
       All paths below are relative to this prefix, e.g. `GET /healthz`
       here is served at `GET /v1/healthz`.
 
+security:
+  - cookieAuth: []
+  - bearerAuth: []
+
 tags:
   - name: ops
     description: Health and other operational endpoints.
+  - name: auth
+    description: Login, logout, the current user and session management.
+  - name: shop
+    description: Shop settings, locations and staff (Phase 1).
 
 paths:
   /healthz:
@@ -27,6 +35,7 @@ paths:
       tags: [ops]
       summary: Liveness check.
       description: Reports the process is up. Does not touch the database.
+      security: []
       responses:
         "200":
           description: The process is up.
@@ -35,7 +44,384 @@ paths:
               schema:
                 $ref: "#/components/schemas/Healthz"
 
+  /readyz:
+    get:
+      operationId: getReadyz
+      tags: [ops]
+      summary: Readiness check.
+      description: >
+        Reports whether the API's dependencies (currently the database) are
+        reachable. Used by the orchestrator/deploy tooling, not by clients.
+      security: []
+      responses:
+        "200":
+          description: All checks passed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Readiness"
+        "503":
+          description: One or more checks failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Readiness"
+
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: Authenticate with username and password.
+      description: >
+        For `client: web`, sets the `savdo_session` cookie and omits
+        `token`. For `client: mobile`, returns `token` for the caller to
+        send as `Authorization: Bearer <token>`; no cookie is set (D-29).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Authenticated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Revoke the current session.
+      responses:
+        "204":
+          description: Session revoked.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+
+  /auth/me:
+    get:
+      operationId: getMe
+      tags: [auth]
+      summary: The authenticated user, their shop and their permissions.
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Me"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+
+  /auth/sessions:
+    get:
+      operationId: listSessions
+      tags: [auth]
+      summary: The authenticated user's own sessions.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+
+  /auth/sessions/{id}:
+    delete:
+      operationId: revokeSession
+      tags: [auth]
+      summary: Revoke one of the authenticated user's own sessions.
+      description: >
+        Revoking the caller's own current session behaves like `POST
+        /auth/logout`. Revoking a session belonging to another user is not
+        possible here — the owner revokes staff sessions by deactivating
+        the staff member (`PATCH /staff/{id}`).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Revoked.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /shop:
+    get:
+      operationId: getShop
+      tags: [shop]
+      summary: The current shop's settings.
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Shop"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+    patch:
+      operationId: updateShop
+      tags: [shop]
+      summary: Update shop settings.
+      description: Owner only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ShopPatch"
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Shop"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /locations:
+    get:
+      operationId: listLocations
+      tags: [shop]
+      summary: List the shop's locations.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LocationList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+    post:
+      operationId: createLocation
+      tags: [shop]
+      summary: Create a location.
+      description: Owner only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LocationCreate"
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Location"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /locations/{id}:
+    patch:
+      operationId: updateLocation
+      tags: [shop]
+      summary: Update a location.
+      description: Owner only.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LocationPatch"
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Location"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /staff:
+    get:
+      operationId: listStaff
+      tags: [shop]
+      summary: List the shop's staff.
+      description: Owner only.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      operationId: createStaff
+      tags: [shop]
+      summary: Create a staff member (manager or cashier).
+      description: Owner only. The password is set here; see D-28 for resets.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StaffCreate"
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /staff/{id}:
+    patch:
+      operationId: updateStaff
+      tags: [shop]
+      summary: Update a staff member.
+      description: Owner only.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StaffPatch"
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /staff/{id}/password:
+    post:
+      operationId: setStaffPassword
+      tags: [shop]
+      summary: Set a staff member's password.
+      description: >
+        Owner only (D-28). There is no self-service "forgot password" until
+        Phase 7's Telegram OTP flow.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetStaffPassword"
+      responses:
+        "204":
+          description: Password set.
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
 components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: savdo_session
+      description: >
+        Session cookie set by `POST /auth/login` for `client: web`
+        (`SameSite=Lax`, D-29). Every mutating request (POST/PATCH/PUT/
+        DELETE) authenticated this way must also send `X-Requested-With:
+        savdo`; requests without it are rejected as a CSRF check enforced
+        by middleware (ADR-005, docs/05-API.md § Conventions).
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: >
+        Opaque session token returned by `POST /auth/login` for `client:
+        mobile` (ADR-005), sent as `Authorization: Bearer <token>`.
+
   schemas:
     Healthz:
       type: object
@@ -46,6 +432,25 @@ components:
         status:
           type: string
           enum: [ok]
+
+    Readiness:
+      type: object
+      description: Response body for `GET /readyz` (200 and 503 share this shape).
+      required:
+        - status
+        - checks
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded]
+        checks:
+          type: object
+          required:
+            - db
+          properties:
+            db:
+              type: string
+              enum: [ok, error]
 
     ErrorCode:
       type: string
@@ -77,13 +482,347 @@ components:
               $ref: "#/components/schemas/ErrorCode"
             details:
               type: object
-              description: Optional machine-readable context, shape depends on `code`.
+              description: >
+                Optional machine-readable context, shape depends on `code`.
+                For `VALIDATION_FAILED` this is `{ "fields": { "<field>":
+                "<reason>" } }`.
 
     Decimal:
       type: string
       format: decimal
       pattern: '^-?\d+(\.\d+)?$'
       description: money and quantities as decimal strings (ADR-007)
+
+    Locale:
+      type: string
+      description: A UI/data locale (ADR-012).
+      enum: [uz, ru, en]
+
+    Role:
+      type: string
+      description: A user's role (04-DATA-MODEL.md § 7 Permissions).
+      enum: [owner, manager, cashier]
+
+    StaffRole:
+      type: string
+      description: >
+        The roles the owner can assign when creating or editing a staff
+        member. `owner` is not assignable — there is exactly one owner,
+        seeded (D-30).
+      enum: [manager, cashier]
+
+    SessionClient:
+      type: string
+      description: Which client created a session (D-29).
+      enum: [web, mobile]
+
+    LocationKind:
+      type: string
+      enum: [store, warehouse]
+
+    User:
+      type: object
+      required:
+        - id
+        - username
+        - fullName
+        - phone
+        - role
+        - locale
+        - isActive
+        - lastLoginAt
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        username:
+          type: string
+        fullName:
+          type: string
+        phone:
+          type: ["string", "null"]
+        role:
+          $ref: "#/components/schemas/Role"
+        locale:
+          $ref: "#/components/schemas/Locale"
+        isActive:
+          type: boolean
+        lastLoginAt:
+          type: ["string", "null"]
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+
+    UserList:
+      type: object
+      description: Cursor-paginated envelope for `GET /staff`.
+      required:
+        - items
+        - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/User"
+        nextCursor:
+          type: ["string", "null"]
+
+    Shop:
+      type: object
+      required:
+        - id
+        - slug
+        - name
+        - currency
+        - timezone
+        - defaultLocale
+        - allowNegativeStock
+        - updateCostOnPurchase
+      properties:
+        id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+        name:
+          type: string
+        currency:
+          type: string
+          description: ISO 4217 currency code, one per shop (ADR-007). `UZS` in MVP.
+        timezone:
+          type: string
+          description: IANA timezone name, e.g. `Asia/Tashkent`.
+        defaultLocale:
+          $ref: "#/components/schemas/Locale"
+        allowNegativeStock:
+          type: boolean
+        updateCostOnPurchase:
+          type: boolean
+
+    ShopPatch:
+      type: object
+      description: Partial update — only provided fields change.
+      properties:
+        name:
+          type: string
+        timezone:
+          type: string
+        defaultLocale:
+          $ref: "#/components/schemas/Locale"
+        allowNegativeStock:
+          type: boolean
+        updateCostOnPurchase:
+          type: boolean
+
+    Location:
+      type: object
+      required:
+        - id
+        - name
+        - kind
+        - isDefault
+        - isActive
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        kind:
+          $ref: "#/components/schemas/LocationKind"
+        isDefault:
+          type: boolean
+        isActive:
+          type: boolean
+
+    LocationList:
+      type: object
+      description: Cursor-paginated envelope for `GET /locations`.
+      required:
+        - items
+        - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Location"
+        nextCursor:
+          type: ["string", "null"]
+
+    LocationCreate:
+      type: object
+      required:
+        - name
+        - kind
+      properties:
+        name:
+          type: string
+        kind:
+          $ref: "#/components/schemas/LocationKind"
+        isDefault:
+          type: boolean
+
+    LocationPatch:
+      type: object
+      description: Partial update — only provided fields change.
+      properties:
+        name:
+          type: string
+        kind:
+          $ref: "#/components/schemas/LocationKind"
+        isDefault:
+          type: boolean
+        isActive:
+          type: boolean
+
+    Session:
+      type: object
+      required:
+        - id
+        - client
+        - userAgent
+        - ip
+        - createdAt
+        - lastSeenAt
+        - expiresAt
+        - current
+      properties:
+        id:
+          type: string
+          format: uuid
+        client:
+          $ref: "#/components/schemas/SessionClient"
+        userAgent:
+          type: ["string", "null"]
+        ip:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+        lastSeenAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+          description: >
+            Recomputed on every authenticated use, sliding per `client`
+            (D-29): 30 days for `mobile`, 7 days for `web`.
+        current:
+          type: boolean
+          description: Whether this is the session the request was authenticated with.
+
+    SessionList:
+      type: object
+      description: Cursor-paginated envelope for `GET /auth/sessions`.
+      required:
+        - items
+        - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Session"
+        nextCursor:
+          type: ["string", "null"]
+
+    LoginRequest:
+      type: object
+      required:
+        - username
+        - password
+        - client
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+        client:
+          $ref: "#/components/schemas/SessionClient"
+
+    LoginResponse:
+      type: object
+      required:
+        - user
+        - session
+      properties:
+        user:
+          $ref: "#/components/schemas/User"
+        session:
+          $ref: "#/components/schemas/Session"
+        token:
+          type: string
+          description: >
+            Bearer token for `client: mobile` only. Absent for `client:
+            web`, which authenticates with the `savdo_session` cookie
+            instead.
+
+    Me:
+      type: object
+      required:
+        - user
+        - shop
+        - permissions
+      properties:
+        user:
+          $ref: "#/components/schemas/User"
+        shop:
+          $ref: "#/components/schemas/Shop"
+        permissions:
+          type: array
+          items:
+            type: string
+          description: >
+            Machine-readable capability strings the UI uses to show/hide
+            actions. The API remains the enforcement point (ADR-010).
+
+    StaffCreate:
+      type: object
+      required:
+        - username
+        - password
+        - fullName
+        - role
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+          minLength: 8
+        fullName:
+          type: string
+        phone:
+          type: string
+        role:
+          $ref: "#/components/schemas/StaffRole"
+        locale:
+          $ref: "#/components/schemas/Locale"
+
+    StaffPatch:
+      type: object
+      description: Partial update — only provided fields change.
+      properties:
+        fullName:
+          type: string
+        phone:
+          type: ["string", "null"]
+        role:
+          $ref: "#/components/schemas/StaffRole"
+        isActive:
+          type: boolean
+        locale:
+          $ref: "#/components/schemas/Locale"
+
+    SetStaffPassword:
+      type: object
+      required:
+        - password
+      properties:
+        password:
+          type: string
+          minLength: 8
 
   parameters:
     Limit:
@@ -131,6 +870,22 @@ components:
 
     NotFound:
       description: The resource does not exist (or is outside the caller's shop).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+    ValidationFailed:
+      description: The request body failed validation.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+    Conflict:
+      description: >
+        The request conflicts with the current state of the resource
+        (e.g. a duplicate username, phone or location name within the shop).
       content:
         application/json:
           schema:
