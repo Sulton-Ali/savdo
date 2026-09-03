@@ -76,13 +76,10 @@ migrate:
 	@set -a; . infra/.env; set +a; \
 	cd api && go run ./cmd/savdo migrate up
 
-## seed: load development seed data.
+## seed: load development seed data (the demo shop, its locations and users).
 seed:
-	@if [ -d api/cmd/seed ]; then \
-		cd api && go run ./cmd/seed; \
-	else \
-		echo "skip: cmd/seed not implemented yet (Phase 1)"; \
-	fi
+	@set -a; . infra/.env; set +a; \
+	cd api && go run ./cmd/savdo seed
 
 ## api: run the API server.
 api:
