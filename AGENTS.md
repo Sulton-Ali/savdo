@@ -1,297 +1,160 @@
 # AGENTS.md
 
-Source of truth for how AI agents operate in this repo. Tool-specific files
-(`CLAUDE.md`) point back here. If they conflict, **this file wins**.
+Source of truth for how AI agents operate in this repo. `CLAUDE.md` points here; if
+they conflict, **this file wins**.
 
 ## What this is
 
-**Savdo** ("trade" in Uzbek) is a light ERP + CRM for small shops in Uzbekistan. One Go
-API serves four clients: a public landing (TanStack Start, SSR for SEO), an admin panel
-(Vite + React SPA), a mobile admin app (Expo / React Native, Android first) and a Telegram
-bot that answers customer questions with AI grounded in the shop's own data.
+**Savdo** ("trade" in Uzbek): a light ERP + CRM for small shops in Uzbekistan. One Go
+API serves a public landing (TanStack Start, SSR), an admin panel (Vite + React), a
+mobile admin app (Expo, Android first) and a Telegram bot that answers customers with an
+LLM grounded in the shop's own data. uz/ru/en, UZS. Built single-shop, tenant-ready
+(ADR-004). First client: a family clothing shop.
 
-First client: a family clothing shop — sizes, colours, seasonal stock. Trilingual
-(uz/ru/en), currency UZS. Built as a **single shop**, designed **tenant-ready** (every
-business table carries `shop_id`; see ADR-004).
+## Operating mode — read this first
 
-## Operating mode — READ THIS FIRST
-
-**This project is AI-native. You write the code. The owner writes none.**
-
-The owner is the Product Owner: sets scope, answers questions, approves architecture,
-dependencies and money, and accepts or rejects a closed phase. Everything else —
-implementation, tests, review, merges, docs — is done by agents.
-
-"You write the code" is not "you decide the product". These constraints make delegation
-safe:
+**AI-native: agents write all code; the owner writes none.** The owner (Product Owner)
+sets scope, answers questions, approves architecture, dependencies and money, and
+accepts or rejects a closed phase.
 
 - **The docs are the specification.** `docs/` is normative. Code that disagrees with a
-  doc is a bug in the code — unless the owner rules the doc wrong, in which case the doc
-  is fixed first, in its own commit.
-- **Ask, don't guess.** An ambiguity in a spec goes back to the owner through the
-  orchestrator. A guess that turns out right is still a process failure, because the
-  next one will not be. See § Escalate to the owner.
-- **Stay inside your task's file scope.** If a task names the files you may touch, that
-  is the boundary. Needing something outside it means the decomposition was wrong: stop
-  and say so. Do not go exploring and do not "also fix" adjacent things.
-- **One task, one branch, one concern.** An unrelated improvement in the same change
-  gets the whole change sent back, however good it is.
-- **Tests ship with the code**, in the same change, written by whoever wrote the code.
-- **Never tick a roadmap box.** Only `/phase-done` does that, after verifying the
-  phase's Done-when bar by actually running it.
-- **Reviewers report; they never fix.** A reviewer that edits has reviewed itself.
-- **No agent merges its own work.** Agents do merge — the owner delegated that — but the
-  session that wrote the diff is never the session that merges it.
-- **Verify versions and API surfaces against the registry or context7**, never against
-  training data. The stack is current as of September 2026 and training data lags it.
+  doc is a bug in the code; if the doc is wrong, the owner rules and the doc is fixed
+  first, in its own commit.
+- **Ask, don't guess.** Ambiguity goes to the owner via the orchestrator. A lucky guess
+  is still a process failure.
+- **Stay inside your task's file scope.** Needing more means the task was cut wrong:
+  stop and say so. No exploring, no "also fixing".
+- **One task, one branch, one concern. Tests ship with the code, by its author.**
+- **Never tick a roadmap box** — only `/phase-done` does, after running the Done-when bar.
+- **Reviewers report, never fix. No agent merges its own work.**
+- **Verify versions and APIs against the registry or context7**, never training data.
+  The stack is current as of 2026-09; code that looks wrong may just be newer than you.
 
-**Plain English with the owner.** Keep replies at CEFR B1/B2: short sentences, common
-words, explain jargon the first time it appears. Docs, code and comments stay in normal
+Talk to the owner in plain English (CEFR B1/B2). Docs, code and comments in normal
 technical English.
 
 ## Karpathy guidelines
 
-Behavioural defaults for LLM coding, taken verbatim from the
-[karpathy-guidelines skill](https://github.com/multica-ai/andrej-karpathy-skills)
-(MIT), derived from [Andrej Karpathy's observations](https://x.com/karpathy/status/2015883857489522876)
-on LLM coding pitfalls. They bias toward caution over speed; for trivial tasks, use
-judgement. They reinforce the operating mode above — they never override `docs/` or the
-hard rules below.
+From [Karpathy's observations](https://x.com/karpathy/status/2015883857489522876) via the
+MIT [karpathy-guidelines](https://github.com/multica-ai/andrej-karpathy-skills) skill.
+Caution over speed; use judgement on trivial tasks. They never override `docs/` or the
+hard rules.
 
-**Savdo note on rule 2.** The tenant-ready schema (ADR-004) and the provider-agnostic
-LLM adapter (ADR-009) are flexibility the owner asked for (D-02, D-09). They are not
-"speculative configurability" — do not argue them away under this rule.
-
-### 1. Think Before Coding
-
-**Don't assume. Don't hide confusion. Surface tradeoffs.**
-
-Before implementing:
-- State your assumptions explicitly. If uncertain, ask.
-- If multiple interpretations exist, present them - don't pick silently.
-- If a simpler approach exists, say so. Push back when warranted.
-- If something is unclear, stop. Name what's confusing. Ask.
-
-### 2. Simplicity First
-
-**Minimum code that solves the problem. Nothing speculative.**
-
-- No features beyond what was asked.
-- No abstractions for single-use code.
-- No "flexibility" or "configurability" that wasn't requested.
-- No error handling for impossible scenarios.
-- If you write 200 lines and it could be 50, rewrite it.
-
-Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
-
-### 3. Surgical Changes
-
-**Touch only what you must. Clean up only your own mess.**
-
-When editing existing code:
-- Don't "improve" adjacent code, comments, or formatting.
-- Don't refactor things that aren't broken.
-- Match existing style, even if you'd do it differently.
-- If you notice unrelated dead code, mention it - don't delete it.
-
-When your changes create orphans:
-- Remove imports/variables/functions that YOUR changes made unused.
-- Don't remove pre-existing dead code unless asked.
-
-The test: Every changed line should trace directly to the user's request.
-
-### 4. Goal-Driven Execution
-
-**Define success criteria. Loop until verified.**
-
-Transform tasks into verifiable goals:
-- "Add validation" → "Write tests for invalid inputs, then make them pass"
-- "Fix the bug" → "Write a test that reproduces it, then make it pass"
-- "Refactor X" → "Ensure tests pass before and after"
-
-For multi-step tasks, state a brief plan:
-```
-1. [Step] → verify: [check]
-2. [Step] → verify: [check]
-3. [Step] → verify: [check]
-```
-
-Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+1. **Think before coding.** State assumptions; surface interpretations and trade-offs
+   instead of picking silently; if unclear, stop and ask.
+2. **Simplicity first.** Minimum code that solves the ask; nothing speculative, no
+   single-use abstractions, no unrequested configurability. (ADR-004 tenant-readiness
+   and the ADR-009 LLM adapter are owner-requested, not speculative.)
+3. **Surgical changes.** Touch only what the task needs; match existing style; clean up
+   only orphans your change made; mention other dead code, don't delete it.
+4. **Goal-driven execution.** Turn the ask into a verifiable check (test, command,
+   behaviour); plan as step → verify; loop until it passes.
 
 ## Docs map
 
-| Doc                       | Contents                                                            | Read it before...                                  |
-| ------------------------- | ------------------------------------------------------------------- | -------------------------------------------------- |
-| `docs/00-DECISIONS.md`    | Owner decisions (D-xx) and open questions (Q-xx) from the interview | Assuming anything about scope or product behaviour |
-| `docs/01-OVERVIEW.md`     | Pitch, personas, user stories, non-goals, definition of done        | Touching product scope or feature intent           |
-| `docs/02-TECH-STACK.md`   | Pinned versions and rationale                                       | Adding, bumping or importing any dependency        |
-| `docs/03-ARCHITECTURE.md` | Monorepo layout, module map, key flows, **ADR-001…014**             | Designing anything cross-cutting                   |
-| `docs/04-DATA-MODEL.md`   | Schema, ledgers, permission matrix, rules for agents                | Any DB or migration work                           |
-| `docs/05-API.md`          | REST conventions, errors, pagination, auth, endpoint catalogue      | Adding or changing an endpoint                     |
-| `docs/06-ROADMAP.md`      | **Living state** — the first phase with unchecked boxes is current  | Anything at all                                    |
-| `docs/07-DEVOPS.md`       | Local stack, the `make verify` gate, **branch/merge protocol**, deploy | Infra work, and **before creating any branch**  |
-| `docs/08-AI-WORKFLOW.md`  | The fleet, the loop, context discipline, failure modes, metrics     | Orchestrating or dispatching other agents          |
+`00-DECISIONS` owner decisions D-xx and open questions Q-xx (read before assuming scope)
+· `01-OVERVIEW` pitch, personas, non-goals · `02-TECH-STACK` pinned versions
+· `03-ARCHITECTURE` layout, flows, ADR-001…014 · `04-DATA-MODEL` schema, ledgers,
+permission matrix, rules · `05-API` conventions and endpoint catalogue
+· `06-ROADMAP` **living state: first phase with unchecked boxes is current**
+· `07-DEVOPS` local stack, `make verify`, **branch/merge protocol** (read before any
+branch) · `08-AI-WORKFLOW` fleet, loop, context discipline, failure modes.
 
-## Stack (condensed)
+## Stack (orientation only — `02-TECH-STACK.md` has the pins)
 
-`docs/02-TECH-STACK.md` is the authority with exact pins. This is orientation only.
-
-| Layer    | Choice                                                                                       |
-| -------- | -------------------------------------------------------------------------------------------- |
-| API      | Go (stdlib `net/http` mux, no framework) · pgx · **sqlc** · **goose** SQL migrations · slog  |
-| Contract | **OpenAPI 3.1** in `contracts/openapi.yaml` → oapi-codegen (Go) + openapi-typescript (TS)     |
-| Database | PostgreSQL. **System of record.** Money as `NUMERIC(14,2)`, ids `uuid`, time `timestamptz`   |
-| Media    | Local disk volume served by Caddy, behind a Go `Storage` interface (ADR-008). No MinIO in MVP |
-| Landing  | **TanStack Start** (SSR) + React + Tailwind — `web/`                                         |
-| Admin    | **Vite + React** SPA, TanStack Router + Query, shadcn/ui, Tailwind — `admin/`                |
-| Mobile   | **Expo** (Expo Router, NativeWind), Android first — `mobile/`                                |
-| Bot      | Go binary `api/cmd/bot`, `go-telegram/bot`, LLM behind `internal/ai` adapter (ADR-009)       |
-| i18n     | Shared JSON in `packages/i18n`; product/category translations in DB                          |
-| Tooling  | pnpm workspaces · Biome · Vitest · Playwright · golangci-lint · testcontainers-go · Make      |
-| Hosting  | One VPS, Docker Compose, Caddy (TLS). Static admin build served by Caddy                     |
+Go stdlib `net/http` · pgx · sqlc · goose SQL migrations · PostgreSQL (`NUMERIC` money,
+`uuid` v7, `timestamptz`) · OpenAPI 3.1 in `contracts/openapi.yaml` → oapi-codegen +
+openapi-typescript/openapi-fetch · media on a disk volume behind a `Storage` interface ·
+TanStack Start (`web/`) · Vite + React + TanStack Router/Query + shadcn (`admin/`) · Expo
++ Expo Router + NativeWind (`mobile/`) · `go-telegram/bot` + `internal/ai` adapter
+(`api/cmd/bot`) · i18next with JSON in `packages/i18n` · pnpm, Biome, Vitest,
+Playwright, golangci-lint, testcontainers-go, Make · one VPS, Docker Compose, Caddy.
 
 ## Conventions
 
-- **pnpm is the package manager for TypeScript — never npm, never yarn.** Go uses modules.
-- Monorepo: `api/`, `contracts/`, `web/`, `admin/`, `mobile/`, `packages/`, `infra/`,
-  `docs/`. Root `Makefile` is the entry point for every check.
-- Go: standard layout `api/cmd/<binary>`, `api/internal/<module>`. One module per
-  business area (`auth`, `shop`, `catalog`, `stock`, `sales`, `crm`, `content`, `bot`,
-  `ai`, `media`). Handlers implement the oapi-codegen interface; business rules live in
-  a service; SQL lives in `api/db/queries/*.sql` compiled by sqlc. **No ORM.**
-- Migrations: `api/db/migrations/NNNN_<slug>.sql`, goose format, one concern each,
-  additive by default. Never edit a migration that has merged.
-- TypeScript strict everywhere, `noUncheckedIndexedAccess` on. Biome for lint + format.
-- Database `snake_case`; Go `CamelCase`; JSON/API `camelCase`. sqlc and oapi-codegen do
-  the mapping; nobody hand-writes a mapping struct.
-- **Contract first.** A new or changed endpoint starts in `contracts/openapi.yaml`, then
-  `make generate`, then the Go handler, then the client. Request/response shapes are
-  never declared by hand on either side (ADR-002). Use `/api-change`.
-- API errors return a machine-readable `code`. **Never a human sentence for display** —
-  clients translate codes (`docs/05-API.md` § Errors).
-- Conventional Commits. Scope = module name (`feat(stock): …`). **Never** add
-  `Co-authored-by`, `Claude-Session`, `Generated-with` or any agent/tool attribution
-  trailer to commits or merges (owner decision D-19). The commit-msg hook rejects them.
-- Tests: Go `testing` + testcontainers-go against real Postgres (integration), Vitest
-  (unit, web), Playwright (e2e, admin + landing).
+- Layout: `api/`, `contracts/`, `web/`, `admin/`, `mobile/`, `packages/`, `infra/`,
+  `docs/`. Root `Makefile` runs every check. **pnpm for TypeScript, never npm/yarn.**
+- Go: `api/cmd/<binary>`, `api/internal/<module>` (`auth shop catalog media stock sales
+  crm content reports ai bot httpx db`). Handler → service → sqlc; **no ORM**.
+  Migrations `api/db/migrations/NNNN_<slug>.sql`, one concern, additive, never edited
+  after merge.
+- **Contract first** (ADR-002): change `contracts/openapi.yaml` → `make generate` → Go
+  handler → client. No hand-declared request/response shapes anywhere. Use `/api-change`.
+- TypeScript strict + `noUncheckedIndexedAccess`; Biome. DB `snake_case`, Go
+  `CamelCase`, JSON `camelCase` — generators map, nobody hand-writes mappings.
+- Errors return a machine-readable `code`, never a display sentence (ADR-013).
+- Conventional Commits, scope = module. **No attribution trailers** (`Co-authored-by`,
+  `Claude-Session`, …) — owner decision D-19; the commit-msg hook rejects them.
+- Tests: Go `testing` + testcontainers Postgres; Vitest; Playwright.
 
 ## Hard rules — violating these fails review
 
-1. **Every query on a business table filters by `shop_id`** taken from the auth
-   context, never from the request body or query string (ADR-004).
-2. **Never `UPDATE stock_levels` directly.** Stock changes are `stock_movements` rows
-   inserted through the stock service, which updates `stock_levels` in the same
-   transaction (ADR-006). `stock_levels` is rebuildable from movements.
-3. **Never mutate a completed sale.** Corrections are a `void` or `return`, each of
-   which writes its own stock movements (ADR-014).
-4. **Money is `NUMERIC(14,2)`, never float**, in Go `decimal`-typed or `pgtype.Numeric`,
-   never `float64`. Currency comes from the shop row.
-5. **Cost price and margin never reach a `cashier` role response or any public/bot
-   customer response.** Field-level filtering is enforced in the service, not the UI
-   (ADR-010).
-6. **Never hand-declare a request or response struct/type.** Shapes come from
-   `contracts/openapi.yaml` through the generators (ADR-002).
-7. **Never edit a merged migration.** Fix forward with a new one. Destructive changes
-   (`DROP`, type narrowing, removing an enum value) need explicit owner approval in the
-   task and the merge commit body.
-8. **Never trust client-supplied totals.** Sale totals, discounts and stock quantities
-   are computed server-side from line items and current prices.
-9. **Never store a session secret, password, bot token or API key in a log, a doc, a
-   test fixture or a commit.** Passwords are argon2id hashes; session tokens are stored
-   hashed (ADR-005).
-10. **The bot's customer mode answers only through its tools** (public products, prices,
-    availability yes/no, hours, address, contacts). It never sees cost price, stock
-    quantities, customers, staff or sales (ADR-009). A tool that would expose those is a
-    CRITICAL finding.
-11. **Never add a dependency or bump a pinned version** without owner approval, and
-    never from memory — check the registry.
-12. **Never call an LLM from a request path other than the bot's own handler**, and
-    never without the per-shop and per-user rate limit in place (ADR-009).
+1. Every business-table query filters by `shop_id` from the auth context, never from
+   the request (ADR-004).
+2. Never `UPDATE stock_levels` directly; stock changes are `stock_movements` written by
+   `stock.Service.Move` in one transaction (ADR-006).
+3. Never mutate a completed sale; corrections are a void or a return with their own
+   movements (ADR-014).
+4. Money is `NUMERIC(14,2)` / decimal, never float; currency from the shop row (ADR-007).
+5. `cost_price`, `unit_cost` and margins never reach a cashier, public or bot response;
+   filtered in the service, not the UI (ADR-010).
+6. No hand-declared request/response types; shapes come from the contract (ADR-002).
+7. Never edit a merged migration; destructive changes need owner approval quoted in
+   the task and the merge body.
+8. Never trust client totals or quantities; compute server-side.
+9. No secret, token, password or key in logs, docs, fixtures or commits; passwords
+   argon2id, session tokens stored hashed (ADR-005).
+10. The bot's customer mode answers only through its public-read tools; it never sees
+    cost, quantities, customers, staff or sales (ADR-009).
+11. No new dependency or version bump without owner approval, checked in the registry.
+12. No LLM call outside the bot handler, and never without rate limits (ADR-009).
 
-## Vendored skills (Addy Osmani's agent-skills)
+## Vendored skills
 
-Ten general-engineering skills are vendored verbatim under `.claude/skills/` from
-[addyosmani/agent-skills](https://github.com/addyosmani/agent-skills), pinned in
-`.claude/skills/VENDORED.md` and `docs/02-TECH-STACK.md`. They are reference knowledge,
-not process: **`AGENTS.md` and the Savdo skills win when they conflict.** In particular,
-Savdo uses branches merged `--no-ff` by a separate session, not trunk-based direct
-commits, and the review/merge separation is never collapsed into one session.
-
-| Role        | Consults                                                                                                              |
-| ----------- | --------------------------------------------------------------------------------------------------------------------- |
-| implementer | `test-driven-development`, `incremental-implementation`, `source-driven-development`, `context-engineering`; plus `api-and-interface-design` on contract work and `frontend-ui-engineering` / `performance-optimization` on web and mobile work |
-| db          | `test-driven-development`                                                                                              |
-| reviewer    | `code-review-and-quality`, `security-and-hardening`, `doubt-driven-development`                                       |
-| merger      | none                                                                                                                   |
-| scribe      | none — keep Haiku's context small                                                                                      |
+Ten general skills from [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills)
+live verbatim in `.claude/skills/` (pinned in `.claude/skills/VENDORED.md`). Reference
+knowledge, not process: **this file and the Savdo skills win on conflict** (branches
+merged `--no-ff` by a separate session, never trunk-based; review and merge never
+collapse into one session). Each agent definition names the skills it may load; the
+scribe loads none.
 
 ## Escalate to the owner
 
-Stop and ask (through the orchestrator) rather than deciding, for:
-
-- Anything in `docs/01-OVERVIEW.md` § Non-goals, or any open question in
-  `docs/00-DECISIONS.md`
-- New dependencies or version bumps
-- New or reversed ADRs
-- Non-additive schema changes; anything destructive
-- Auth, authorization, roles, rate limits, CORS, CSP
-- Anything touching money math, stock ledger integrity or sale immutability
-- The LLM provider/model choice, and anything that costs money or reaches a real user
+Non-goals (`01-OVERVIEW.md`) and open Q-xx · new dependencies or bumps · new or reversed
+ADRs · non-additive or destructive schema changes · auth, roles, rate limits, CORS, CSP ·
+money math, ledger integrity, sale immutability · LLM provider/model · anything costing
+money or reaching a real user.
 
 ## Workflow
 
-Development is roadmap-phase-driven (`docs/06-ROADMAP.md`). **The first phase with
-unchecked boxes is the current phase.** Work outside it needs owner approval.
+Roadmap-phase-driven (`06-ROADMAP.md`); work outside the current phase needs approval.
+A phase closes only when its Done-when bar holds end to end, ticked by `/phase-done`.
 
-A phase closes only when its **Done when** bar holds end to end — not when its tasks are
-individually checked. Boxes are ticked exclusively by `/phase-done`.
+**Fleet** (`08-AI-WORKFLOW.md`): the interactive session is the orchestrator on
+**Fable 5.1** — it interviews, decomposes, dispatches with minimum context, tracks; it
+does not execute. Scribe **Haiku** (reads, search, mechanical edits) · implementer, db,
+merger **Sonnet** · reviewer **Sonnet**, plus **Opus** in a second fresh session for
+correctness-critical work: `auth`, `stock`, `sales`, the `ai`/`bot` data boundary.
 
-**Correctness-critical modules** — `auth` (sessions, roles, permissions), `stock`
-(ledger), `sales` (money, immutability, stock decrement) and the `ai`/`bot` customer-mode
-data boundary — require **two reviewers on different models** (Sonnet and Opus), each a
-fresh session with a split scope.
+**Loop**: `/interview` → `/phase-start` → implement on `phase-<n>/t<id>-<slug>` →
+`/phase-review` (fresh session) → fix → merger (third session) runs **`make verify`**
+and merges `--no-ff` → `/phase-done`. Mechanics in `07-DEVOPS.md` § Branch and merge
+protocol; parallel-agent constraints in `08-AI-WORKFLOW.md`. The gate is local; a green
+CI run is not a substitute.
 
-**Harness models** (`docs/08-AI-WORKFLOW.md` § The fleet): the interactive session IS the
-orchestrator, on **Fable 5.1**. It reasons, interviews the owner, decomposes, dispatches
-with minimum context, tracks the roadmap. **It does not execute.** Reads, searches and
-mechanical edits → **Haiku** (scribe). Implementation, DB work and delegated merges →
-**Sonnet**. Review → **Sonnet**; correctness-critical adds **Opus**.
-
-**Branch and merge mechanics — `docs/07-DEVOPS.md` § Branch and merge protocol.** Read it
-before creating a branch. Operating constraints for parallel agents:
-`docs/08-AI-WORKFLOW.md` § Operating constraints.
-
-**The gate is `make verify`** (format → lint → typecheck → generated-code-fresh → tests),
-run locally before every merge by the merging session. A green remote run is not a
-substitute.
-
-## Commands
-
-Phase 0 creates these. Until it lands, the targets are the specification of what Phase 0
-must deliver.
+## Commands (Phase 0 delivers these)
 
 ```bash
-make verify            # THE GATE
-make generate          # oapi-codegen + sqlc + openapi-typescript; commit the output
-make dev-infra         # docker compose up -d (Postgres, Mailpit if needed)
-make dev-infra-down
-make migrate           # goose up against the compose database
-make seed              # demo shop, users, clothing catalogue
-make api               # go run ./cmd/api on :8080
-make bot               # go run ./cmd/bot (long polling)
-pnpm --filter admin dev
-pnpm --filter web dev
-pnpm --filter mobile start
+make verify        # THE GATE: format → lint → typecheck → generated-code-fresh → tests
+make generate      # oapi-codegen + sqlc + openapi-typescript; commit the output
+make dev-infra | dev-infra-down | migrate | seed | api | bot
+pnpm --filter admin dev · pnpm --filter web dev · pnpm --filter mobile start
 ```
 
-Current roadmap phase: **Phase 0 — Bootstrap** as of 2026-09-03. Docs and agent
-configuration exist; no application code yet.
+Current phase: **Phase 0 — Bootstrap** (2026-09-03). No application code yet.
 
 ## MCP
 
-- **context7** — current library docs. Verify API surfaces before asserting how
-  something works, and especially before "fixing" code that merely looks unfamiliar.
-- **postgres** — read-only inspection of the local Compose database; enabled once
-  Phase 0 brings the database up. Schema changes still go through goose migrations.
-- **playwright** — drives a real browser for `/phase-done` verification of the admin
-  panel and the landing. Enabled from Phase 2.
+`context7` (library docs — mandatory before asserting an API) · `postgres` (read-only
+inspection of the Compose DB, from Phase 1) · `playwright` (browser verification for
+`/phase-done`, from Phase 2).
