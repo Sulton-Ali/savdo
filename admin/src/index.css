@@ -1,0 +1,8 @@
+@import "tailwindcss";
+@import "@savdo/ui-tokens/tokens.css";
+
+body {
+  margin: 0;
+  background: var(--savdo-color-bg);
+  font-family: var(--savdo-font-family);
+}
