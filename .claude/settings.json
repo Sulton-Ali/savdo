@@ -1,5 +1,7 @@
 {
-  "enabledMcpjsonServers": ["context7"],
+  "enabledMcpjsonServers": [
+    "context7"
+  ],
   "permissions": {
     "allow": [
       "Bash(make verify)",
@@ -39,7 +41,9 @@
       "Bash(git branch)",
       "Bash(git branch:*)",
       "Bash(git show:*)",
-      "Bash(git worktree list)"
+      "Bash(git worktree list)",
+      "Bash(docker compose exec postgres psql:*)",
+      "Bash(go tool:*)"
     ],
     "ask": [
       "Bash(git push:*)",
@@ -58,7 +62,9 @@
       "Bash(psql:* DROP*)",
       "Read(./infra/.env)",
       "Read(./**/.env)",
-      "Read(./**/.env.local)"
+      "Read(./**/.env.local)",
+      "Bash(docker compose exec postgres psql:* DROP*)",
+      "Bash(docker compose exec postgres psql:* TRUNCATE*)"
     ]
   }
 }

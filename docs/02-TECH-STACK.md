@@ -12,13 +12,13 @@ branch — with the reason.
 
 | Item                  | Pin      | Why / notes                                                                                                  |
 | --------------------- | -------- | ------------------------------------------------------------------------------------------------------------ |
-| Go                    | 1.27.1   | Latest stable (2026-09-01). goose ≥3.28 needs Go 1.26+; oapi-codegen 2.8 needs 1.25+                          |
+| Go                    | 1.27.x   | Latest stable 1.27.1 (2026-09-01); dev machine has the CachyOS 1.27.0 build, fine. `go tool` directive needs ≥ 1.24 |
 | Router                | stdlib   | `net/http` `ServeMux` with method + path patterns. No framework (D-11)                                        |
 | pgx                   | v5.10.0  | Postgres driver; `pgxpool`; `pgtype.Numeric` for money                                                        |
-| sqlc                  | v1.31.1  | Typed Go from SQL; `sqlc diff` in the gate                                                                     |
-| goose                 | v3.28.0  | SQL migrations, embedded via `embed.FS`, run by `savdo migrate` and a one-shot container in prod              |
-| oapi-codegen          | v2.8.0   | OpenAPI 3.1 → Go server interface (`std-http` generator) + types; runtime ≥ v1.6.0                             |
-| golangci-lint         | v2.13.2  | Lint gate; config in `api/.golangci.yml` (errcheck, govet, staticcheck, gosec, revive, sqlclosecheck)         |
+| sqlc                  | v1.31.1  | Typed Go from SQL; `sqlc diff` in the gate. Pinned via `go tool` in `go.mod` (D-24)                             |
+| goose                 | v3.28.0  | SQL migrations, embedded via `embed.FS`, run by `savdo migrate`; CLI via `go tool` (D-24)                      |
+| oapi-codegen          | v2.8.0   | OpenAPI 3.1 → Go server interface (`std-http` generator) + types; runtime ≥ v1.6.0; via `go tool` (D-24)       |
+| golangci-lint         | v2.13.2  | Lint gate; binary pinned and installed by the Makefile into `api/bin/`; config `api/.golangci.yml`            |
 | testcontainers-go     | v0.44.0  | Real Postgres in integration tests (`modules/postgres`)                                                         |
 | go-telegram/bot       | v1.25.0  | Bot API 10.3; modern, maintained. **Not** `go-telegram-bot-api` (older design)                                |
 | anthropic-sdk-go      | v1.69.0  | First `internal/ai` provider (Claude). Tool use via Messages API                                              |
@@ -99,8 +99,8 @@ interface so the choice can be made — and changed — by config.
 | ----------- | -------------------------------------------------------------------------------------------- |
 | Claude Code | 2.1.x; models: Fable 5.1 (orchestrator), Sonnet 5, Opus 5, Haiku 4.5                         |
 | context7    | MCP over HTTP; mandatory for verifying library APIs                                          |
-| postgres MCP | `@modelcontextprotocol/server-postgres@0.6.2` (upstream archived but functional read-only); replace with a maintained server if it breaks — a Phase 1 scribe task verifies |
+| postgres MCP | **none** (D-24) — upstream deprecated 2025-07 with a read-only bypass; inspect with `docker compose exec postgres psql` |
 | playwright MCP | `@playwright/mcp` for browser-driven verification                                          |
 | agent-skills (vendored) | addyosmani/agent-skills @ 020ec10 (2026-09-03), 10 skills + linked references, MIT; see .claude/skills/VENDORED.md |
-| gh          | **not installed on the dev machine** (Q-14)                                                   |
-| Go          | **not installed on the dev machine** (Q-15)                                                   |
+| gh          | 2.98, authenticated as Sulton-Ali                                                              |
+| Go          | 1.27.0 (CachyOS build)                                                                        |

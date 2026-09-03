@@ -139,7 +139,7 @@ entries are added by `/phase-done` when a review catches one.
 | `.claude/agents/`   | `implementer`, `reviewer`, `db`, `merger`, `scribe` with per-role tool restrictions      |
 | `.claude/skills/`   | `/interview`, `/adr`, `/phase-start`, `/api-change`, `/phase-review`, `/phase-done`, `/new-module` + 10 vendored general skills (see `VENDORED.md`) |
 | `.claude/settings.json` | Permission allow/ask/deny lists so agents run the routine commands without prompts |
-| `.mcp.json`         | `context7` (docs), `postgres` (read-only inspection), `playwright` (browser verification) |
+| `.mcp.json`         | `context7` (docs), `playwright` (browser verification). No postgres MCP — D-24              |
 
 **context7 is not optional.** Verify API surfaces against it before asserting how a
 library works.

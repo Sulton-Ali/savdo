@@ -153,6 +153,6 @@ pnpm --filter admin dev · pnpm --filter web dev · pnpm --filter mobile start
 
 ## MCP
 
-`context7` (library docs — mandatory before asserting an API) · `postgres` (read-only
-inspection of the Compose DB, from Phase 1) · `playwright` (browser verification for
-`/phase-done`, from Phase 2).
+`context7` (library docs — mandatory before asserting an API) · `playwright` (browser
+verification for `/phase-done`, from Phase 2). DB inspection: `docker compose exec
+postgres psql` — no postgres MCP (D-24).

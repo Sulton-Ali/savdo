@@ -4,17 +4,13 @@
       "type": "http",
       "url": "https://mcp.context7.com/mcp"
     },
-    "postgres": {
+    "playwright": {
       "command": "npx",
       "args": [
         "-y",
-        "@modelcontextprotocol/server-postgres@0.6.2",
-        "postgresql://savdo:savdo@localhost:5432/savdo"
+        "@playwright/mcp@latest",
+        "--headless"
       ]
-    },
-    "playwright": {
-      "command": "npx",
-      "args": ["-y", "@playwright/mcp@latest", "--headless"]
     }
   }
 }

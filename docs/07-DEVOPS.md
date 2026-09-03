@@ -2,9 +2,11 @@
 
 ## Local development
 
-Prerequisites on the developer machine (the agents' machine): Go (pin in
-`02-TECH-STACK.md`), Node LTS via fnm, pnpm, Docker with Compose v2. `gh` CLI for the
-GitHub remote. Currently missing here: Go and `gh` (Q-14, Q-15).
+Prerequisites on the developer machine (the agents' machine): Go, Node LTS via fnm, pnpm,
+Docker with Compose, `gh`. Everything else is pinned and installed by the repo itself:
+Go tools through the `go tool` directive in `api/go.mod`, golangci-lint by the Makefile,
+TS tools as pnpm dev dependencies (D-24). Inspect the database with
+`docker compose exec postgres psql -U savdo savdo` — there is no postgres MCP.
 
 ```bash
 cp infra/.env.example infra/.env   # once; never commit .env

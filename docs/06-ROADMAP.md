@@ -18,7 +18,7 @@ the same phase (O-05), so the owner can test each increment.
 - [ ] Owner answers Q-14 (GitHub) and Q-15 (Go install); remote `Sulton-Ali/savdo` exists (answered 2026-09-03; box ticked by /phase-done)
 - [ ] Monorepo scaffold: `api/` Go module with `cmd/api` hello server, `contracts/openapi.yaml` with `/healthz`, `packages/{i18n,api-client}`, `admin/`, `web/`, `mobile/` minimal apps that build
 - [ ] Root `Makefile`: `verify`, `generate`, `dev-infra`, `dev-infra-down`, `migrate`, `seed`, `api`, `bot`
-- [ ] `make generate` pipeline: oapi-codegen (Go) + openapi-typescript/openapi-fetch (TS) + sqlc; freshness check in `verify`
+- [ ] `make generate` pipeline: oapi-codegen (Go) + openapi-typescript/openapi-fetch (TS) + sqlc, Go tools pinned via `go tool` in `go.mod` (D-24); freshness check in `verify`
 - [ ] `infra/docker-compose.yml` with Postgres (pinned), `infra/.env.example`, goose wired
 - [ ] Biome, golangci-lint, Vitest, Go test configs; `lefthook` commit-msg hook (Conventional Commits, rejects attribution trailers)
 - [ ] GitHub Actions `ci.yml` running `make verify` on PR and push to `main`
