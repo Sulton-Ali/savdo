@@ -1,0 +1,24 @@
+/**
+ * CSS custom properties mirroring `./tokens.ts`. Keep both in sync by hand —
+ * there is no build step for this package (Phase 0 keeps it plain ESM + CSS).
+ *
+ * `--savdo-color-primary` is a placeholder (#0f766e, teal-700); the real
+ * brand colour is an owner decision for a later phase.
+ */
+:root {
+  --savdo-color-primary: #0f766e;
+  --savdo-color-primary-hover: #0d9488;
+  --savdo-color-bg: #f5f5f4;
+  --savdo-color-surface: #ffffff;
+  --savdo-color-text: #1f2937;
+  --savdo-color-muted: #6b7280;
+  --savdo-color-success: #16a34a;
+  --savdo-color-warning: #d97706;
+  --savdo-color-danger: #dc2626;
+
+  --savdo-radius-sm: 4px;
+  --savdo-radius-md: 8px;
+  --savdo-radius-lg: 12px;
+
+  --savdo-font-family: Inter, system-ui, sans-serif;
+}
