@@ -21,6 +21,7 @@ import (
 	"github.com/Sulton-Ali/savdo/api/db"
 	"github.com/Sulton-Ali/savdo/api/internal/catalog"
 	"github.com/Sulton-Ali/savdo/api/internal/config"
+	"github.com/Sulton-Ali/savdo/api/internal/crm"
 	apidb "github.com/Sulton-Ali/savdo/api/internal/db"
 	"github.com/Sulton-Ali/savdo/api/internal/media"
 	"github.com/Sulton-Ali/savdo/api/internal/seed"
@@ -173,7 +174,35 @@ func runSeed(args []string) error {
 	fmt.Printf("catalog: %d units, %d attribute definitions, %d categories, %d products, %d variants, %d images created, %d images repaired\n",
 		catalogReport.UnitsCreated, catalogReport.AttributesCreated, catalogReport.CategoriesCreated,
 		catalogReport.ProductsCreated, catalogReport.VariantsCreated, catalogReport.ImagesCreated, catalogReport.ImagesRepaired)
+
+	stockReport, err := runSeedStock(ctx, pool, report.ShopID)
+	if err != nil {
+		return fmt.Errorf("seed stock: %w", err)
+	}
+	if stockReport.Skipped {
+		fmt.Println("stock already seeded")
+	} else {
+		fmt.Printf("stock: %d suppliers, %d purchases, %d purchase items, %d transfers created\n",
+			stockReport.SuppliersCreated, stockReport.PurchasesCreated, stockReport.PurchaseItemsCreated, stockReport.TransfersCreated)
+	}
 	return nil
+}
+
+// runSeedStock wires the crm and stock services exactly as cmd/api does,
+// then calls seed.Stock — the suppliers/purchases/transfer pass documented
+// on seed.Stock's own doc comment (D-49).
+func runSeedStock(ctx context.Context, pool *pgxpool.Pool, shopID uuid.UUID) (seed.StockReport, error) {
+	q := apidb.New(pool)
+
+	owner, err := q.GetOwner(ctx, shopID)
+	if err != nil {
+		return seed.StockReport{}, fmt.Errorf("get owner: %w", err)
+	}
+
+	crmHandler := crm.NewHandler(crm.NewService(q))
+	stockHandler := stock.NewHandler(stock.NewService(pool, q))
+
+	return seed.Stock(ctx, pool, q, crmHandler, stockHandler, shopID, owner.ID)
 }
 
 // runSeedCatalog wires the catalog service and the media pipeline exactly
