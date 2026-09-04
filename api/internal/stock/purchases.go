@@ -1,11 +1,14 @@
-// Purchases: draft -> receive -> cancel (docs/03-ARCHITECTURE.md §
-// "Receive a purchase"; docs/04-DATA-MODEL.md § 3; D-42/D-45/D-47/D-48).
-// Requires stock.write (manager+, docs/05-API.md's endpoint table) on
-// every route — the same permission every other write in this package
-// gates on, and every role with it also has cost.read (auth.rolePermissions),
-// so unitCost/totalCost are effectively manager+-only by the route gate
-// alone; there is no cashier-reachable purchases code path to separately
-// filter cost out of (mirrors ListStockMovements' own note on this).
+package stock
+
+// This file: purchases, draft -> receive -> cancel
+// (docs/03-ARCHITECTURE.md § "Receive a purchase"; docs/04-DATA-MODEL.md
+// § 3; D-42/D-45/D-47/D-48). Requires stock.write (manager+,
+// docs/05-API.md's endpoint table) on every route — the same permission
+// every other write in this package gates on, and every role with it also
+// has cost.read (auth.rolePermissions), so unitCost/totalCost are
+// effectively manager+-only by the route gate alone; there is no
+// cashier-reachable purchases code path to separately filter cost out of
+// (mirrors ListStockMovements' own note on this).
 //
 // productName is resolved by locale (contracts/openapi.yaml's PurchaseItem),
 // but this package has no way to read the caller's Accept-Language: that
@@ -19,7 +22,6 @@
 // file therefore resolves in the shop's own default_locale
 // (shops.default_locale) rather than the caller's Accept-Language —
 // flagged in the T4 report as a decision, not a silent guess.
-package stock
 
 import (
 	"context"

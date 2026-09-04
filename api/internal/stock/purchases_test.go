@@ -56,7 +56,7 @@ func receivePurchase(ctx context.Context, t *testing.T, h *stock.Handler, pool *
 	return resp, nil
 }
 
-func mustCreatePurchase(t *testing.T, h *stock.Handler, ctx context.Context, supplierID, locationID, variantID uuid.UUID, qty, unitCost string) gen.Purchase {
+func mustCreatePurchase(ctx context.Context, t *testing.T, h *stock.Handler, supplierID, locationID, variantID uuid.UUID, qty, unitCost string) gen.Purchase {
 	t.Helper()
 	resp, err := h.CreatePurchase(ctx, purchaseCreateReq(supplierID, locationID, variantID, qty, unitCost))
 	if err != nil {
@@ -94,7 +94,7 @@ func TestCreatePurchase_computesTotalsAndSequentialNumbers(t *testing.T) {
 	loc := seedLocation(ctx, t, q, shop.ID, "Main")
 	managerCtx := ctxAs(shop.ID, manager)
 
-	first := mustCreatePurchase(t, h, managerCtx, supplier.ID, loc.ID, variant.ID, "10.000", "1500.00")
+	first := mustCreatePurchase(managerCtx, t, h, supplier.ID, loc.ID, variant.ID, "10.000", "1500.00")
 	if first.Number != "P-000001" {
 		t.Fatalf("first Number = %q, want P-000001", first.Number)
 	}
@@ -108,7 +108,7 @@ func TestCreatePurchase_computesTotalsAndSequentialNumbers(t *testing.T) {
 		t.Fatalf("Status = %q, want draft", first.Status)
 	}
 
-	second := mustCreatePurchase(t, h, managerCtx, supplier.ID, loc.ID, variant.ID, "2.000", "1000.00")
+	second := mustCreatePurchase(managerCtx, t, h, supplier.ID, loc.ID, variant.ID, "2.000", "1000.00")
 	if second.Number != "P-000002" {
 		t.Fatalf("second Number = %q, want P-000002 (sequential per shop)", second.Number)
 	}
@@ -140,7 +140,7 @@ func TestCreatePurchase_itemProductNameVariantLabelSku(t *testing.T) {
 	loc := seedLocation(ctx, t, q, shop.ID, "Main")
 	managerCtx := ctxAs(shop.ID, manager)
 
-	created := mustCreatePurchase(t, h, managerCtx, supplier.ID, loc.ID, variant.ID, "3.000", "500.00")
+	created := mustCreatePurchase(managerCtx, t, h, supplier.ID, loc.ID, variant.ID, "3.000", "500.00")
 	if len(created.Items) != 1 {
 		t.Fatalf("Items = %+v, want 1", created.Items)
 	}
@@ -253,7 +253,7 @@ func TestUpdatePurchase_draftPatchReplacesItemsAndRecomputesTotal(t *testing.T) 
 	loc := seedLocation(ctx, t, q, shop.ID, "Main")
 	managerCtx := ctxAs(shop.ID, manager)
 
-	created := mustCreatePurchase(t, h, managerCtx, supplier.ID, loc.ID, variantA.ID, "10.000", "100.00")
+	created := mustCreatePurchase(managerCtx, t, h, supplier.ID, loc.ID, variantA.ID, "10.000", "100.00")
 	if created.TotalCost != "1000.00" {
 		t.Fatalf("initial TotalCost = %q, want 1000.00", created.TotalCost)
 	}
@@ -295,7 +295,7 @@ func TestUpdatePurchase_notDraftIs409(t *testing.T) {
 	loc := seedLocation(ctx, t, q, shop.ID, "Main")
 	managerCtx := ctxAs(shop.ID, manager)
 
-	created := mustCreatePurchase(t, h, managerCtx, supplier.ID, loc.ID, variant.ID, "10.000", "100.00")
+	created := mustCreatePurchase(managerCtx, t, h, supplier.ID, loc.ID, variant.ID, "10.000", "100.00")
 	if _, err := receivePurchase(managerCtx, t, h, pool, q, created.Id); err != nil {
 		t.Fatalf("receivePurchase: %v", err)
 	}
@@ -320,7 +320,7 @@ func TestReceivePurchaseTx_writesMovementAndLevel(t *testing.T) {
 	loc := seedLocation(ctx, t, q, shop.ID, "Main")
 	managerCtx := ctxAs(shop.ID, manager)
 
-	created := mustCreatePurchase(t, h, managerCtx, supplier.ID, loc.ID, variant.ID, "10.000", "250.00")
+	created := mustCreatePurchase(managerCtx, t, h, supplier.ID, loc.ID, variant.ID, "10.000", "250.00")
 
 	received, err := receivePurchase(managerCtx, t, h, pool, q, created.Id)
 	if err != nil {
@@ -359,7 +359,7 @@ func TestReceivePurchaseTx_costOverrideOnAndOff(t *testing.T) {
 	locOn := seedLocation(ctx, t, q, shopOn.ID, "Main")
 	ctxOn := ctxAs(shopOn.ID, managerOn)
 
-	createdOn := mustCreatePurchase(t, h, ctxOn, supplierOn.ID, locOn.ID, variantOn.ID, "5.000", "777.00")
+	createdOn := mustCreatePurchase(ctxOn, t, h, supplierOn.ID, locOn.ID, variantOn.ID, "5.000", "777.00")
 	if _, err := receivePurchase(ctxOn, t, h, pool, q, createdOn.Id); err != nil {
 		t.Fatalf("receivePurchase (cost on): %v", err)
 	}
@@ -393,7 +393,7 @@ func TestReceivePurchaseTx_costOverrideOnAndOff(t *testing.T) {
 	locOff := seedLocation(ctx, t, q, shopOff.ID, "Main")
 	ctxOff := ctxAs(shopOff.ID, managerOff)
 
-	createdOff := mustCreatePurchase(t, h, ctxOff, supplierOff.ID, locOff.ID, variantOff.ID, "5.000", "999.00")
+	createdOff := mustCreatePurchase(ctxOff, t, h, supplierOff.ID, locOff.ID, variantOff.ID, "5.000", "999.00")
 	if _, err := receivePurchase(ctxOff, t, h, pool, q, createdOff.Id); err != nil {
 		t.Fatalf("receivePurchase (cost off): %v", err)
 	}
@@ -420,14 +420,14 @@ func TestReceivePurchaseTx_alreadyReceivedAndCancelled(t *testing.T) {
 	loc := seedLocation(ctx, t, q, shop.ID, "Main")
 	managerCtx := ctxAs(shop.ID, manager)
 
-	created := mustCreatePurchase(t, h, managerCtx, supplier.ID, loc.ID, variant.ID, "10.000", "100.00")
+	created := mustCreatePurchase(managerCtx, t, h, supplier.ID, loc.ID, variant.ID, "10.000", "100.00")
 	if _, err := receivePurchase(managerCtx, t, h, pool, q, created.Id); err != nil {
 		t.Fatalf("first receive: %v", err)
 	}
 	_, err := receivePurchase(managerCtx, t, h, pool, q, created.Id)
 	assertConflict(t, "second receive", err, gen.PURCHASEALREADYRECEIVED)
 
-	createdB := mustCreatePurchase(t, h, managerCtx, supplier.ID, loc.ID, variant.ID, "1.000", "1.00")
+	createdB := mustCreatePurchase(managerCtx, t, h, supplier.ID, loc.ID, variant.ID, "1.000", "1.00")
 	if _, err := h.CancelPurchase(managerCtx, gen.CancelPurchaseRequestObject{Id: createdB.Id}); err != nil {
 		t.Fatalf("cancel draft: %v", err)
 	}
@@ -449,7 +449,7 @@ func TestReceivePurchaseTx_writesAuditRow(t *testing.T) {
 	loc := seedLocation(ctx, t, q, shop.ID, "Main")
 	managerCtx := ctxAs(shop.ID, manager)
 
-	created := mustCreatePurchase(t, h, managerCtx, supplier.ID, loc.ID, variant.ID, "4.000", "10.00")
+	created := mustCreatePurchase(managerCtx, t, h, supplier.ID, loc.ID, variant.ID, "4.000", "10.00")
 	if _, err := receivePurchase(managerCtx, t, h, pool, q, created.Id); err != nil {
 		t.Fatalf("receivePurchase: %v", err)
 	}
@@ -479,7 +479,7 @@ func TestCancelPurchase_draftWritesNoMovement(t *testing.T) {
 	loc := seedLocation(ctx, t, q, shop.ID, "Main")
 	managerCtx := ctxAs(shop.ID, manager)
 
-	created := mustCreatePurchase(t, h, managerCtx, supplier.ID, loc.ID, variant.ID, "6.000", "50.00")
+	created := mustCreatePurchase(managerCtx, t, h, supplier.ID, loc.ID, variant.ID, "6.000", "50.00")
 
 	resp, err := h.CancelPurchase(managerCtx, gen.CancelPurchaseRequestObject{Id: created.Id})
 	if err != nil {
@@ -518,7 +518,7 @@ func TestCancelPurchase_receivedWritesReversingMovementsAndRebuildMatches(t *tes
 	loc := seedLocation(ctx, t, q, shop.ID, "Main")
 	managerCtx := ctxAs(shop.ID, manager)
 
-	created := mustCreatePurchase(t, h, managerCtx, supplier.ID, loc.ID, variant.ID, "8.000", "20.00")
+	created := mustCreatePurchase(managerCtx, t, h, supplier.ID, loc.ID, variant.ID, "8.000", "20.00")
 	if _, err := receivePurchase(managerCtx, t, h, pool, q, created.Id); err != nil {
 		t.Fatalf("receivePurchase: %v", err)
 	}
@@ -603,7 +603,7 @@ func TestCancelPurchase_receivedWithStockAlreadyMovedOut(t *testing.T) {
 	locOff := seedLocation(ctx, t, q, shopOff.ID, "Main")
 	ctxOff := ctxAs(shopOff.ID, managerOff)
 
-	createdOff := mustCreatePurchase(t, h, ctxOff, supplierOff.ID, locOff.ID, variantOff.ID, "10.000", "1.00")
+	createdOff := mustCreatePurchase(ctxOff, t, h, supplierOff.ID, locOff.ID, variantOff.ID, "10.000", "1.00")
 	if _, err := receivePurchase(ctxOff, t, h, pool, q, createdOff.Id); err != nil {
 		t.Fatalf("receivePurchase: %v", err)
 	}
@@ -653,7 +653,7 @@ func TestCancelPurchase_receivedWithStockAlreadyMovedOut(t *testing.T) {
 	locOn := seedLocation(ctx, t, q, shopOn.ID, "Main")
 	ctxOn := ctxAs(shopOn.ID, managerOn)
 
-	createdOn := mustCreatePurchase(t, h, ctxOn, supplierOn.ID, locOn.ID, variantOn.ID, "10.000", "1.00")
+	createdOn := mustCreatePurchase(ctxOn, t, h, supplierOn.ID, locOn.ID, variantOn.ID, "10.000", "1.00")
 	if _, err := receivePurchase(ctxOn, t, h, pool, q, createdOn.Id); err != nil {
 		t.Fatalf("receivePurchase (allow negative): %v", err)
 	}
@@ -689,7 +689,7 @@ func TestPurchasesAndSuppliers_cashierForbiddenOnEveryRoute(t *testing.T) {
 	ownerCtx := ctxAs(shop.ID, owner)
 	cashierCtx := ctxAs(shop.ID, cashier)
 
-	created := mustCreatePurchase(t, h, ownerCtx, supplier.ID, loc.ID, variant.ID, "1.000", "1.00")
+	created := mustCreatePurchase(ownerCtx, t, h, supplier.ID, loc.ID, variant.ID, "1.000", "1.00")
 
 	assertForbidden(t, "ListPurchases", func() error {
 		_, err := h.ListPurchases(cashierCtx, gen.ListPurchasesRequestObject{})
@@ -737,8 +737,8 @@ func TestListPurchases_isolatedPerShop(t *testing.T) {
 	locA := seedLocation(ctx, t, q, shopA.ID, "Main A")
 	locB := seedLocation(ctx, t, q, shopB.ID, "Main B")
 
-	mustCreatePurchase(t, h, ctxAs(shopA.ID, managerA), supplierA.ID, locA.ID, variantA.ID, "1.000", "1.00")
-	mustCreatePurchase(t, h, ctxAs(shopB.ID, managerB), supplierB.ID, locB.ID, variantB.ID, "1.000", "1.00")
+	mustCreatePurchase(ctxAs(shopA.ID, managerA), t, h, supplierA.ID, locA.ID, variantA.ID, "1.000", "1.00")
+	mustCreatePurchase(ctxAs(shopB.ID, managerB), t, h, supplierB.ID, locB.ID, variantB.ID, "1.000", "1.00")
 
 	resp, err := h.ListPurchases(ctxAs(shopA.ID, managerA), gen.ListPurchasesRequestObject{})
 	if err != nil {

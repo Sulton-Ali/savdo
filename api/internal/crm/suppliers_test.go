@@ -46,7 +46,7 @@ func ctxAs(shopID uuid.UUID, role db.UserRole) context.Context {
 
 func strPtr(s string) *string { return &s }
 
-func mustCreateSupplier(t *testing.T, h *crm.Handler, ctx context.Context, name string) gen.Supplier {
+func mustCreateSupplier(ctx context.Context, t *testing.T, h *crm.Handler, name string) gen.Supplier {
 	t.Helper()
 	resp, err := h.CreateSupplier(ctx, gen.CreateSupplierRequestObject{Body: &gen.SupplierCreate{Name: name}})
 	if err != nil {
@@ -64,7 +64,7 @@ func TestCreateSupplier_minimalAndFullFields(t *testing.T) {
 	shop := seedShop(context.Background(), t, q, "create-supplier")
 	ctx := ctxAs(shop.ID, db.UserRoleManager)
 
-	minimal := mustCreateSupplier(t, h, ctx, "Bare Supplier")
+	minimal := mustCreateSupplier(ctx, t, h, "Bare Supplier")
 	if minimal.Name != "Bare Supplier" {
 		t.Fatalf("Name = %q, want %q", minimal.Name, "Bare Supplier")
 	}
@@ -96,7 +96,7 @@ func TestCreateSupplier_duplicateActiveNameConflicts(t *testing.T) {
 	shop := seedShop(context.Background(), t, q, "dup-supplier")
 	ctx := ctxAs(shop.ID, db.UserRoleOwner)
 
-	mustCreateSupplier(t, h, ctx, "Same Name")
+	mustCreateSupplier(ctx, t, h, "Same Name")
 
 	_, err := h.CreateSupplier(ctx, gen.CreateSupplierRequestObject{Body: &gen.SupplierCreate{Name: "Same Name"}})
 	if err == nil {
@@ -116,7 +116,7 @@ func TestCreateSupplier_nameFreedAfterSoftDelete(t *testing.T) {
 	shop := seedShop(context.Background(), t, q, "reuse-supplier-name")
 	ctx := ctxAs(shop.ID, db.UserRoleOwner)
 
-	first := mustCreateSupplier(t, h, ctx, "Reusable Name")
+	first := mustCreateSupplier(ctx, t, h, "Reusable Name")
 
 	if _, err := h.DeleteSupplier(ctx, gen.DeleteSupplierRequestObject{Id: first.Id}); err != nil {
 		t.Fatalf("DeleteSupplier: %v", err)
@@ -125,7 +125,7 @@ func TestCreateSupplier_nameFreedAfterSoftDelete(t *testing.T) {
 	// The partial unique index only covers live rows (deleted_at IS NULL),
 	// so the name is free again — same reasoning as
 	// categories_shop_id_slug_key.
-	second := mustCreateSupplier(t, h, ctx, "Reusable Name")
+	second := mustCreateSupplier(ctx, t, h, "Reusable Name")
 	if second.Id == first.Id {
 		t.Fatal("second CreateSupplier reused the first's id")
 	}
@@ -136,7 +136,7 @@ func TestUpdateSupplier_nullClearsNullableFields(t *testing.T) {
 	shop := seedShop(context.Background(), t, q, "update-supplier")
 	ctx := ctxAs(shop.ID, db.UserRoleManager)
 
-	created := mustCreateSupplier(t, h, ctx, "Updatable")
+	created := mustCreateSupplier(ctx, t, h, "Updatable")
 	if _, err := h.UpdateSupplier(ctx, gen.UpdateSupplierRequestObject{Id: created.Id, Body: &gen.SupplierPatch{
 		ContactName: nullable.NewNullableWithValue("Dilnoza"), Phone: nullable.NewNullableWithValue("+998900000000"),
 	}}); err != nil {
@@ -172,7 +172,7 @@ func TestGetSupplier_notFoundForOtherShopOrDeleted(t *testing.T) {
 	ctxA := ctxAs(shopA.ID, db.UserRoleManager)
 	ctxB := ctxAs(shopB.ID, db.UserRoleManager)
 
-	created := mustCreateSupplier(t, h, ctxA, "Shop A Supplier")
+	created := mustCreateSupplier(ctxA, t, h, "Shop A Supplier")
 
 	if _, err := h.GetSupplier(ctxB, gen.GetSupplierRequestObject{Id: created.Id}); err == nil {
 		t.Fatal("GetSupplier from another shop: want 404, got nil error")
@@ -203,9 +203,9 @@ func TestListSuppliers_isolatedPerShopAndSearch(t *testing.T) {
 	ctxA := ctxAs(shopA.ID, db.UserRoleManager)
 	ctxB := ctxAs(shopB.ID, db.UserRoleManager)
 
-	mustCreateSupplier(t, h, ctxA, "Tashkent Textiles")
-	mustCreateSupplier(t, h, ctxA, "Fergana Fabrics")
-	mustCreateSupplier(t, h, ctxB, "Other Shop Supplier")
+	mustCreateSupplier(ctxA, t, h, "Tashkent Textiles")
+	mustCreateSupplier(ctxA, t, h, "Fergana Fabrics")
+	mustCreateSupplier(ctxB, t, h, "Other Shop Supplier")
 
 	resp, err := h.ListSuppliers(ctxA, gen.ListSuppliersRequestObject{})
 	if err != nil {
@@ -244,7 +244,7 @@ func TestSuppliers_cashierForbiddenOnEveryRoute(t *testing.T) {
 	owner := ctxAs(shop.ID, db.UserRoleOwner)
 	cashier := ctxAs(shop.ID, db.UserRoleCashier)
 
-	created := mustCreateSupplier(t, h, owner, "Cashier Blocked")
+	created := mustCreateSupplier(owner, t, h, "Cashier Blocked")
 
 	assertForbidden(t, "ListSuppliers", func() error {
 		_, err := h.ListSuppliers(cashier, gen.ListSuppliersRequestObject{})
