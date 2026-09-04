@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"sort"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -12,6 +15,7 @@ import (
 
 	"github.com/Sulton-Ali/savdo/api/gen"
 	"github.com/Sulton-Ali/savdo/api/internal/apierr"
+	"github.com/Sulton-Ali/savdo/api/internal/catalog"
 	"github.com/Sulton-Ali/savdo/api/internal/db"
 	"github.com/Sulton-Ali/savdo/api/internal/stock"
 )
@@ -763,4 +767,453 @@ func seedAttributeDefinition(ctx context.Context, t *testing.T, q *db.Queries, s
 		t.Fatalf("seedAttributeDefinition(%q): %v", code, err)
 	}
 	return a
+}
+
+// withAcceptLanguage runs fn with ctx carrying header as the request's
+// `Accept-Language` (catalog.AcceptLanguageMiddleware's own stashing,
+// exercised directly here rather than via a full router) — the only way
+// to exercise stock's own catalog.ResolveLocale call sites without
+// standing up httpx.NewRouter's whole middleware chain (MAJOR 1, T4
+// review).
+func withAcceptLanguage(ctx context.Context, t *testing.T, header string, fn func(context.Context)) {
+	t.Helper()
+	mw := catalog.AcceptLanguageMiddleware(func(ctx context.Context, _ http.ResponseWriter, _ *http.Request, _ any) (any, error) {
+		fn(ctx)
+		return nil, nil
+	}, "test")
+	req, err := http.NewRequest(http.MethodGet, "/", nil)
+	if err != nil {
+		t.Fatalf("withAcceptLanguage: NewRequest: %v", err)
+	}
+	if header != "" {
+		req.Header.Set("Accept-Language", header)
+	}
+	if _, err := mw(ctx, nil, req, nil); err != nil {
+		t.Fatalf("withAcceptLanguage: middleware: %v", err)
+	}
+}
+
+// TestGetPurchase_productNameHonoursAcceptLanguage is MAJOR 1's own test
+// (T4 review): a product with both uz and ru names, requested with
+// `Accept-Language: ru` resolves productName in ru; requested with no
+// header at all falls back to the shop's default_locale (uz) — exactly
+// Product.name's own requested -> uz -> any rule (ADR-012).
+func TestGetPurchase_productNameHonoursAcceptLanguage(t *testing.T) {
+	pool, q := newTestQueries(t)
+	ctx := context.Background()
+	h := stock.NewHandler(stock.NewService(pool, q))
+
+	shop := seedShop(ctx, t, q, "purchase-accept-language")
+	manager := seedUser(ctx, t, q, shop.ID, "manager1", db.UserRoleManager)
+	supplier := seedSupplier(ctx, t, q, shop.ID, "Locale Supplier")
+	unit := seedUnit(ctx, t, q, shop.ID, "pcs")
+	product := seedProduct(ctx, t, q, shop.ID, unit.ID, "accept-language-product")
+	if err := q.UpsertProductTranslation(ctx, db.UpsertProductTranslationParams{ProductID: product.ID, Locale: "uz", Name: "Koylak"}); err != nil {
+		t.Fatalf("UpsertProductTranslation(uz): %v", err)
+	}
+	if err := q.UpsertProductTranslation(ctx, db.UpsertProductTranslationParams{ProductID: product.ID, Locale: "ru", Name: "Rubashka"}); err != nil {
+		t.Fatalf("UpsertProductTranslation(ru): %v", err)
+	}
+	variant := seedVariant(ctx, t, q, shop.ID, product.ID, "{}")
+	loc := seedLocation(ctx, t, q, shop.ID, "Main")
+	managerCtx := ctxAs(shop.ID, manager)
+
+	created := mustCreatePurchase(managerCtx, t, h, supplier.ID, loc.ID, variant.ID, "1.000", "10.00")
+
+	withAcceptLanguage(managerCtx, t, "ru", func(ctx context.Context) {
+		resp, err := h.GetPurchase(ctx, gen.GetPurchaseRequestObject{Id: created.Id})
+		if err != nil {
+			t.Fatalf("GetPurchase (Accept-Language: ru): %v", err)
+		}
+		got, ok := resp.(gen.GetPurchase200JSONResponse)
+		if !ok {
+			t.Fatalf("GetPurchase response type = %T", resp)
+		}
+		if len(got.Items) != 1 || got.Items[0].ProductName != "Rubashka" {
+			t.Fatalf("Items = %+v, want productName Rubashka (Accept-Language: ru)", got.Items)
+		}
+	})
+
+	withAcceptLanguage(managerCtx, t, "", func(ctx context.Context) {
+		resp, err := h.GetPurchase(ctx, gen.GetPurchaseRequestObject{Id: created.Id})
+		if err != nil {
+			t.Fatalf("GetPurchase (no Accept-Language): %v", err)
+		}
+		got, ok := resp.(gen.GetPurchase200JSONResponse)
+		if !ok {
+			t.Fatalf("GetPurchase response type = %T", resp)
+		}
+		if len(got.Items) != 1 || got.Items[0].ProductName != "Koylak" {
+			t.Fatalf("Items = %+v, want productName Koylak (shop default_locale, no header)", got.Items)
+		}
+	})
+}
+
+// TestCreatePurchase_duplicateVariantIdRejected is MINOR 3's test (T4
+// review): two items of the same PurchaseCreate naming the same variantId
+// is a 400 VALIDATION_FAILED on `items`, not two separate purchase_items
+// rows.
+func TestCreatePurchase_duplicateVariantIdRejected(t *testing.T) {
+	pool, q := newTestQueries(t)
+	ctx := context.Background()
+	h := stock.NewHandler(stock.NewService(pool, q))
+
+	shop := seedShop(ctx, t, q, "purchase-dup-variant")
+	manager := seedUser(ctx, t, q, shop.ID, "manager1", db.UserRoleManager)
+	supplier := seedSupplier(ctx, t, q, shop.ID, "Dup Variant Supplier")
+	unit := seedUnit(ctx, t, q, shop.ID, "pcs")
+	product := seedProduct(ctx, t, q, shop.ID, unit.ID, "dup-variant-product")
+	variant := seedVariant(ctx, t, q, shop.ID, product.ID, "{}")
+	loc := seedLocation(ctx, t, q, shop.ID, "Main")
+	managerCtx := ctxAs(shop.ID, manager)
+
+	_, err := h.CreatePurchase(managerCtx, gen.CreatePurchaseRequestObject{Body: &gen.PurchaseCreate{
+		SupplierId: supplier.ID, LocationId: loc.ID,
+		Items: []gen.PurchaseItemCreate{
+			{VariantId: variant.ID, Qty: "1.000", UnitCost: "1.00"},
+			{VariantId: variant.ID, Qty: "2.000", UnitCost: "2.00"},
+		},
+	}})
+	if err == nil {
+		t.Fatal("want 400 VALIDATION_FAILED for a duplicate variantId, got no error")
+	}
+	var apiErr *apierr.Error
+	if !errors.As(err, &apiErr) || apiErr.Status != 400 {
+		t.Fatalf("error = %v, want 400 VALIDATION_FAILED", err)
+	}
+	if apiErr.Details["fields"].(map[string]string)["items"] != "invalid" {
+		t.Fatalf("details = %v, want fields.items=invalid", apiErr.Details)
+	}
+}
+
+// TestCreatePurchase_lineTotalOutOfRangeMapsTo400 is MINOR 4's test (T4
+// review): a qty and unitCost that each individually pass their own
+// bound (parseQty's numeric(12,3), money.ParseAmount's numeric(14,2)) can
+// still multiply into a line_total Postgres' numeric(14,2) column cannot
+// hold — CreatePurchaseItem's own insert must map that the same way
+// Move already does (mapOutOfRange), not surface an opaque 500.
+func TestCreatePurchase_lineTotalOutOfRangeMapsTo400(t *testing.T) {
+	pool, q := newTestQueries(t)
+	ctx := context.Background()
+	h := stock.NewHandler(stock.NewService(pool, q))
+
+	shop := seedShop(ctx, t, q, "purchase-out-of-range")
+	manager := seedUser(ctx, t, q, shop.ID, "manager1", db.UserRoleManager)
+	supplier := seedSupplier(ctx, t, q, shop.ID, "Out Of Range Supplier")
+	unit := seedUnit(ctx, t, q, shop.ID, "pcs")
+	product := seedProduct(ctx, t, q, shop.ID, unit.ID, "out-of-range-product")
+	variant := seedVariant(ctx, t, q, shop.ID, product.ID, "{}")
+	loc := seedLocation(ctx, t, q, shop.ID, "Main")
+	managerCtx := ctxAs(shop.ID, manager)
+
+	_, err := h.CreatePurchase(managerCtx, purchaseCreateReq(supplier.ID, loc.ID, variant.ID, "999999999.999", "999999999999.99"))
+	if err == nil {
+		t.Fatal("want 400 VALIDATION_FAILED for a line_total out of numeric(14,2) range, got no error")
+	}
+	var apiErr *apierr.Error
+	if !errors.As(err, &apiErr) || apiErr.Status != 400 {
+		t.Fatalf("error = %v, want 400 VALIDATION_FAILED", err)
+	}
+	if apiErr.Details["fields"].(map[string]string)["qty"] != "invalid" {
+		t.Fatalf("details = %v, want fields.qty=invalid (mapOutOfRange's own shape)", apiErr.Details)
+	}
+}
+
+// TestReceiveAndCancelPurchase_multiItem is MAJOR 2's test (T4 review),
+// both halves:
+//
+// (a) receiving a three-item purchase (variants inserted out of order in
+// the request) writes one purchase_in per line, in ascending variant_id
+// order (Move's own deadlock-avoidance rule), totalCost is the sum of the
+// three line totals, and the stored purchases.total_cost column equals
+// the response totalCost (Sonnet MINOR 2 / Opus MINOR 5).
+//
+// (b) cancelling that received purchase after only the second variant's
+// stock left (a sale, not a purchase-cancel) is 409 STOCK_INSUFFICIENT,
+// writes zero purchase_cancel movements (the whole transaction rolls
+// back, not just the failing line), leaves the first variant's level
+// unchanged, leaves the purchase status received, and stock.Rebuild
+// still matches the (unchanged) levels.
+func TestReceiveAndCancelPurchase_multiItem(t *testing.T) {
+	pool, q := newTestQueries(t)
+	ctx := context.Background()
+	h := stock.NewHandler(stock.NewService(pool, q))
+	svc := stock.NewService(pool, q)
+
+	shop := seedShop(ctx, t, q, "purchase-multi-item")
+	manager := seedUser(ctx, t, q, shop.ID, "manager1", db.UserRoleManager)
+	supplier := seedSupplier(ctx, t, q, shop.ID, "Multi Item Supplier")
+	unit := seedUnit(ctx, t, q, shop.ID, "pcs")
+	product := seedProduct(ctx, t, q, shop.ID, unit.ID, "multi-item-product")
+	v1 := seedVariant(ctx, t, q, shop.ID, product.ID, `{"k":"1"}`)
+	v2 := seedVariant(ctx, t, q, shop.ID, product.ID, `{"k":"2"}`)
+	v3 := seedVariant(ctx, t, q, shop.ID, product.ID, `{"k":"3"}`)
+	loc := seedLocation(ctx, t, q, shop.ID, "Main")
+	managerCtx := ctxAs(shop.ID, manager)
+
+	// Inserted out of order (v3, v1, v2) — CreatePurchase itself does not
+	// sort; ReceivePurchaseTx's own sortedPurchaseItems is what must.
+	resp, err := h.CreatePurchase(managerCtx, gen.CreatePurchaseRequestObject{Body: &gen.PurchaseCreate{
+		SupplierId: supplier.ID, LocationId: loc.ID,
+		Items: []gen.PurchaseItemCreate{
+			{VariantId: v3.ID, Qty: "5.000", UnitCost: "10.00"},
+			{VariantId: v1.ID, Qty: "5.000", UnitCost: "10.00"},
+			{VariantId: v2.ID, Qty: "5.000", UnitCost: "10.00"},
+		},
+	}})
+	if err != nil {
+		t.Fatalf("CreatePurchase: %v", err)
+	}
+	created, ok := resp.(gen.CreatePurchase201JSONResponse)
+	if !ok {
+		t.Fatalf("CreatePurchase response type = %T", resp)
+	}
+
+	received, err := receivePurchase(managerCtx, t, h, pool, q, created.Id)
+	if err != nil {
+		t.Fatalf("receivePurchase: %v", err)
+	}
+	if received.TotalCost != "150.00" {
+		t.Fatalf("TotalCost = %q, want 150.00 (3 lines * 5 * 10.00)", received.TotalCost)
+	}
+
+	for _, v := range []struct {
+		name string
+		id   uuid.UUID
+	}{{"v1", v1.ID}, {"v2", v2.ID}, {"v3", v3.ID}} {
+		if count := countMovements(ctx, t, pool, shop.ID, v.id, loc.ID, db.StockMovementKindPurchaseIn); count != 1 {
+			t.Fatalf("%s purchase_in movements = %d, want 1", v.name, count)
+		}
+	}
+
+	// Movements were written in ascending variant_id order regardless of
+	// the request's own item order — ids are UUID v7 (time-ordered), so
+	// the insertion order Move actually ran in is recoverable by sorting
+	// the written rows by id.
+	rows, err := pool.Query(ctx, `SELECT variant_id FROM stock_movements WHERE shop_id = $1 AND ref_id = $2 ORDER BY id`, shop.ID, created.Id)
+	if err != nil {
+		t.Fatalf("query movement order: %v", err)
+	}
+	var gotOrder []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			t.Fatalf("scan movement variant_id: %v", err)
+		}
+		gotOrder = append(gotOrder, id)
+	}
+	rows.Close()
+	wantOrder := []uuid.UUID{v1.ID, v2.ID, v3.ID}
+	sort.Slice(wantOrder, func(i, j int) bool { return wantOrder[i].String() < wantOrder[j].String() })
+	if len(gotOrder) != 3 || gotOrder[0] != wantOrder[0] || gotOrder[1] != wantOrder[1] || gotOrder[2] != wantOrder[2] {
+		t.Fatalf("movement write order = %v, want ascending variant_id order %v", gotOrder, wantOrder)
+	}
+
+	dbPurchase, err := q.GetPurchase(ctx, db.GetPurchaseParams{ShopID: shop.ID, ID: created.Id})
+	if err != nil {
+		t.Fatalf("GetPurchase: %v", err)
+	}
+	storedTotal, err := dbPurchase.TotalCost.Value()
+	if err != nil {
+		t.Fatalf("TotalCost.Value: %v", err)
+	}
+	if storedTotal != "150.00" {
+		t.Fatalf("stored purchases.total_cost = %v, want 150.00 (equal to the response totalCost)", storedTotal)
+	}
+
+	// (b) Only v2's stock leaves, via a sale — not a purchase cancel.
+	if _, err := svc.MoveInTx(ctx, stock.MoveParams{
+		ShopID: shop.ID, VariantID: v2.ID, LocationID: loc.ID,
+		Kind: db.StockMovementKindSaleOut, Qty: d(t, "-5.000"),
+	}); err != nil {
+		t.Fatalf("sale out v2: %v", err)
+	}
+
+	beforeV1, _ := readLevel(ctx, t, pool, shop.ID, v1.ID, loc.ID)
+	beforeV3, _ := readLevel(ctx, t, pool, shop.ID, v3.ID, loc.ID)
+
+	_, err = h.CancelPurchase(managerCtx, gen.CancelPurchaseRequestObject{Id: created.Id})
+	if err == nil {
+		t.Fatal("want 409 STOCK_INSUFFICIENT, got no error")
+	}
+	var apiErr *apierr.Error
+	if !errors.As(err, &apiErr) || apiErr.Status != 409 || apiErr.Code != gen.STOCKINSUFFICIENT {
+		t.Fatalf("error = %v, want 409 STOCK_INSUFFICIENT", err)
+	}
+
+	var cancelCount int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM stock_movements WHERE shop_id = $1 AND ref_type = 'purchase_cancel'`, shop.ID).Scan(&cancelCount); err != nil {
+		t.Fatalf("count purchase_cancel movements: %v", err)
+	}
+	if cancelCount != 0 {
+		t.Fatalf("purchase_cancel movements after a failed cancel = %d, want 0 (the whole transaction must roll back)", cancelCount)
+	}
+
+	afterV1, exists := readLevel(ctx, t, pool, shop.ID, v1.ID, loc.ID)
+	if !exists || !afterV1.Equal(beforeV1) {
+		t.Fatalf("v1 level after the failed cancel = (%s, exists=%v), want unchanged at %s", afterV1, exists, beforeV1)
+	}
+
+	stillReceived, err := q.GetPurchase(ctx, db.GetPurchaseParams{ShopID: shop.ID, ID: created.Id})
+	if err != nil {
+		t.Fatalf("GetPurchase after failed cancel: %v", err)
+	}
+	if stillReceived.Status != db.PurchaseStatusReceived {
+		t.Fatalf("Status after failed cancel = %q, want received (unchanged)", stillReceived.Status)
+	}
+
+	beforeV2, _ := readLevel(ctx, t, pool, shop.ID, v2.ID, loc.ID)
+	result, err := stock.Rebuild(ctx, pool, shop.Slug)
+	if err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+	if result.Movements != 4 {
+		t.Fatalf("Rebuild Movements = %d, want 4 (3 receives + 1 sale; nothing from the failed cancel)", result.Movements)
+	}
+	afterRebuildV1, _ := readLevel(ctx, t, pool, shop.ID, v1.ID, loc.ID)
+	afterRebuildV2, _ := readLevel(ctx, t, pool, shop.ID, v2.ID, loc.ID)
+	afterRebuildV3, _ := readLevel(ctx, t, pool, shop.ID, v3.ID, loc.ID)
+	if !afterRebuildV1.Equal(beforeV1) || !afterRebuildV2.Equal(beforeV2) || !afterRebuildV3.Equal(beforeV3) {
+		t.Fatalf("levels after rebuild = (%s, %s, %s), want unchanged (%s, %s, %s)",
+			afterRebuildV1, afterRebuildV2, afterRebuildV3, beforeV1, beforeV2, beforeV3)
+	}
+}
+
+// receiveStep/startReceiveHoldingLock/assertReceiveStillBlocked/
+// waitReceiveLocked/finishReceive are ReceivePurchaseTx's own copy of
+// move_test.go's moveStep/startMoveHoldingLock/assertStillBlocked/
+// waitLocked/finish (MINOR 6, T4 review): begin a transaction, run
+// ReceivePurchaseTx inside it, and block holding whatever row lock
+// GetPurchaseForUpdate took until the test says commit — the same
+// deterministic "genuinely blocked, not just not-yet-scheduled" shape,
+// reused as separate functions (not generics) since the two step types
+// carry a different result field and Go's stdlib channel plumbing is
+// cheap to duplicate compared to a shared generic type.
+type receiveStep struct {
+	result gen.Purchase
+	err    error
+	locked chan struct{}
+	commit chan struct{}
+	done   chan error
+}
+
+func startReceiveHoldingLock(ctx context.Context, t *testing.T, pool *pgxpool.Pool, q *db.Queries, h *stock.Handler, id uuid.UUID) *receiveStep {
+	t.Helper()
+	s := &receiveStep{locked: make(chan struct{}), commit: make(chan struct{}), done: make(chan error, 1)}
+	go func() {
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			s.err = err
+			close(s.locked)
+			s.done <- err
+			return
+		}
+		s.result, s.err = h.ReceivePurchaseTx(ctx, q.WithTx(tx), id)
+		close(s.locked)
+
+		<-s.commit
+		if s.err != nil {
+			s.done <- tx.Rollback(ctx)
+			return
+		}
+		s.done <- tx.Commit(ctx)
+	}()
+	return s
+}
+
+func assertReceiveStillBlocked(t *testing.T, label string, s *receiveStep, timeout time.Duration) {
+	t.Helper()
+	select {
+	case <-s.locked:
+		t.Fatalf("%s: ReceivePurchaseTx returned before the blocking transaction committed, want it still blocked", label)
+	case <-time.After(timeout):
+	}
+}
+
+func waitReceiveLocked(t *testing.T, label string, s *receiveStep, timeout time.Duration) error {
+	t.Helper()
+	select {
+	case <-s.locked:
+		return s.err
+	case <-time.After(timeout):
+		t.Fatalf("%s: ReceivePurchaseTx did not return within %s", label, timeout)
+		return nil
+	}
+}
+
+func finishReceive(t *testing.T, label string, s *receiveStep, timeout time.Duration) error {
+	t.Helper()
+	close(s.commit)
+	select {
+	case err := <-s.done:
+		return err
+	case <-time.After(timeout):
+		t.Fatalf("%s: commit/rollback did not complete within %s", label, timeout)
+		return nil
+	}
+}
+
+// TestReceivePurchaseTx_concurrentReceiveExactlyOneSucceeds is MINOR 6's
+// test (T4 review): two goroutines racing ReceivePurchaseTx on the same
+// draft purchase — deterministically interleaved the same way
+// move_test.go's own TestMove_concurrentLastUnit_exactlyOneSucceeds is,
+// via GetPurchaseForUpdate's row lock rather than stock_levels' — exactly
+// one succeeds, the other (once unblocked) gets
+// PURCHASE_ALREADY_RECEIVED, and exactly one purchase_in movement per
+// line is ever written.
+func TestReceivePurchaseTx_concurrentReceiveExactlyOneSucceeds(t *testing.T) {
+	pool, q := newTestQueries(t)
+	ctx := context.Background()
+	h := stock.NewHandler(stock.NewService(pool, q))
+
+	shop := seedShop(ctx, t, q, "purchase-receive-race")
+	manager := seedUser(ctx, t, q, shop.ID, "manager1", db.UserRoleManager)
+	supplier := seedSupplier(ctx, t, q, shop.ID, "Race Supplier")
+	unit := seedUnit(ctx, t, q, shop.ID, "pcs")
+	product := seedProduct(ctx, t, q, shop.ID, unit.ID, "race-product")
+	v1 := seedVariant(ctx, t, q, shop.ID, product.ID, `{"k":"1"}`)
+	v2 := seedVariant(ctx, t, q, shop.ID, product.ID, `{"k":"2"}`)
+	loc := seedLocation(ctx, t, q, shop.ID, "Main")
+	managerCtx := ctxAs(shop.ID, manager)
+
+	resp, err := h.CreatePurchase(managerCtx, gen.CreatePurchaseRequestObject{Body: &gen.PurchaseCreate{
+		SupplierId: supplier.ID, LocationId: loc.ID,
+		Items: []gen.PurchaseItemCreate{
+			{VariantId: v1.ID, Qty: "3.000", UnitCost: "10.00"},
+			{VariantId: v2.ID, Qty: "4.000", UnitCost: "10.00"},
+		},
+	}})
+	if err != nil {
+		t.Fatalf("CreatePurchase: %v", err)
+	}
+	created, ok := resp.(gen.CreatePurchase201JSONResponse)
+	if !ok {
+		t.Fatalf("CreatePurchase response type = %T", resp)
+	}
+
+	stepA := startReceiveHoldingLock(managerCtx, t, pool, q, h, created.Id)
+	if err := waitReceiveLocked(t, "A", stepA, resultWait); err != nil {
+		t.Fatalf("A: want ReceivePurchaseTx to succeed (first to the lock), got: %v", err)
+	}
+
+	stepB := startReceiveHoldingLock(managerCtx, t, pool, q, h, created.Id)
+	assertReceiveStillBlocked(t, "B", stepB, blockedWait)
+
+	if err := finishReceive(t, "A", stepA, resultWait); err != nil {
+		t.Fatalf("A: commit: %v", err)
+	}
+
+	bErr := waitReceiveLocked(t, "B", stepB, resultWait)
+	assertConflict(t, "B: receive once unblocked", bErr, gen.PURCHASEALREADYRECEIVED)
+	if err := finishReceive(t, "B", stepB, resultWait); err != nil {
+		t.Fatalf("B: rollback: %v", err)
+	}
+
+	if count := countMovements(ctx, t, pool, shop.ID, v1.ID, loc.ID, db.StockMovementKindPurchaseIn); count != 1 {
+		t.Fatalf("v1 purchase_in movements = %d, want 1 (B's must not have written a second one)", count)
+	}
+	if count := countMovements(ctx, t, pool, shop.ID, v2.ID, loc.ID, db.StockMovementKindPurchaseIn); count != 1 {
+		t.Fatalf("v2 purchase_in movements = %d, want 1 (B's must not have written a second one)", count)
+	}
 }
