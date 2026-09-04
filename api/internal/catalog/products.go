@@ -65,19 +65,20 @@ const productSlugRetries = 3
 // shape sqlc generates (Get/List x For{Staff,Cashier}, plus the plain
 // db.Product CreateProduct/UpdateProduct return).
 type productCommon struct {
-	ID         uuid.UUID
-	CategoryID *uuid.UUID
-	UnitID     uuid.UUID
-	Slug       string
-	Sku        *string
-	BasePrice  pgtype.Numeric
-	PromoPrice pgtype.Numeric
-	PromoFrom  *time.Time
-	PromoTo    *time.Time
-	IsActive   bool
-	IsFeatured bool
-	Name       string
-	LocaleUsed string
+	ID                uuid.UUID
+	CategoryID        *uuid.UUID
+	UnitID            uuid.UUID
+	Slug              string
+	Sku               *string
+	BasePrice         pgtype.Numeric
+	PromoPrice        pgtype.Numeric
+	PromoFrom         *time.Time
+	PromoTo           *time.Time
+	IsActive          bool
+	IsFeatured        bool
+	Name              string
+	LocaleUsed        string
+	LowStockThreshold *int32
 }
 
 func commonFromStaffRow(r db.GetProductForStaffRow) productCommon {
@@ -85,6 +86,7 @@ func commonFromStaffRow(r db.GetProductForStaffRow) productCommon {
 		ID: r.ID, CategoryID: r.CategoryID, UnitID: r.UnitID, Slug: r.Slug, Sku: r.Sku,
 		BasePrice: r.BasePrice, PromoPrice: r.PromoPrice, PromoFrom: r.PromoFrom, PromoTo: r.PromoTo,
 		IsActive: r.IsActive, IsFeatured: r.IsFeatured, Name: r.Name, LocaleUsed: r.LocaleUsed,
+		LowStockThreshold: r.LowStockThreshold,
 	}
 }
 
@@ -93,6 +95,7 @@ func commonFromCashierRow(r db.GetProductForCashierRow) productCommon {
 		ID: r.ID, CategoryID: r.CategoryID, UnitID: r.UnitID, Slug: r.Slug, Sku: r.Sku,
 		BasePrice: r.BasePrice, PromoPrice: r.PromoPrice, PromoFrom: r.PromoFrom, PromoTo: r.PromoTo,
 		IsActive: r.IsActive, IsFeatured: r.IsFeatured, Name: r.Name, LocaleUsed: r.LocaleUsed,
+		LowStockThreshold: r.LowStockThreshold,
 	}
 }
 
@@ -101,6 +104,7 @@ func commonFromListStaffRow(r db.ListProductsForStaffRow) productCommon {
 		ID: r.ID, CategoryID: r.CategoryID, UnitID: r.UnitID, Slug: r.Slug, Sku: r.Sku,
 		BasePrice: r.BasePrice, PromoPrice: r.PromoPrice, PromoFrom: r.PromoFrom, PromoTo: r.PromoTo,
 		IsActive: r.IsActive, IsFeatured: r.IsFeatured, Name: r.Name, LocaleUsed: r.LocaleUsed,
+		LowStockThreshold: r.LowStockThreshold,
 	}
 }
 
@@ -109,6 +113,7 @@ func commonFromListCashierRow(r db.ListProductsForCashierRow) productCommon {
 		ID: r.ID, CategoryID: r.CategoryID, UnitID: r.UnitID, Slug: r.Slug, Sku: r.Sku,
 		BasePrice: r.BasePrice, PromoPrice: r.PromoPrice, PromoFrom: r.PromoFrom, PromoTo: r.PromoTo,
 		IsActive: r.IsActive, IsFeatured: r.IsFeatured, Name: r.Name, LocaleUsed: r.LocaleUsed,
+		LowStockThreshold: r.LowStockThreshold,
 	}
 }
 
@@ -140,6 +145,7 @@ func toGenProductBase(pc productCommon, requested string) (gen.Product, error) {
 		TranslationFallback: translationFallback(pc.LocaleUsed, requested),
 		PromoFrom:           nullableTime(pc.PromoFrom),
 		PromoTo:             nullableTime(pc.PromoTo),
+		LowStockThreshold:   nullableInt32(pc.LowStockThreshold),
 	}
 
 	if pc.PromoPrice.Valid {
@@ -458,6 +464,11 @@ func (h *Handler) CreateProduct(ctx context.Context, req gen.CreateProductReques
 		fields["promoTo"] = "invalid"
 	}
 
+	var lowStockThreshold *int32
+	if body.LowStockThreshold != nil {
+		lowStockThreshold = validatedLowStockThreshold(*body.LowStockThreshold, fields)
+	}
+
 	// products_category_id_fkey / products_unit_id_fkey have no shop_id
 	// component (and, for category, no deleted_at filter either), so the
 	// FK alone would silently accept another shop's id or a soft-deleted
@@ -512,7 +523,7 @@ func (h *Handler) CreateProduct(ctx context.Context, req gen.CreateProductReques
 	var created db.Product
 	found := false
 	for i, slug := range candidates {
-		p, writeErr := h.createProductAttempt(ctx, authCtx.ShopID, slug, body, basePrice, costPrice, promoPrice, isActive, isFeatured, entries, variants, hasVariants)
+		p, writeErr := h.createProductAttempt(ctx, authCtx.ShopID, slug, body, basePrice, costPrice, promoPrice, lowStockThreshold, isActive, isFeatured, entries, variants, hasVariants)
 		if writeErr == nil {
 			created, found = p, true
 			break
@@ -538,6 +549,7 @@ func (h *Handler) CreateProduct(ctx context.Context, req gen.CreateProductReques
 		ID: created.ID, CategoryID: created.CategoryID, UnitID: created.UnitID, Slug: created.Slug, Sku: created.Sku,
 		BasePrice: created.BasePrice, PromoPrice: created.PromoPrice, PromoFrom: created.PromoFrom, PromoTo: created.PromoTo,
 		IsActive: created.IsActive, IsFeatured: created.IsFeatured, Name: name, LocaleUsed: localeUsed,
+		LowStockThreshold: created.LowStockThreshold,
 	}
 	// CreateProduct always requires catalog.write, which the role matrix
 	// grants only alongside cost.read — includeCost is unconditionally
@@ -554,7 +566,7 @@ func (h *Handler) CreateProduct(ctx context.Context, req gen.CreateProductReques
 // variants + has_variants flip as a single transaction, so a mid-way
 // failure (a duplicate sku, an invalid unit/category id caught only by
 // the FK) never leaves a half-written product behind.
-func (h *Handler) createProductAttempt(ctx context.Context, shopID uuid.UUID, slug string, body *gen.ProductCreate, basePrice decimal.Decimal, costPrice, promoPrice pgtype.Numeric, isActive, isFeatured bool, entries map[string]translationEntry, variants []preparedVariant, hasVariants bool) (db.Product, error) {
+func (h *Handler) createProductAttempt(ctx context.Context, shopID uuid.UUID, slug string, body *gen.ProductCreate, basePrice decimal.Decimal, costPrice, promoPrice pgtype.Numeric, lowStockThreshold *int32, isActive, isFeatured bool, entries map[string]translationEntry, variants []preparedVariant, hasVariants bool) (db.Product, error) {
 	tx, err := h.svc.pool.Begin(ctx)
 	if err != nil {
 		return db.Product{}, fmt.Errorf("begin tx: %w", err)
@@ -566,6 +578,7 @@ func (h *Handler) createProductAttempt(ctx context.Context, shopID uuid.UUID, sl
 		ID: newID(), ShopID: shopID, CategoryID: body.CategoryId, UnitID: body.UnitId, Slug: slug, Sku: body.Sku,
 		BasePrice: money.ToNumeric(basePrice), CostPrice: costPrice, PromoPrice: promoPrice,
 		PromoFrom: body.PromoFrom, PromoTo: body.PromoTo, IsActive: isActive, IsFeatured: isFeatured,
+		LowStockThreshold: lowStockThreshold,
 	})
 	if err != nil {
 		return db.Product{}, err
@@ -747,6 +760,16 @@ func (h *Handler) UpdateProduct(ctx context.Context, req gen.UpdateProductReques
 		fields["slug"] = "invalid"
 	}
 
+	clearLowStockThreshold := false
+	var lowStockThreshold *int32
+	if lp := optionalLowStockThreshold(body.LowStockThreshold, fields); lp != nil {
+		if *lp == nil {
+			clearLowStockThreshold = true
+		} else {
+			lowStockThreshold = *lp
+		}
+	}
+
 	var patchEntries map[string]translationEntry
 	if body.Translations != nil {
 		patchEntries = translationsToMap(*body.Translations)
@@ -771,6 +794,7 @@ func (h *Handler) UpdateProduct(ctx context.Context, req gen.UpdateProductReques
 		ClearSku: clearSku, Sku: sku, ClearCost: clearCost, CostPrice: costPrice,
 		ClearPromo: clearPromo, PromoPrice: promoPrice, PromoFrom: promoFrom, PromoTo: promoTo,
 		IsActive: body.IsActive, IsFeatured: body.IsFeatured, ShopID: authCtx.ShopID, ID: req.Id,
+		ClearLowStockThreshold: clearLowStockThreshold, LowStockThreshold: lowStockThreshold,
 	}
 	if hasBasePrice {
 		params.BasePrice = basePrice

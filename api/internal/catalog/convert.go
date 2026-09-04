@@ -100,3 +100,52 @@ func int32Field(field string, v int, fields map[string]string) int32 {
 	}
 	return int32(v) // #nosec G115 -- range-checked immediately above
 }
+
+// nullableInt32 converts a *int32 (nil = SQL NULL) to the tri-state
+// nullable.Nullable[int] the generated Product schema uses for
+// lowStockThreshold — same idea as nullableUUID/nullableString/
+// nullableTime, just widened from the sqlc column's int32 to the bare Go
+// int a JSON Schema `integer` field generates.
+func nullableInt32(v *int32) nullable.Nullable[int] {
+	if v == nil {
+		return nullable.NewNullNullable[int]()
+	}
+	return nullable.NewNullableWithValue(int(*v))
+}
+
+// validatedLowStockThreshold checks v is non-negative and fits int32 (via
+// int32Field), recording fields["lowStockThreshold"] = "invalid" and
+// returning nil on either violation rather than clamping or wrapping.
+// Shared by CreateProduct's plain *int field and
+// optionalLowStockThreshold's nullable one.
+func validatedLowStockThreshold(v int, fields map[string]string) *int32 {
+	const field = "lowStockThreshold"
+	if v < 0 {
+		fields[field] = "invalid"
+		return nil
+	}
+	iv := int32Field(field, v, fields)
+	if _, bad := fields[field]; bad {
+		return nil
+	}
+	return &iv
+}
+
+// optionalLowStockThreshold is optionalString for
+// Product.LowStockThreshold's nullable.Nullable[int] (ProductPatch): nil
+// (not specified — leave unchanged), a pointer to nil (explicit `null` —
+// clear the override, D-35), or a pointer to a validated int32 (set).
+func optionalLowStockThreshold(n nullable.Nullable[int], fields map[string]string) **int32 {
+	if !n.IsSpecified() {
+		return nil
+	}
+	if n.IsNull() {
+		var nilPtr *int32
+		return &nilPtr
+	}
+	v := validatedLowStockThreshold(n.MustGet(), fields)
+	if v == nil {
+		return nil
+	}
+	return &v
+}
