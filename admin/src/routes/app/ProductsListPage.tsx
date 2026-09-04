@@ -35,7 +35,12 @@ export function ProductsListPage() {
     return () => clearTimeout(timer);
   }, [rawQuery]);
 
-  const { data: categories } = useQuery({ queryKey: ["categories"], queryFn: fetchCategories });
+  // Only catalog.write sees inactive categories in the filter dropdown — a
+  // cashier (no catalog.write) must never request them (T6a review MAJOR 2).
+  const { data: categories } = useQuery({
+    queryKey: ["categories", canWrite],
+    queryFn: () => fetchCategories(canWrite),
+  });
   const categoriesById = useMemo(
     () => new Map((categories ?? []).map((category) => [category.id, category])),
     [categories],
@@ -109,6 +114,27 @@ export function ProductsListPage() {
       dataIndex: "isActive",
       render: (isActive: boolean) => <Switch checked={isActive} disabled />,
     },
+    // An explicit action, not just the row's onClick — the row click has no
+    // keyboard path (T6a review MAJOR 3).
+    ...(canWrite
+      ? ([
+          {
+            title: "",
+            key: "actions",
+            render: (_: unknown, row: Product) => (
+              <Button
+                size="small"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  navigate({ to: "/products/$id", params: { id: row.id } });
+                }}
+              >
+                {t("catalog.products.edit")}
+              </Button>
+            ),
+          },
+        ] satisfies ColumnsType<Product>)
+      : []),
   ];
 
   return (

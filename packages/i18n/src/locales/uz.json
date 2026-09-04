@@ -128,6 +128,7 @@
     "products": {
       "title": "Mahsulotlar",
       "add": "Mahsulot qo‘shish",
+      "edit": "Tahrirlash",
       "searchPlaceholder": "Mahsulotlarni qidirish",
       "allCategories": "Barcha kategoriyalar",
       "uncategorized": "Kategoriyasiz",

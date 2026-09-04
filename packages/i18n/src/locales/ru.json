@@ -128,6 +128,7 @@
     "products": {
       "title": "Товары",
       "add": "Добавить товар",
+      "edit": "Редактировать",
       "searchPlaceholder": "Поиск товаров",
       "allCategories": "Все категории",
       "uncategorized": "Без категории",

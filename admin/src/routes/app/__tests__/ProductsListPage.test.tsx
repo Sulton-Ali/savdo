@@ -168,4 +168,38 @@ describe("ProductsListPage", () => {
       { timeout: 2000 },
     );
   });
+
+  // T6a review MAJOR 2: a cashier has no `catalog.write` and must never
+  // request inactive categories for the filter dropdown.
+  it("requests /categories without includeInactive for a cashier", async () => {
+    mockEndpoints([product({})]);
+
+    renderPage([]);
+    await screen.findByText("Shirt");
+
+    await waitFor(() => {
+      const categoriesCall = mockedApi.GET.mock.calls.find((call) => call[0] === "/categories");
+      expect(categoriesCall).toBeTruthy();
+      const query = (
+        categoriesCall?.[1] as never as { params?: { query?: { includeInactive?: boolean } } }
+      )?.params?.query;
+      expect(query?.includeInactive).toBeFalsy();
+    });
+  });
+
+  // T6a review MAJOR 3: row-click navigation has no keyboard path — an
+  // explicit action must exist for catalog.write, and must not exist for a
+  // read-only cashier.
+  it("shows an explicit Edit action for catalog.write but not for a cashier", async () => {
+    mockEndpoints([product({})]);
+
+    renderPage(["catalog.write"]);
+    await screen.findByText("Shirt");
+    expect(screen.getByRole("button", { name: "Edit" })).toBeTruthy();
+    cleanup();
+
+    renderPage([]);
+    await screen.findByText("Shirt");
+    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+  });
 });

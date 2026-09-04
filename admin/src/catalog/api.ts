@@ -67,12 +67,13 @@ export async function updateAttributeDefinition(
 }
 
 /** `GET /categories` — flat list, not cursor-paginated; the client builds
- * the tree from `parentId`. Always fetched with `includeInactive: true` here
- * since the categories page is only reachable with `catalog.write`, which
- * must be able to see and manage inactive categories too. */
-export async function fetchCategories(): Promise<Category[]> {
+ * the tree from `parentId`. `includeInactive` defaults to `false` (a
+ * cashier browsing the product list's category filter has no `catalog.write`
+ * and should never see inactive categories); callers with `catalog.write`
+ * (the categories page, the product form's category field) pass `true`. */
+export async function fetchCategories(includeInactive = false): Promise<Category[]> {
   const { data, error } = await api.GET("/categories", {
-    params: { query: { includeInactive: true } },
+    params: { query: { includeInactive: includeInactive || undefined } },
   });
   if (error) {
     throw new ApiError(error);

@@ -71,7 +71,13 @@ export function ProductFormPage({ productId }: { productId?: string }) {
     queryFn: () => fetchProduct(productId as string),
     enabled: isEdit,
   });
-  const { data: categories } = useQuery({ queryKey: ["categories"], queryFn: fetchCategories });
+  // catalog.write is required to reach this page at all, so the category
+  // TreeSelect always includes inactive categories (a product may already
+  // reference one, and only catalog.write should see them, T6a review MAJOR 2).
+  const { data: categories } = useQuery({
+    queryKey: ["categories", true],
+    queryFn: () => fetchCategories(true),
+  });
   const { data: units } = useQuery({ queryKey: ["units"], queryFn: fetchUnits });
   const categoryOptions = buildCategoryTreeSelectData(categories ?? []);
 
