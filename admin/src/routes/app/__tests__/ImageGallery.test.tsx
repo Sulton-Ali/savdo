@@ -178,16 +178,16 @@ describe("ImageGallery", () => {
     });
   });
 
-  it("posts coverImageId when a non-cover image is set as cover", async () => {
-    mockedApi.PATCH.mockResolvedValueOnce(apiResult({ items: [] }));
+  it("PATCHes isCover:true on the image itself when a non-cover image is set as cover", async () => {
+    mockedApi.PATCH.mockResolvedValueOnce(apiResult(image("b", 1, { isCover: true })));
     renderGallery([image("a", 0), image("b", 1)]);
 
     fireEvent.click(screen.getByRole("button", { name: "Set as cover" }));
 
     await waitFor(() => {
-      expect(mockedApi.PATCH).toHaveBeenCalledWith("/products/{id}/images/order", {
-        params: { path: { id: "p1" } },
-        body: { imageIds: ["a", "b"], coverImageId: "b" },
+      expect(mockedApi.PATCH).toHaveBeenCalledWith("/products/{id}/images/{imageId}", {
+        params: { path: { id: "p1", imageId: "b" } },
+        body: { isCover: true },
       });
     });
   });
@@ -253,61 +253,73 @@ describe("ImageGallery", () => {
     });
   });
 
-  // MAJOR 1 (phase-2/t6b review): retagging detaches then reattaches the
-  // image (no single-image update endpoint exists) — if the reattach step
-  // fails after the detach already succeeded, the gallery must refetch so
-  // it reflects what the server actually has, not the stale pre-mutation
-  // cache, and must tell the user something went wrong.
-  it("invalidates the product query and notifies on a failed retag (detach succeeded, reattach failed)", async () => {
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+  // T5 (phase-3): retagging PATCHes the image directly
+  // (`PATCH /products/{id}/images/{imageId}`, D-43) instead of the old
+  // detach/reattach/reorder workaround.
+  it("PATCHes the image directly when retagging, not remove/add/reorder", async () => {
+    mockedApi.PATCH.mockResolvedValueOnce(apiResult(image("a", 0, { variantId: "v1" })));
 
-    mockedApi.DELETE.mockResolvedValueOnce({
-      data: undefined,
-      error: undefined,
-      response: new Response(null, { status: 204 }),
-    } as never);
-    mockedApi.POST.mockResolvedValueOnce(apiError("INTERNAL", {}, 500));
-
-    renderGallery([image("a", 0)], {
-      variants: [variant({ id: "v1" })],
-      queryClient,
-    });
+    renderGallery([image("a", 0)], { variants: [variant({ id: "v1" })] });
 
     fireEvent.mouseDown(screen.getByLabelText("Variant"));
     await clickOpenDropdownOption();
 
     await waitFor(() => {
-      expect(mockedApi.DELETE).toHaveBeenCalledWith("/products/{id}/images/{imageId}", {
+      expect(mockedApi.PATCH).toHaveBeenCalledWith("/products/{id}/images/{imageId}", {
         params: { path: { id: "p1", imageId: "a" } },
+        body: { variantId: "v1" },
       });
     });
-    expect(mockedApi.POST).toHaveBeenCalledWith("/products/{id}/images", {
-      params: { path: { id: "p1" } },
-      body: { mediaId: "media-a", variantId: "v1", isCover: true },
-    });
-
-    expect(await screen.findByText("Something went wrong. Please try again.")).toBeTruthy();
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["product", "p1"] });
+    expect(mockedApi.DELETE).not.toHaveBeenCalled();
+    expect(mockedApi.POST).not.toHaveBeenCalled();
   });
 
-  // Review follow-up: locking must key off a Set of in-flight image ids,
-  // not the single `retagMutation`'s `variables` (which only ever reflects
-  // the most recent `.mutate()` call) — otherwise starting a second retag
-  // while a first is still pending would silently unlock the first.
+  it("PATCHes variantId: null when the variant tag is cleared (untag)", async () => {
+    mockedApi.PATCH.mockResolvedValueOnce(apiResult(image("a", 0, { variantId: null })));
+
+    const { container } = renderGallery([image("a", 0, { variantId: "v1" })], {
+      variants: [variant({ id: "v1" })],
+    });
+
+    const clearIcon = container.querySelector(".ant-select-clear") as HTMLElement;
+    expect(clearIcon).toBeTruthy();
+    fireEvent.mouseDown(clearIcon);
+    fireEvent.click(clearIcon);
+
+    await waitFor(() => {
+      expect(mockedApi.PATCH).toHaveBeenCalledWith("/products/{id}/images/{imageId}", {
+        params: { path: { id: "p1", imageId: "a" } },
+        body: { variantId: null },
+      });
+    });
+  });
+
+  it("notifies on a failed retag", async () => {
+    mockedApi.PATCH.mockResolvedValueOnce(
+      apiError("VALIDATION_FAILED", { fields: { variantId: "invalid" } }, 400),
+    );
+
+    renderGallery([image("a", 0)], { variants: [variant({ id: "v1" })] });
+
+    fireEvent.mouseDown(screen.getByLabelText("Variant"));
+    await clickOpenDropdownOption();
+
+    expect(await screen.findByText("Something went wrong. Please try again.")).toBeTruthy();
+  });
+
+  // Review follow-up (phase-2/t6b, still applies to the single-PATCH
+  // flow): locking must key off a Set of in-flight image ids, not the
+  // single mutation's `variables` (which only ever reflects the most
+  // recent `.mutate()` call) — otherwise starting a second update while a
+  // first is still pending would silently unlock the first.
   it("keeps each image's controls locked independently when two retags overlap", async () => {
-    const deletes = [deferred<unknown>(), deferred<unknown>()];
-    let deleteCall = 0;
-    mockedApi.DELETE.mockImplementation((() => {
-      const call = deletes[deleteCall];
-      deleteCall += 1;
+    const patches = [deferred<unknown>(), deferred<unknown>()];
+    let patchCall = 0;
+    mockedApi.PATCH.mockImplementation((() => {
+      const call = patches[patchCall];
+      patchCall += 1;
       return call?.promise;
     }) as never);
-    // The retag flow's later steps (reattach, reorder) — not under test
-    // here, just needed so each mutation runs to completion once its
-    // DELETE resolves.
-    mockedApi.POST.mockResolvedValue(apiResult(image("recreated", 0), 201));
-    mockedApi.PATCH.mockResolvedValue(apiResult({ items: [] }));
 
     renderGallery([image("a", 0), image("b", 1)], { variants: [variant({ id: "v1" })] });
 
@@ -319,27 +331,18 @@ describe("ImageGallery", () => {
     fireEvent.mouseDown(selects[1] as HTMLInputElement);
     await clickOpenDropdownOption();
 
-    // Both retags are now in flight (both DELETE calls pending) — both
+    // Both retags are now in flight (both PATCH calls pending) — both
     // Selects must stay locked, not just the most recently started one.
     await waitFor(() => {
       expect(isSelectDisabled(selects[0] as HTMLInputElement)).toBe(true);
       expect(isSelectDisabled(selects[1] as HTMLInputElement)).toBe(true);
     });
 
-    deletes[0]?.resolve({
-      data: undefined,
-      error: undefined,
-      response: new Response(null, { status: 204 }),
-    });
-    // image "a"'s retag still has its POST/PATCH steps to finish, and "b"'s
-    // DELETE hasn't resolved yet — "b" must remain locked throughout.
+    patches[0]?.resolve(apiResult(image("a", 0, { variantId: "v1" })));
+    // "b"'s PATCH hasn't resolved yet — it must remain locked throughout.
     expect(isSelectDisabled(selects[1] as HTMLInputElement)).toBe(true);
 
-    deletes[1]?.resolve({
-      data: undefined,
-      error: undefined,
-      response: new Response(null, { status: 204 }),
-    });
+    patches[1]?.resolve(apiResult(image("b", 1, { variantId: "v1" })));
 
     await waitFor(() => {
       expect(isSelectDisabled(selects[0] as HTMLInputElement)).toBe(false);

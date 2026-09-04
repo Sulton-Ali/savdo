@@ -9,8 +9,10 @@ import {
   type AttributeDefinition,
   addProductImage,
   type ProductImage,
+  type ProductImagePatch,
   removeProductImage,
   reorderProductImages,
+  updateProductImage,
   uploadMedia,
   type Variant,
 } from "../../catalog/api";
@@ -29,11 +31,9 @@ const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
  * cover badge, per-image variant tagging, up/down reorder, remove, and an
  * upload button that opens a crop step before ever calling `POST /media`.
  *
- * There is no endpoint to change a single already-attached image's
- * `variantId` in place (`docs/05-API.md` § Catalogue and media only lists
- * create/delete/reorder) — the variant `Select` below works around that by
- * detaching and reattaching the same media file, then restoring its exact
- * position and cover flag via `PATCH .../images/order`.
+ * The variant `Select` and the "set as cover" action both retag/re-cover an
+ * image in place via `PATCH /products/{id}/images/{imageId}` (D-43) — one
+ * atomic request each, not the earlier detach/reattach/reorder workaround.
  */
 export function ImageGallery({
   productId,
@@ -52,11 +52,12 @@ export function ImageGallery({
   const { notification } = App.useApp();
   const queryClient = useQueryClient();
   const [pendingImageSrc, setPendingImageSrc] = useState<string | null>(null);
-  // Every image currently mid-retag — a `Set`, not the single active
-  // mutation's `variables`, so two rapid retags on different images (each
-  // its own `mutate` call against the same `useMutation`) both stay locked
-  // rather than the second overwriting the first's in-flight marker.
-  const [retaggingIds, setRetaggingIds] = useState<Set<string>>(new Set());
+  // Every image currently mid-update (retag or cover change) — a `Set`,
+  // not the single active mutation's `variables`, so two rapid updates on
+  // different images (each its own `mutate` call against the same
+  // `useMutation`) both stay locked rather than the second overwriting the
+  // first's in-flight marker.
+  const [updatingIds, setUpdatingIds] = useState<Set<string>>(new Set());
 
   const sorted = [...images].sort((a, b) => a.sortOrder - b.sortOrder);
   const atCap = sorted.length >= MAX_PRODUCT_IMAGES;
@@ -119,35 +120,22 @@ export function ImageGallery({
     onError: (error) => notifyApiError(notification, error, t),
   });
 
-  const retagMutation = useMutation({
-    mutationFn: async ({ image, variantId }: { image: ProductImage; variantId: string | null }) => {
-      await removeProductImage(productId, image.id);
-      const created = await addProductImage(productId, {
-        mediaId: image.mediaId,
-        ...(variantId ? { variantId } : {}),
-        isCover: image.isCover,
-      });
-      const orderedIds = sorted.map((img) => (img.id === image.id ? created.id : img.id));
-      await reorderProductImages(productId, {
-        imageIds: orderedIds,
-        ...(image.isCover ? { coverImageId: created.id } : {}),
-      });
-    },
-    onMutate: ({ image }) => {
-      setRetaggingIds((current) => new Set(current).add(image.id));
+  // Backs both the variant `Select` (retag) and the "set as cover" action:
+  // one `PATCH /products/{id}/images/{imageId}` (D-43) per call, so the two
+  // never race each other into inconsistent remove/add/reorder steps the
+  // old workaround needed.
+  const updateImageMutation = useMutation({
+    mutationFn: ({ imageId, patch }: { imageId: string; patch: ProductImagePatch }) =>
+      updateProductImage(productId, imageId, patch),
+    onMutate: ({ imageId }) => {
+      setUpdatingIds((current) => new Set(current).add(imageId));
     },
     onSuccess: () => invalidate(),
-    onError: (error) => {
-      // The mutation may have already removed the old attachment (and even
-      // recreated it) before the failing step — refetch so the gallery
-      // reflects what the server actually has, not the pre-mutation cache.
-      invalidate();
-      handleImageError(error);
-    },
-    onSettled: (_data, _error, { image }) => {
-      setRetaggingIds((current) => {
+    onError: (error) => notifyApiError(notification, error, t),
+    onSettled: (_data, _error, { imageId }) => {
+      setUpdatingIds((current) => {
         const next = new Set(current);
-        next.delete(image.id);
+        next.delete(imageId);
         return next;
       });
     },
@@ -184,10 +172,7 @@ export function ImageGallery({
   }
 
   function handleSetCover(imageId: string) {
-    reorderMutation.mutate({
-      imageIds: sorted.map((image) => image.id),
-      coverImageId: imageId,
-    });
+    updateImageMutation.mutate({ imageId, patch: { isCover: true } });
   }
 
   const variantOptions = variants.map((variant) => ({
@@ -227,7 +212,7 @@ export function ImageGallery({
         ) : (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
             {sorted.map((image, index) => {
-              const isRetagging = retaggingIds.has(image.id);
+              const isUpdating = updatingIds.has(image.id);
               return (
                 <Card
                   key={image.id}
@@ -248,28 +233,31 @@ export function ImageGallery({
                         size="small"
                         style={{ width: "100%" }}
                         allowClear
-                        disabled={isRetagging}
-                        loading={isRetagging}
+                        disabled={isUpdating}
+                        loading={isUpdating}
                         placeholder={t("catalog.images.noVariant")}
                         aria-label={t("catalog.images.variantTag")}
                         value={image.variantId ?? undefined}
                         options={variantOptions}
                         onChange={(value: string | undefined) =>
-                          retagMutation.mutate({ image, variantId: value ?? null })
+                          updateImageMutation.mutate({
+                            imageId: image.id,
+                            patch: { variantId: value ?? null },
+                          })
                         }
                       />
                       <Space size={4}>
                         <Button
                           size="small"
                           aria-label={t("catalog.images.moveUp")}
-                          disabled={isRetagging || index === 0}
+                          disabled={isUpdating || index === 0}
                           onClick={() => handleReorder(image.id, "up")}
                           icon={<ArrowUp size={14} />}
                         />
                         <Button
                           size="small"
                           aria-label={t("catalog.images.moveDown")}
-                          disabled={isRetagging || index === sorted.length - 1}
+                          disabled={isUpdating || index === sorted.length - 1}
                           onClick={() => handleReorder(image.id, "down")}
                           icon={<ArrowDown size={14} />}
                         />
@@ -277,7 +265,7 @@ export function ImageGallery({
                           <Button
                             size="small"
                             aria-label={t("catalog.images.setCover")}
-                            disabled={isRetagging}
+                            disabled={isUpdating}
                             onClick={() => handleSetCover(image.id)}
                             icon={<Star size={14} />}
                           />
@@ -289,7 +277,7 @@ export function ImageGallery({
                           <Button
                             size="small"
                             danger
-                            disabled={isRetagging}
+                            disabled={isUpdating}
                             aria-label={t("catalog.images.remove")}
                             icon={<Trash2 size={14} />}
                           />
