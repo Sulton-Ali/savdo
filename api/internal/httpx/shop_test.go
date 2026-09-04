@@ -3,6 +3,7 @@ package httpx
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -546,7 +547,9 @@ func TestCreateStaffWithBlankPhoneTwiceBothSucceed(t *testing.T) {
 
 // TestPatchStaffBlankPhoneClearsIt is MAJOR-2's PATCH case: a staff
 // member created with a real phone number, then PATCHed with
-// `phone: ""`, must show phone: null afterward.
+// `phone: ""`, must show phone: null in the response AND have a true
+// SQL NULL phone in the database (ClearUserPhone, not a literal empty
+// string masked at the response layer).
 func TestPatchStaffBlankPhoneClearsIt(t *testing.T) {
 	f := newShopTestFixture(t)
 	cookies := f.login(t, f.ownerUsername, f.ownerPassword, "web").Result().Cookies()
@@ -575,5 +578,46 @@ func TestPatchStaffBlankPhoneClearsIt(t *testing.T) {
 	}
 	if patched.Phone != nil {
 		t.Fatalf("patched user Phone = %v, want nil after clearing", *patched.Phone)
+	}
+
+	dbUser, err := f.q.GetUserByID(t.Context(), db.GetUserByIDParams{ShopID: f.shopID, ID: created.Id})
+	if err != nil {
+		t.Fatalf("GetUserByID: %v", err)
+	}
+	if dbUser.Phone != nil {
+		t.Fatalf("db row Phone = %q, want a true SQL NULL (nil), not a literal empty string", *dbUser.Phone)
+	}
+}
+
+// TestPatchStaffBlankPhoneTwiceDoesNotCollide is MAJOR-2's other
+// required test: two different staff members both cleared via
+// `PATCH {"phone":""}` must not collide on the partial unique index
+// (shop_id, phone) where phone is not null — because ClearUserPhone
+// writes a true NULL for each of them, not the same literal "" value.
+func TestPatchStaffBlankPhoneTwiceDoesNotCollide(t *testing.T) {
+	f := newShopTestFixture(t)
+	cookies := f.login(t, f.ownerUsername, f.ownerPassword, "web").Result().Cookies()
+
+	var ids []string
+	for i, username := range []string{"clearme1", "clearme2"} {
+		rec := f.do(t, http.MethodPost, "/v1/staff", cookies, map[string]any{
+			"username": username, "password": "a-fine-password-1", "fullName": "Clear Me", "role": "cashier",
+			"phone": fmt.Sprintf("+99890111223%d", i),
+		})
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("create %q status = %d, body = %s", username, rec.Code, rec.Body.String())
+		}
+		var user gen.User
+		if err := json.Unmarshal(rec.Body.Bytes(), &user); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		ids = append(ids, user.Id.String())
+	}
+
+	for _, id := range ids {
+		rec := f.do(t, http.MethodPatch, "/v1/staff/"+id, cookies, map[string]any{"phone": ""})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("PATCH phone=\"\" for %s status = %d, want 200 (no 409 collision), body = %s", id, rec.Code, rec.Body.String())
+		}
 	}
 }

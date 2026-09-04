@@ -270,20 +270,14 @@ func (h *Handler) UpdateStaff(ctx context.Context, req gen.UpdateStaffRequestObj
 
 	// body.Phone is passed through unchanged, deliberately not
 	// normalized the way CreateStaff's is: nil must keep meaning "leave
-	// unchanged" (UpdateUser's `phone = COALESCE($2, phone)` — a nil
-	// param always resolves to the existing value; there is no parameter
-	// that can make COALESCE produce NULL from a non-null existing
-	// value, so an explicit "set to NULL" needs a query change this
-	// package doesn't own, out of scope here), while a non-nil empty
-	// string ("phone": "") is the one signal we CAN act on: it reaches
-	// UpdateStaff as a real "clear" request, stored as a literal empty
-	// string (not SQL NULL) and mapped back to a nil `phone` in the
-	// response by toGenUser (staff.go) — clearing at the API's contract
-	// boundary even though the column isn't truly NULL. A JSON `null` is
-	// indistinguishable from an omitted field once oapi-codegen decodes
-	// StaffPatch.phone into a plain *string (Q-20, contract-level, out
-	// of scope), so `null` and absent both mean "leave unchanged" here;
-	// only `""` means "clear".
+	// unchanged", while a non-nil empty string ("phone": "") is the
+	// "clear" signal UpdateStaff (staff.go) acts on — it routes that
+	// case through the dedicated ClearUserPhone statement instead of
+	// UpdateUser's COALESCE, so the column becomes a true SQL NULL, not
+	// a literal empty string. A JSON `null` is indistinguishable from an
+	// omitted field once oapi-codegen decodes StaffPatch.phone into a
+	// plain *string (Q-20, contract-level, out of scope), so `null` and
+	// absent both mean "leave unchanged" here; only `""` means "clear".
 	updated, err := h.svc.UpdateStaff(ctx, authCtx.ShopID, authCtx.UserID, req.Id, StaffPatchInput{
 		FullName: fullName, Phone: body.Phone, Role: role, IsActive: body.IsActive, Locale: locale,
 	})

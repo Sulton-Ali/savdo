@@ -96,6 +96,15 @@ type StaffPatchInput struct {
 // no user (owner included) can change their own role or deactivate
 // themselves. Deactivating a (non-owner, non-self) user revokes every
 // one of their sessions in the same transaction as the write.
+//
+// in.Phone == a non-nil pointer to "" is a "clear the phone" request
+// (handler_staff.go decides this; nil stays indistinguishable from an
+// omitted field either way — Q-20, contract-level). UpdateUser's `phone
+// = COALESCE($2, phone)` can never express "set to NULL" — there is no
+// parameter value that makes COALESCE return NULL from a non-null
+// existing value — so clearing goes through the dedicated ClearUserPhone
+// statement instead, in the same transaction as UpdateUser (which is
+// itself told to leave phone alone in that case).
 func (s *Service) UpdateStaff(ctx context.Context, shopID, actorID, id uuid.UUID, in StaffPatchInput) (db.User, error) {
 	target, err := s.q.GetUserByID(ctx, db.GetUserByIDParams{ShopID: shopID, ID: id})
 	if err != nil {
@@ -122,8 +131,10 @@ func (s *Service) UpdateStaff(ctx context.Context, shopID, actorID, id uuid.UUID
 		return db.User{}, apierr.Validation(fields)
 	}
 
+	clearingPhone := in.Phone != nil && *in.Phone == ""
 	deactivating := in.IsActive != nil && !*in.IsActive
-	if !deactivating {
+
+	if !clearingPhone && !deactivating {
 		updated, err := s.q.UpdateUser(ctx, db.UpdateUserParams{
 			FullName: in.FullName, Phone: in.Phone, Role: in.Role, Locale: in.Locale, IsActive: in.IsActive,
 			ShopID: shopID, ID: id,
@@ -144,21 +155,40 @@ func (s *Service) UpdateStaff(ctx context.Context, shopID, actorID, id uuid.UUID
 	defer func() { _ = tx.Rollback(ctx) }()
 	qtx := s.q.WithTx(tx)
 
+	phoneForUpdateUser := in.Phone
+	if clearingPhone {
+		// ClearUserPhone below does the real clearing; UpdateUser's own
+		// phone param is left nil ("unchanged") so its COALESCE never
+		// sees the empty string at all.
+		phoneForUpdateUser = nil
+	}
+
 	updated, err := qtx.UpdateUser(ctx, db.UpdateUserParams{
-		FullName: in.FullName, Phone: in.Phone, Role: in.Role, Locale: in.Locale, IsActive: in.IsActive,
+		FullName: in.FullName, Phone: phoneForUpdateUser, Role: in.Role, Locale: in.Locale, IsActive: in.IsActive,
 		ShopID: shopID, ID: id,
 	})
 	if err != nil {
 		if field, ok := conflictField(err); ok {
 			return db.User{}, apierr.Conflict(field)
 		}
-		return db.User{}, fmt.Errorf("shop: update staff (deactivate): %w", err)
+		return db.User{}, fmt.Errorf("shop: update staff: %w", err)
 	}
-	if err := qtx.RevokeAllUserSessions(ctx, db.RevokeAllUserSessionsParams{ShopID: shopID, UserID: id}); err != nil {
-		return db.User{}, fmt.Errorf("shop: revoke sessions on deactivate: %w", err)
+
+	if clearingPhone {
+		if err := qtx.ClearUserPhone(ctx, db.ClearUserPhoneParams{ShopID: shopID, ID: id}); err != nil {
+			return db.User{}, fmt.Errorf("shop: clear staff phone: %w", err)
+		}
+		updated.Phone = nil
 	}
+
+	if deactivating {
+		if err := qtx.RevokeAllUserSessions(ctx, db.RevokeAllUserSessionsParams{ShopID: shopID, UserID: id}); err != nil {
+			return db.User{}, fmt.Errorf("shop: revoke sessions on deactivate: %w", err)
+		}
+	}
+
 	if err := tx.Commit(ctx); err != nil {
-		return db.User{}, fmt.Errorf("shop: commit deactivate staff: %w", err)
+		return db.User{}, fmt.Errorf("shop: commit update staff: %w", err)
 	}
 	return updated, nil
 }
@@ -206,25 +236,12 @@ func (s *Service) SetStaffPassword(ctx context.Context, shopID, id uuid.UUID, pa
 // ShopID are deliberately never carried across — a password hash must
 // never reach a response (hard rule 9), and shop_id is the tenant
 // boundary, not response payload.
-//
-// Phone maps a stored literal empty string to nil (never a bare ""), the
-// counterpart to UpdateStaff's phone handling (handler_staff.go): since
-// UpdateUser's `phone = COALESCE($2, phone)` can never write a true SQL
-// NULL over an existing non-null value, the one way this package has
-// (without a query change out of its scope) to honor a `PATCH
-// {"phone":""}` "clear" request is to store the literal empty string and
-// present it as absent here — every response, not just the one right
-// after the PATCH, so the API never shows a client a literal "" phone.
 func toGenUser(u db.User) gen.User {
-	phone := u.Phone
-	if phone != nil && *phone == "" {
-		phone = nil
-	}
 	return gen.User{
 		Id:          u.ID,
 		Username:    u.Username,
 		FullName:    u.FullName,
-		Phone:       phone,
+		Phone:       u.Phone,
 		Role:        gen.Role(u.Role),
 		Locale:      gen.Locale(u.Locale),
 		IsActive:    u.IsActive,
