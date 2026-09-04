@@ -102,18 +102,45 @@ SET name = EXCLUDED.name, description = EXCLUDED.description;
 -- Depth of category_id counting from 1 at a root (no parent), by walking
 -- parent_id up to the root. The service calls this before creating or
 -- re-parenting a category to enforce depth <= 3 (§ 04-DATA-MODEL.md).
+-- Both arms filter deleted_at IS NULL and shop_id: a soft-deleted category
+-- (or one that somehow belongs to another shop) must not be usable as a
+-- parent, and must not silently participate in a live category's own
+-- ancestor chain either.
 WITH RECURSIVE ancestors AS (
     SELECT cat.id, cat.parent_id, 1 AS depth
     FROM categories cat
-    WHERE cat.id = sqlc.arg('category_id') AND cat.shop_id = sqlc.arg('shop_id')
+    WHERE cat.id = sqlc.arg('category_id') AND cat.shop_id = sqlc.arg('shop_id') AND cat.deleted_at IS NULL
 
     UNION ALL
 
     SELECT c.id, c.parent_id, a.depth + 1
     FROM categories c
     JOIN ancestors a ON c.id = a.parent_id
+    WHERE c.shop_id = sqlc.arg('shop_id') AND c.deleted_at IS NULL
 )
--- COALESCE: category_id not found (or wrong shop) makes ancestors empty,
--- and max() over zero rows is NULL — 0 reads better than NULL for "does not
--- exist / has no ancestors" here.
+-- COALESCE: category_id not found (wrong shop, or soft-deleted) makes
+-- ancestors empty, and max() over zero rows is NULL — 0 reads better than
+-- NULL for "does not exist / has no ancestors" here.
 SELECT COALESCE(max(a.depth), 0)::int AS depth FROM ancestors a;
+
+-- name: GetCategorySubtreeHeight :one
+-- Height of category_id's own subtree counting from 1 at itself (a leaf
+-- has height 1), by walking parent_id -> children down from it. The
+-- service calls this before re-parenting a category to make sure the
+-- category's own descendants would not end up past depth 3: if placed
+-- under a parent at depth(parent), the deepest descendant would land at
+-- depth(parent) + height(self), which must stay <= 3. Both arms filter
+-- deleted_at IS NULL and shop_id, same reasoning as GetCategoryDepth.
+WITH RECURSIVE descendants AS (
+    SELECT cat.id, 1 AS height
+    FROM categories cat
+    WHERE cat.id = sqlc.arg('category_id') AND cat.shop_id = sqlc.arg('shop_id') AND cat.deleted_at IS NULL
+
+    UNION ALL
+
+    SELECT c.id, d.height + 1
+    FROM categories c
+    JOIN descendants d ON c.parent_id = d.id
+    WHERE c.shop_id = sqlc.arg('shop_id') AND c.deleted_at IS NULL
+)
+SELECT COALESCE(max(d.height), 0)::int AS height FROM descendants d;
