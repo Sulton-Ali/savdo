@@ -11,10 +11,16 @@ SELECT
     -- translation matches, and sqlc does not infer that as nullable. An
     -- empty string, not a real locale, signals "no translation yet".
     COALESCE(t.locale, '') AS locale_used,
-    COALESCE(t.name, '') AS name
+    COALESCE(t.name, '') AS name,
+    -- No COALESCE here, unlike name/locale_used above: description is
+    -- nullable at the column level (category_translations.description has
+    -- no NOT NULL), so sqlc already infers *string for it straight from the
+    -- schema — the LATERAL-join NULL-when-no-match case lands on the same
+    -- nullable type instead of needing a '' sentinel.
+    t.description
 FROM categories c
 LEFT JOIN LATERAL (
-    SELECT ct.locale, ct.name
+    SELECT ct.locale, ct.name, ct.description
     FROM category_translations ct
     WHERE ct.category_id = c.id
     ORDER BY
@@ -35,10 +41,11 @@ ORDER BY c.sort_order, c.slug;
 SELECT
     c.*,
     COALESCE(t.locale, '') AS locale_used,
-    COALESCE(t.name, '') AS name
+    COALESCE(t.name, '') AS name,
+    t.description
 FROM categories c
 LEFT JOIN LATERAL (
-    SELECT ct.locale, ct.name
+    SELECT ct.locale, ct.name, ct.description
     FROM category_translations ct
     WHERE ct.category_id = c.id
     ORDER BY
@@ -51,23 +58,25 @@ LEFT JOIN LATERAL (
 ) t ON true
 WHERE c.shop_id = sqlc.arg('shop_id') AND c.id = sqlc.arg('id') AND c.deleted_at IS NULL;
 
+-- name: ListCategoryTranslations :many
+SELECT locale, name, description FROM category_translations WHERE category_id = $1 ORDER BY locale;
+
 -- name: CreateCategory :one
 INSERT INTO categories (id, shop_id, parent_id, slug, sort_order, is_active, image_id)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING *;
 
 -- name: UpdateCategory :one
--- Patch: parent_id and image_id cannot be cleared through COALESCE (there is
--- no "clear" flag for them here because re-parenting to NULL or removing the
--- category image are not exposed as edits in Phase 2 — only setting them to
--- a new value is). slug/sort_order/is_active are plain optional fields.
+-- Patch with explicit clear flags for parent_id/image_id (COALESCE cannot
+-- express "set to NULL"), same pattern as UpdateProduct/UpdateVariant.
+-- slug/sort_order/is_active are plain optional fields.
 UPDATE categories
 SET
-    parent_id = COALESCE(sqlc.narg('parent_id'), parent_id),
+    parent_id = CASE WHEN sqlc.arg('clear_parent')::bool THEN NULL ELSE COALESCE(sqlc.narg('parent_id'), parent_id) END,
     slug = COALESCE(sqlc.narg('slug'), slug),
     sort_order = COALESCE(sqlc.narg('sort_order'), sort_order),
     is_active = COALESCE(sqlc.narg('is_active'), is_active),
-    image_id = COALESCE(sqlc.narg('image_id'), image_id),
+    image_id = CASE WHEN sqlc.arg('clear_image')::bool THEN NULL ELSE COALESCE(sqlc.narg('image_id'), image_id) END,
     updated_at = now()
 WHERE shop_id = sqlc.arg('shop_id') AND id = sqlc.arg('id') AND deleted_at IS NULL
 RETURNING *;

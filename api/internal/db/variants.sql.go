@@ -345,3 +345,42 @@ func (q *Queries) UpdateVariant(ctx context.Context, arg UpdateVariantParams) (P
 	)
 	return i, err
 }
+
+const updateVariantAttributes = `-- name: UpdateVariantAttributes :one
+UPDATE product_variants
+SET attributes = $3, updated_at = now()
+WHERE shop_id = $1 AND id = $2 AND deleted_at IS NULL
+RETURNING id, shop_id, product_id, sku, barcode, attributes, price_override, cost_override, is_active, deleted_at, created_at, updated_at
+`
+
+type UpdateVariantAttributesParams struct {
+	ShopID     uuid.UUID       `json:"shop_id"`
+	ID         uuid.UUID       `json:"id"`
+	Attributes json.RawMessage `json:"attributes"`
+}
+
+// In-place attribute rewrite, separate from UpdateVariant's patch (which
+// deliberately excludes attributes — see the comment there). The
+// (product_id, attributes) unique index still protects against a rewrite
+// landing on a duplicate combination for the product; the service is
+// responsible for canonicalizing the JSON (stable key order) before this
+// runs so two JSON-equivalent objects compare equal to that index.
+func (q *Queries) UpdateVariantAttributes(ctx context.Context, arg UpdateVariantAttributesParams) (ProductVariant, error) {
+	row := q.db.QueryRow(ctx, updateVariantAttributes, arg.ShopID, arg.ID, arg.Attributes)
+	var i ProductVariant
+	err := row.Scan(
+		&i.ID,
+		&i.ShopID,
+		&i.ProductID,
+		&i.Sku,
+		&i.Barcode,
+		&i.Attributes,
+		&i.PriceOverride,
+		&i.CostOverride,
+		&i.IsActive,
+		&i.DeletedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}

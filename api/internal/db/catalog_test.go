@@ -126,6 +126,70 @@ func TestProductVariants_attributesUniquePerProduct(t *testing.T) {
 	}
 }
 
+func TestUpdateVariantAttributes_inPlaceRewriteRespectsUniqueIndex(t *testing.T) {
+	pool := testdb.New(t)
+	testdb.Truncate(t, pool)
+	ctx := context.Background()
+	q := db.New(pool)
+
+	shop := catalogShop(ctx, t, q, "shop-variant-attrs")
+	unit := catalogUnit(ctx, t, q, shop.ID, "pcs")
+	product := catalogProduct(ctx, t, q, shop.ID, unit.ID, "shirt")
+
+	small := json.RawMessage(`{"size":"S"}`)
+	large := json.RawMessage(`{"size":"L"}`)
+
+	v1, err := q.CreateVariant(ctx, db.CreateVariantParams{
+		ID: uuid.New(), ShopID: shop.ID, ProductID: product.ID, Attributes: small, IsActive: true,
+	})
+	if err != nil {
+		t.Fatalf("create variant 1: %v", err)
+	}
+	v2, err := q.CreateVariant(ctx, db.CreateVariantParams{
+		ID: uuid.New(), ShopID: shop.ID, ProductID: product.ID, Attributes: large, IsActive: true,
+	})
+	if err != nil {
+		t.Fatalf("create variant 2: %v", err)
+	}
+
+	medium := json.RawMessage(`{"size":"M"}`)
+	updated, err := q.UpdateVariantAttributes(ctx, db.UpdateVariantAttributesParams{
+		ShopID: shop.ID, ID: v1.ID, Attributes: medium,
+	})
+	if err != nil {
+		t.Fatalf("UpdateVariantAttributes to an unused value: %v", err)
+	}
+	var got, want map[string]any
+	if err := json.Unmarshal(updated.Attributes, &got); err != nil {
+		t.Fatalf("unmarshal returned attributes: %v", err)
+	}
+	if err := json.Unmarshal(medium, &want); err != nil {
+		t.Fatalf("unmarshal expected attributes: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Attributes = %s, want %s", updated.Attributes, medium)
+	}
+	if updated.UpdatedAt.Equal(v1.UpdatedAt) || !updated.UpdatedAt.After(v1.UpdatedAt) {
+		t.Fatalf("UpdatedAt = %v, want after original %v", updated.UpdatedAt, v1.UpdatedAt)
+	}
+
+	// Rewriting v1's attributes onto v2's existing value must hit the
+	// (product_id, attributes) unique index, not silently succeed.
+	if _, err := q.UpdateVariantAttributes(ctx, db.UpdateVariantAttributesParams{
+		ShopID: shop.ID, ID: v1.ID, Attributes: large,
+	}); err == nil {
+		t.Fatal("want a uniqueness error rewriting onto another variant's attributes, got none")
+	}
+
+	// Wrong shop_id must not find the row (cross-tenant isolation).
+	otherShop := catalogShop(ctx, t, q, "shop-variant-attrs-other")
+	if _, err := q.UpdateVariantAttributes(ctx, db.UpdateVariantAttributesParams{
+		ShopID: otherShop.ID, ID: v2.ID, Attributes: json.RawMessage(`{"size":"XL"}`),
+	}); err == nil {
+		t.Fatal("want no row found updating a variant under the wrong shop_id, got none")
+	}
+}
+
 func TestProductImages_onlyOneCoverPerProduct(t *testing.T) {
 	pool := testdb.New(t)
 	testdb.Truncate(t, pool)
@@ -515,5 +579,200 @@ func TestListUnits_localeFallback_returnsLocaleUsed(t *testing.T) {
 	row = byCode(rows, "kg")
 	if row.LocaleUsed != "ru" || row.Name != "Килограмм" {
 		t.Fatalf("any fallback: got locale_used=%q name=%q, want ru/Килограмм", row.LocaleUsed, row.Name)
+	}
+}
+
+func TestListCategoryTranslations_returnsAllLocalesOrdered(t *testing.T) {
+	pool := testdb.New(t)
+	testdb.Truncate(t, pool)
+	ctx := context.Background()
+	q := db.New(pool)
+
+	shop := catalogShop(ctx, t, q, "shop-cat-translations")
+	cat, err := q.CreateCategory(ctx, db.CreateCategoryParams{
+		ID: uuid.New(), ShopID: shop.ID, Slug: "outerwear", IsActive: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateCategory: %v", err)
+	}
+
+	desc := "Куртки и пальто"
+	if err := q.UpsertCategoryTranslation(ctx, db.UpsertCategoryTranslationParams{
+		CategoryID: cat.ID, Locale: "ru", Name: "Верхняя одежда", Description: &desc,
+	}); err != nil {
+		t.Fatalf("upsert ru translation: %v", err)
+	}
+	if err := q.UpsertCategoryTranslation(ctx, db.UpsertCategoryTranslationParams{
+		CategoryID: cat.ID, Locale: "uz", Name: "Ustki kiyim",
+	}); err != nil {
+		t.Fatalf("upsert uz translation: %v", err)
+	}
+
+	rows, err := q.ListCategoryTranslations(ctx, cat.ID)
+	if err != nil {
+		t.Fatalf("ListCategoryTranslations: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("want 2 translations, got %d: %+v", len(rows), rows)
+	}
+	// ORDER BY locale: "ru" < "uz".
+	if rows[0].Locale != "ru" || rows[0].Name != "Верхняя одежда" || rows[0].Description == nil || *rows[0].Description != desc {
+		t.Fatalf("row 0 = %+v, want ru/Верхняя одежда/%q", rows[0], desc)
+	}
+	if rows[1].Locale != "uz" || rows[1].Name != "Ustki kiyim" || rows[1].Description != nil {
+		t.Fatalf("row 1 = %+v, want uz/Ustki kiyim/nil description", rows[1])
+	}
+}
+
+// The LATERAL fallback's description column must come through as a real
+// NULL (*string == nil), not the '' sentinel used for name/locale_used —
+// description is nullable at the schema level, unlike name, so an absent
+// translation and a translation with no description must be
+// distinguishable from "has a description of the empty string".
+func TestGetCategoryAndListCategories_descriptionIsNullableNotEmptyString(t *testing.T) {
+	pool := testdb.New(t)
+	testdb.Truncate(t, pool)
+	ctx := context.Background()
+	q := db.New(pool)
+
+	shop := catalogShop(ctx, t, q, "shop-cat-desc")
+
+	withDesc, err := q.CreateCategory(ctx, db.CreateCategoryParams{
+		ID: uuid.New(), ShopID: shop.ID, Slug: "with-desc", IsActive: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateCategory(with-desc): %v", err)
+	}
+	desc := "Electronics and gadgets"
+	if err := q.UpsertCategoryTranslation(ctx, db.UpsertCategoryTranslationParams{
+		CategoryID: withDesc.ID, Locale: "uz", Name: "Elektronika", Description: &desc,
+	}); err != nil {
+		t.Fatalf("upsert translation with description: %v", err)
+	}
+
+	noDesc, err := q.CreateCategory(ctx, db.CreateCategoryParams{
+		ID: uuid.New(), ShopID: shop.ID, Slug: "no-desc", IsActive: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateCategory(no-desc): %v", err)
+	}
+	if err := q.UpsertCategoryTranslation(ctx, db.UpsertCategoryTranslationParams{
+		CategoryID: noDesc.ID, Locale: "uz", Name: "Boshqa",
+	}); err != nil {
+		t.Fatalf("upsert translation without description: %v", err)
+	}
+
+	untranslated, err := q.CreateCategory(ctx, db.CreateCategoryParams{
+		ID: uuid.New(), ShopID: shop.ID, Slug: "untranslated", IsActive: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateCategory(untranslated): %v", err)
+	}
+
+	got, err := q.GetCategory(ctx, db.GetCategoryParams{ShopID: shop.ID, ID: withDesc.ID, Locale: "uz"})
+	if err != nil {
+		t.Fatalf("GetCategory(with-desc): %v", err)
+	}
+	if got.Description == nil || *got.Description != desc {
+		t.Fatalf("GetCategory(with-desc).Description = %v, want %q", got.Description, desc)
+	}
+
+	got, err = q.GetCategory(ctx, db.GetCategoryParams{ShopID: shop.ID, ID: noDesc.ID, Locale: "uz"})
+	if err != nil {
+		t.Fatalf("GetCategory(no-desc): %v", err)
+	}
+	if got.Description != nil {
+		t.Fatalf("GetCategory(no-desc).Description = %v, want nil (NULL, not '')", *got.Description)
+	}
+
+	got, err = q.GetCategory(ctx, db.GetCategoryParams{ShopID: shop.ID, ID: untranslated.ID, Locale: "uz"})
+	if err != nil {
+		t.Fatalf("GetCategory(untranslated): %v", err)
+	}
+	if got.Description != nil {
+		t.Fatalf("GetCategory(untranslated).Description = %v, want nil", *got.Description)
+	}
+
+	rows, err := q.ListCategories(ctx, db.ListCategoriesParams{ShopID: shop.ID, Locale: "uz", IncludeInactive: true})
+	if err != nil {
+		t.Fatalf("ListCategories: %v", err)
+	}
+	byID := func(id uuid.UUID) db.ListCategoriesRow {
+		t.Helper()
+		for _, r := range rows {
+			if r.ID == id {
+				return r
+			}
+		}
+		t.Fatalf("no row with id %s", id)
+		return db.ListCategoriesRow{}
+	}
+	if r := byID(withDesc.ID); r.Description == nil || *r.Description != desc {
+		t.Fatalf("ListCategories(with-desc).Description = %v, want %q", r.Description, desc)
+	}
+	if r := byID(noDesc.ID); r.Description != nil {
+		t.Fatalf("ListCategories(no-desc).Description = %v, want nil", *r.Description)
+	}
+	if r := byID(untranslated.ID); r.Description != nil {
+		t.Fatalf("ListCategories(untranslated).Description = %v, want nil", *r.Description)
+	}
+}
+
+func TestUpdateCategory_clearParentAndClearImage(t *testing.T) {
+	pool := testdb.New(t)
+	testdb.Truncate(t, pool)
+	ctx := context.Background()
+	q := db.New(pool)
+
+	shop := catalogShop(ctx, t, q, "shop-cat-clear")
+	media := catalogMedia(ctx, t, q, shop.ID, "cat-image.webp", [32]byte{7})
+
+	parent, err := q.CreateCategory(ctx, db.CreateCategoryParams{
+		ID: uuid.New(), ShopID: shop.ID, Slug: "parent", IsActive: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateCategory(parent): %v", err)
+	}
+	child, err := q.CreateCategory(ctx, db.CreateCategoryParams{
+		ID: uuid.New(), ShopID: shop.ID, ParentID: &parent.ID, Slug: "child", IsActive: true, ImageID: &media.ID,
+	})
+	if err != nil {
+		t.Fatalf("CreateCategory(child): %v", err)
+	}
+	if child.ParentID == nil || *child.ParentID != parent.ID {
+		t.Fatalf("child.ParentID = %v, want %s", child.ParentID, parent.ID)
+	}
+	if child.ImageID == nil || *child.ImageID != media.ID {
+		t.Fatalf("child.ImageID = %v, want %s", child.ImageID, media.ID)
+	}
+
+	// clear_parent / clear_image false, no narg supplied: COALESCE keeps the
+	// existing values unchanged (same as before the flags existed).
+	unchanged, err := q.UpdateCategory(ctx, db.UpdateCategoryParams{
+		ShopID: shop.ID, ID: child.ID, SortOrder: nil,
+	})
+	if err != nil {
+		t.Fatalf("UpdateCategory(no-op patch): %v", err)
+	}
+	if unchanged.ParentID == nil || *unchanged.ParentID != parent.ID {
+		t.Fatalf("no-op patch: ParentID = %v, want unchanged %s", unchanged.ParentID, parent.ID)
+	}
+	if unchanged.ImageID == nil || *unchanged.ImageID != media.ID {
+		t.Fatalf("no-op patch: ImageID = %v, want unchanged %s", unchanged.ImageID, media.ID)
+	}
+
+	// clear_parent / clear_image true: both go to NULL regardless of any
+	// narg value (there is none here, but the flag wins either way).
+	cleared, err := q.UpdateCategory(ctx, db.UpdateCategoryParams{
+		ShopID: shop.ID, ID: child.ID, ClearParent: true, ClearImage: true,
+	})
+	if err != nil {
+		t.Fatalf("UpdateCategory(clear): %v", err)
+	}
+	if cleared.ParentID != nil {
+		t.Fatalf("cleared.ParentID = %v, want nil", *cleared.ParentID)
+	}
+	if cleared.ImageID != nil {
+		t.Fatalf("cleared.ImageID = %v, want nil", *cleared.ImageID)
 	}
 }

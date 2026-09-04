@@ -48,6 +48,18 @@ SET
 WHERE shop_id = sqlc.arg('shop_id') AND id = sqlc.arg('id') AND deleted_at IS NULL
 RETURNING *;
 
+-- name: UpdateVariantAttributes :one
+-- In-place attribute rewrite, separate from UpdateVariant's patch (which
+-- deliberately excludes attributes — see the comment there). The
+-- (product_id, attributes) unique index still protects against a rewrite
+-- landing on a duplicate combination for the product; the service is
+-- responsible for canonicalizing the JSON (stable key order) before this
+-- runs so two JSON-equivalent objects compare equal to that index.
+UPDATE product_variants
+SET attributes = $3, updated_at = now()
+WHERE shop_id = $1 AND id = $2 AND deleted_at IS NULL
+RETURNING *;
+
 -- name: SoftDeleteVariant :exec
 UPDATE product_variants
 SET deleted_at = now(), updated_at = now()
