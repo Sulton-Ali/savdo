@@ -40,6 +40,7 @@
     "attributes": "Атрибуты",
     "staff": "Сотрудники",
     "locations": "Филиалы",
+    "suppliers": "Поставщики",
     "settings": "Настройки"
   },
   "auth": {
@@ -124,6 +125,27 @@
       "defaultLocale": "Язык по умолчанию",
       "allowNegativeStock": "Разрешить отрицательный остаток",
       "updateCostOnPurchase": "Обновлять себестоимость при закупке"
+    }
+  },
+  "suppliers": {
+    "title": "Поставщики",
+    "add": "Добавить поставщика",
+    "edit": "Редактировать поставщика",
+    "delete": "Удалить",
+    "confirmDelete": "Удалить этого поставщика?",
+    "searchPlaceholder": "Поиск поставщиков",
+    "columns": {
+      "name": "Название",
+      "contactName": "Контакт",
+      "phone": "Телефон",
+      "telegramUsername": "Telegram"
+    },
+    "fields": {
+      "name": "Название",
+      "contactName": "Контактное лицо",
+      "phone": "Телефон",
+      "telegramUsername": "Имя пользователя в Telegram",
+      "note": "Заметка"
     }
   },
   "catalog": {

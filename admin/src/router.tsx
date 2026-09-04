@@ -11,6 +11,7 @@ import { productNewRoute } from "./routes/app/productNewRoute";
 import { productsRoute } from "./routes/app/productsRoute";
 import { settingsRoute } from "./routes/app/settingsRoute";
 import { staffRoute } from "./routes/app/staffRoute";
+import { suppliersRoute } from "./routes/app/suppliersRoute";
 import { loginRoute } from "./routes/login/loginRoute";
 import { rootRoute } from "./routes/root";
 
@@ -25,6 +26,8 @@ const routeTree = rootRoute.addChildren([
     attributesRoute,
     staffRoute,
     locationsRoute,
+    // Phase 3 T6a: suppliers (manager+).
+    suppliersRoute,
     settingsRoute,
   ]),
 ]);
