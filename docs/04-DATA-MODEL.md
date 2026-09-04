@@ -73,16 +73,16 @@ always reference a variant, never a product.
 **stock_movements** (append-only; no `updated_at`) — `variant_id`, `location_id`,
 `kind stock_movement_kind` (`purchase_in|sale_out|sale_void_in|return_in|adjustment|
 transfer_out|transfer_in`), `qty numeric(12,3)` (signed: positive in, negative out),
-`unit_cost numeric(14,2)`, `ref_type text`, `ref_id uuid`, `reason text`,
+`unit_cost numeric(14,2)`, `ref_type text`, `ref_id uuid`, `reason text`, `adjustment_reason adjustment_reason null`,
 `created_by uuid`, `created_at`. Index `(shop_id, variant_id, location_id, created_at)`.
-**No UPDATE or DELETE is ever issued on this table** — enforce with a trigger that raises. Adjustments carry a fixed reason enum (`count_correction`, `damaged`, `lost`, `found`, `other`; D-46) plus an optional note.
+**No UPDATE or DELETE is ever issued on this table** — enforce with a trigger that raises. Adjustments carry `adjustment_reason` (enum `count_correction`, `damaged`, `lost`, `found`, `other`; D-46, not null iff kind = `adjustment`); the existing `reason text` column holds the optional free-text note.
 
 **stock_levels** — `variant_id`, `location_id`, `qty numeric(12,3) not null default 0`,
 `updated_at`. PK `(shop_id, variant_id, location_id)`. Maintained only by
 `stock.Service.Move` inside the movement's transaction with `FOR UPDATE`. Rebuildable:
 `savdo stock rebuild`.
 
-**Rules (D-41, D-42, D-44):** a level never goes below zero unless `shops.allow_negative_stock` is on — otherwise any movement that would do so fails with `STOCK_INSUFFICIENT` inside `stock.Service.Move` (D-41, D-48). When `shops.update_cost_on_purchase` is on, receiving a purchase sets each received variant's `cost_override` to the line's `unit_cost` (D-42, D-48). Low stock: `shops.low_stock_threshold` default with optional `products.low_stock_threshold` override; a variant is low when its total quantity across locations is at or below the effective threshold (D-44).
+**Rules (D-41, D-42, D-44):** a level never goes below zero unless `shops.allow_negative_stock` is on — otherwise any movement that would do so fails with `STOCK_INSUFFICIENT` inside `stock.Service.Move` (D-41, D-48). When `shops.update_cost_on_purchase` is on, receiving a purchase sets each received variant's `cost_override` to the line's `unit_cost` (D-42, D-48). Low stock: `shops.low_stock_threshold` default with optional `products.low_stock_threshold` override; a variant is low when its total quantity across locations is at or below the effective threshold (D-44). Only variants stocked at least once on active products and variants count (D-50).
 
 **purchases** — `supplier_id`, `location_id`, `number text`, `status purchase_status`
 (`draft|received|cancelled`), `received_at`, `note`, `total_cost numeric(14,2)`,

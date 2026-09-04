@@ -162,6 +162,7 @@ owner links Telegram and resets their password via OTP; conversations appear in 
 - [ ] Monitoring: uptime check, error alerts to the owner's Telegram
 - [ ] Import the family shop's real catalogue and opening stock (CSV import task or seed script)
 - [ ] Security pass: headers, CORS, rate limits, dependency audit
+- [ ] Least-privilege database role for the API (no TRUNCATE / no trigger disable on the ledger); the append-only trigger on `stock_movements` covers UPDATE/DELETE only.
 - [ ] Owner acceptance week (see `01-OVERVIEW.md` § Definition of done)
 
 **Done when:** the shop has run one full week on Savdo in production and the six
