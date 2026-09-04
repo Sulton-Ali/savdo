@@ -37,8 +37,10 @@ Base path `/v1`. JSON only. Server: Go, `api/cmd/api`, port 8080 behind Caddy.
   spec under `components.schemas.ErrorCode`; adding a code means adding it there.
 - **Validation and conflict vocabulary** (O-12): `details.fields` maps field → one of `required`, `invalid`, `too_short`, `too_long`; a uniqueness violation is `409 CONFLICT` with `details.field` naming the field (`username`, `phone`, `name`). Clients translate these words; nothing else is used.
 - **Role-shaped responses**: the same endpoint returns fewer fields for `cashier`
-  (`costPrice`, `unitCost`, margin fields absent, not null). The spec models this with
-  `ProductStaff` / `ProductCashier` / `ProductPublic` schemas.
+  (`costPrice`, `unitCost`, margin fields absent, not null). The spec models this as
+  the same schema with role-dependent optional fields (`ProductStaff`/`ProductCashier`
+  are not used); `ProductPublic`/`VariantPublic` remain separate schemas for Phase 6's
+  public catalogue.
 - **Versioning**: additive changes only within `/v1`. A breaking change is `/v2` and an
   owner decision.
 
@@ -80,6 +82,7 @@ Phase numbers refer to `06-ROADMAP.md`.
 | ------ | ----------------------------------- | --------------- |
 | GET    | `/units`                            | any             |
 | GET/POST | `/attribute-definitions`          | manager+        |
+| PATCH  | `/attribute-definitions/{id}`       | manager+        |
 | GET/POST | `/categories`                     | any / manager+  |
 | GET/PATCH/DELETE | `/categories/{id}`        | any / manager+  |
 | GET/POST | `/products`                       | any / manager+  |
@@ -87,7 +90,8 @@ Phase numbers refer to `06-ROADMAP.md`.
 | GET/POST | `/products/{id}/variants`         | any / manager+  |
 | PATCH/DELETE | `/variants/{id}`              | manager+        |
 | POST   | `/media`                            | manager+ (multipart) |
-| POST/DELETE | `/products/{id}/images`        | manager+        |
+| POST    | `/products/{id}/images`            | manager+        |
+| DELETE | `/products/{id}/images/{imageId}`   | manager+        |
 | PATCH  | `/products/{id}/images/order`       | manager+        |
 
 ### Stock, purchases, suppliers (Phase 3)

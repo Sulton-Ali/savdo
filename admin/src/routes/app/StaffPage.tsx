@@ -315,7 +315,12 @@ export function StaffPage() {
             onFinish={(values) => {
               const body: StaffPatch = {
                 fullName: values.fullName,
-                phone: values.phone ?? null,
+                // D-35: a cleared phone input is a blank string in
+                // AntD's form state, not `undefined` — normalize it to a
+                // real `null` here so the API clears the field (an
+                // explicit `""` is now a validation error, not a
+                // synonym for clearing it).
+                phone: values.phone ? values.phone : null,
                 locale: values.locale,
                 // The owner's role is never patched — the Select above is
                 // disabled for that row and the API rejects it either way.

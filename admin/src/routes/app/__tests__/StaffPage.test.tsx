@@ -129,4 +129,66 @@ describe("StaffPage", () => {
     // The modal stays open on a field-level error.
     expect(screen.getByRole("dialog")).toBeTruthy();
   });
+
+  // D-35: PATCH clears a field with a real JSON `null`, not `""`. AntD's
+  // Form reports a cleared Input as an empty string, so StaffPage must
+  // normalize that to `null` itself before calling the API.
+  it("sends phone: null, not an empty string, when the phone field is cleared", async () => {
+    mockedApi.GET.mockResolvedValue({
+      data: {
+        items: [
+          {
+            id: "u1",
+            username: "cashier1",
+            fullName: "Cashier One",
+            phone: "+998901112233",
+            role: "cashier",
+            locale: "uz",
+            isActive: true,
+            lastLoginAt: null,
+            createdAt: "2026-01-01T00:00:00Z",
+          },
+        ],
+        nextCursor: null,
+      },
+      error: undefined,
+      response: new Response(null, { status: 200 }),
+    } as never);
+    mockedApi.PATCH.mockResolvedValueOnce({
+      data: {
+        id: "u1",
+        username: "cashier1",
+        fullName: "Cashier One",
+        phone: null,
+        role: "cashier",
+        locale: "uz",
+        isActive: true,
+        lastLoginAt: null,
+        createdAt: "2026-01-01T00:00:00Z",
+      },
+      error: undefined,
+      response: new Response(null, { status: 200 }),
+    } as never);
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit staff" }));
+
+    const phoneInput = await screen.findByLabelText("Phone");
+    fireEvent.change(phoneInput, { target: { value: "" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(mockedApi.PATCH).toHaveBeenCalledWith("/staff/{id}", {
+        params: { path: { id: "u1" } },
+        body: {
+          fullName: "Cashier One",
+          phone: null,
+          locale: "uz",
+          role: "cashier",
+        },
+      });
+    });
+  });
 });

@@ -470,7 +470,8 @@ func TestListSessions(t *testing.T) {
 	if !list.Items[0].Current {
 		t.Fatal("the only session should be marked Current")
 	}
-	if list.NextCursor != nil {
-		t.Fatalf("NextCursor = %v, want nil", *list.NextCursor)
+	if !list.NextCursor.IsNull() {
+		v, _ := list.NextCursor.Get()
+		t.Fatalf("NextCursor = %v, want null", v)
 	}
 }

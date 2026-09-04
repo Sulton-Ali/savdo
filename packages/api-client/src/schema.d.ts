@@ -261,6 +261,299 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/units": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the shop's units of measure.
+         * @description Seeded per shop, read-only in Phase 2 (docs/04-DATA-MODEL.md § 2). Not cursor-paginated — the set is small and fixed for now.
+         */
+        get: operations["listUnits"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/attribute-definitions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the shop's attribute definitions (e.g. size, colour).
+         * @description Not cursor-paginated — seeded with a handful of entries (D-32) and expected to stay small.
+         */
+        get: operations["listAttributeDefinitions"];
+        put?: never;
+        /**
+         * Create an attribute definition.
+         * @description Requires `catalog.write` (manager+).
+         */
+        post: operations["createAttributeDefinition"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/attribute-definitions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update an attribute definition.
+         * @description Requires `catalog.write` (manager+). `code` is not patchable — variants already reference it by key (docs/04-DATA-MODEL.md § 2).
+         */
+        patch: operations["updateAttributeDefinition"];
+        trace?: never;
+    };
+    "/categories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the shop's categories as a flat list.
+         * @description Flat, not cursor-paginated — the client builds the tree from `parentId`. Depth is capped at 3 (docs/04-DATA-MODEL.md § 2).
+         */
+        get: operations["listCategories"];
+        put?: never;
+        /**
+         * Create a category.
+         * @description Requires `catalog.write` (manager+). `400 fields.parentId: invalid` when the parent chain would exceed depth 3.
+         */
+        post: operations["createCategory"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/categories/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a category. */
+        get: operations["getCategory"];
+        put?: never;
+        post?: never;
+        /**
+         * Soft-delete a category.
+         * @description Requires `catalog.write` (manager+). `409 CONFLICT details.field: products` when products still reference this category (assumption: D-32/D-34 area, no cascading delete).
+         */
+        delete: operations["deleteCategory"];
+        options?: never;
+        head?: never;
+        /**
+         * Update a category.
+         * @description Requires `catalog.write` (manager+). `400 fields.parentId: invalid` when re-parenting would exceed depth 3 or create a cycle.
+         */
+        patch: operations["updateCategory"];
+        trace?: never;
+    };
+    "/products": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List products.
+         * @description Cursor-paginated. `Product`'s `costPrice`/`translations` are present only for owner/manager, never for a cashier (§ Conventions, ADR-010).
+         */
+        get: operations["listProducts"];
+        put?: never;
+        /**
+         * Create a product.
+         * @description Requires `catalog.write` (manager+).
+         */
+        post: operations["createProduct"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/products/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a product, including its variants and images.
+         * @description `costPrice`/`translations` are present only for owner/manager, like `GET /products` (§ Conventions).
+         */
+        get: operations["getProduct"];
+        put?: never;
+        post?: never;
+        /**
+         * Soft-delete a product.
+         * @description Requires `catalog.write` (manager+).
+         */
+        delete: operations["deleteProduct"];
+        options?: never;
+        head?: never;
+        /**
+         * Update a product.
+         * @description Requires `catalog.write` (manager+).
+         */
+        patch: operations["updateProduct"];
+        trace?: never;
+    };
+    "/products/{id}/variants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List a product's variants.
+         * @description Not cursor-paginated — a product has at most a handful of variants. `Variant`'s `costOverride` is present only for owner/manager (§ Conventions).
+         */
+        get: operations["listVariants"];
+        put?: never;
+        /**
+         * Add a variant to a product.
+         * @description Requires `catalog.write` (manager+).
+         */
+        post: operations["createVariant"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/variants/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Soft-delete a variant.
+         * @description Requires `catalog.write` (manager+). `400 fields.variantId: invalid` when this is the product's only variant — every product must keep at least one (docs/04-DATA-MODEL.md § 2).
+         */
+        delete: operations["deleteVariant"];
+        options?: never;
+        head?: never;
+        /**
+         * Update a variant.
+         * @description Requires `catalog.write` (manager+).
+         */
+        patch: operations["updateVariant"];
+        trace?: never;
+    };
+    "/media": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload an image.
+         * @description Requires `catalog.write` (manager+). Generates thumb/card/full sizes as WebP (ADR-008). `400 fields.file: invalid` for an unsupported format, `400 fields.file: too_long` over the size limit.
+         */
+        post: operations["uploadMedia"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/products/{id}/images": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Attach an uploaded image to a product.
+         * @description Requires `catalog.write` (manager+). `400 fields.mediaId: invalid` once the product already has 8 images (D-34); `409 CONFLICT details.field: mediaId` when this media file is already attached to the product (`product_images` unique `(product_id, media_id)`, docs/04-DATA-MODEL.md § 2).
+         */
+        post: operations["addProductImage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/products/{id}/images/{imageId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove an image from a product.
+         * @description Requires `catalog.write` (manager+). Hard delete (join row).
+         */
+        delete: operations["removeProductImage"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/products/{id}/images/order": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Reorder a product's images and/or change its cover image.
+         * @description Requires `catalog.write` (manager+).
+         */
+        patch: operations["reorderProductImages"];
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -442,6 +735,329 @@ export interface components {
         };
         SetStaffPassword: {
             password: string;
+        };
+        /** @description One locale's name/description for a translatable entity. */
+        TranslationEntry: {
+            name: string;
+            description?: string;
+        };
+        /** @description Per-locale name/description (ADR-012), keyed by `Locale`. On create, an entry for the shop's own default locale is required — expressible only as a service-level rule, since the JSON Schema can't know a given shop's `defaultLocale` value. On PATCH, each provided locale entry fully replaces the stored entry for that locale; omitted locales are left unchanged. Response fields outside this object (`name`/`description`/`locale`/ `translationFallback`) are the entity resolved for the caller's `Accept-Language`, fallback order `requested → uz → any`. */
+        Translations: {
+            uz?: components["schemas"]["TranslationEntry"];
+            ru?: components["schemas"]["TranslationEntry"];
+            en?: components["schemas"]["TranslationEntry"];
+        };
+        /** @description A unit of measure (docs/04-DATA-MODEL.md § 2). Seeded, read-only in Phase 2. */
+        Unit: {
+            /** Format: uuid */
+            id: string;
+            /** @description e.g. `pcs`, `kg`, `m`. */
+            code: string;
+            /** @description Decimal places a quantity in this unit is stored/displayed with (0 for `pcs`, 3 for `kg`). */
+            precision: number;
+            /** @description Resolved for the caller's `Accept-Language`. */
+            name: string;
+            locale: components["schemas"]["Locale"];
+            translationFallback: boolean;
+        };
+        /** @description Flat envelope for `GET /units` (not cursor-paginated). */
+        UnitList: {
+            items: components["schemas"]["Unit"][];
+        };
+        /** @description A per-shop variant attribute, e.g. size or colour (D-32). */
+        AttributeDefinition: {
+            /** Format: uuid */
+            id: string;
+            /** @description Stable key `product_variants.attributes` values are keyed by, e.g. `size`. */
+            code: string;
+            sortOrder: number;
+            /** @description Resolved for the caller's `Accept-Language`. */
+            name: string;
+            locale: components["schemas"]["Locale"];
+            translationFallback: boolean;
+            translations?: components["schemas"]["Translations"];
+        };
+        AttributeDefinitionCreate: {
+            code: string;
+            sortOrder?: number;
+            translations: components["schemas"]["Translations"];
+        };
+        /** @description Partial update — only provided fields change. `code` is not patchable. */
+        AttributeDefinitionPatch: {
+            sortOrder?: number;
+            translations?: components["schemas"]["Translations"];
+        };
+        /** @description Flat envelope for `GET /attribute-definitions` (not cursor-paginated). */
+        AttributeDefinitionList: {
+            items: components["schemas"]["AttributeDefinition"][];
+        };
+        Category: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            parentId: string | null;
+            slug: string;
+            sortOrder: number;
+            isActive: boolean;
+            /** Format: uuid */
+            imageId: string | null;
+            /** @description Resolved for the caller's `Accept-Language`. */
+            name: string;
+            description: string | null;
+            locale: components["schemas"]["Locale"];
+            translationFallback: boolean;
+            translations?: components["schemas"]["Translations"];
+        };
+        CategoryCreate: {
+            /** Format: uuid */
+            parentId?: string;
+            slug?: string;
+            sortOrder?: number;
+            isActive?: boolean;
+            /** Format: uuid */
+            imageId?: string;
+            translations: components["schemas"]["Translations"];
+        };
+        /** @description Partial update — only provided fields change. */
+        CategoryPatch: {
+            /**
+             * Format: uuid
+             * @description Explicit `null` moves the category to the top level.
+             */
+            parentId?: string | null;
+            slug?: string;
+            sortOrder?: number;
+            isActive?: boolean;
+            /**
+             * Format: uuid
+             * @description Explicit `null` removes the category's image.
+             */
+            imageId?: string | null;
+            translations?: components["schemas"]["Translations"];
+        };
+        /** @description Flat envelope for `GET /categories` (not cursor-paginated; the client builds the tree from `parentId`). */
+        CategoryList: {
+            items: components["schemas"]["Category"][];
+        };
+        /** @description A variant's attribute values, keyed by `attribute_definitions.code` (e.g. `{"size": "L", "color": "blue"}`, D-32). */
+        AttributeValues: {
+            [key: string]: string;
+        };
+        /**
+         * @description Public/bot-facing stock signal — never a quantity (ADR-010, hard rule 4/5).
+         * @enum {string}
+         */
+        Availability: "in_stock" | "low" | "out_of_stock";
+        /** @description `costOverride` is present only when the caller has the `cost.read` permission; absent (not null) otherwise (ADR-010). */
+        Variant: {
+            /** Format: uuid */
+            id: string;
+            sku: string | null;
+            barcode: string | null;
+            attributes: components["schemas"]["AttributeValues"];
+            /** Format: decimal */
+            priceOverride: string | null;
+            /**
+             * Format: decimal
+             * @description Present only when the caller has the `cost.read` permission; absent (not null) otherwise (ADR-010).
+             */
+            costOverride?: string | null;
+            isActive: boolean;
+        };
+        /** @description Defined now for Phase 6's public catalogue (D-32/D-34); no path references it yet. No cost, no `isActive` (only active variants are ever returned publicly); `availability` replaces any quantity (hard rule 4/5). */
+        VariantPublic: {
+            /** Format: uuid */
+            id: string;
+            sku: string | null;
+            barcode: string | null;
+            attributes: components["schemas"]["AttributeValues"];
+            /** Format: decimal */
+            priceOverride: string | null;
+            availability: components["schemas"]["Availability"];
+        };
+        VariantCreate: {
+            sku?: string;
+            barcode?: string;
+            attributes: components["schemas"]["AttributeValues"];
+            priceOverride?: components["schemas"]["Decimal"];
+            costOverride?: components["schemas"]["Decimal"];
+            isActive?: boolean;
+        };
+        /** @description Partial update — only provided fields change. */
+        VariantPatch: {
+            sku?: string | null;
+            barcode?: string | null;
+            attributes?: components["schemas"]["AttributeValues"];
+            /** Format: decimal */
+            priceOverride?: string | null;
+            /** Format: decimal */
+            costOverride?: string | null;
+            isActive?: boolean;
+        };
+        /** @description Flat envelope for `GET /products/{id}/variants` (not cursor-paginated). */
+        VariantList: {
+            items: components["schemas"]["Variant"][];
+        };
+        /** @description `costPrice` and `translations` are present only when the caller has the `cost.read` / `catalog.write` permission; absent (not null) otherwise (ADR-010). */
+        Product: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            categoryId: string | null;
+            slug: string;
+            sku: string | null;
+            /** Format: uuid */
+            unitId: string;
+            basePrice: components["schemas"]["Decimal"];
+            /**
+             * Format: decimal
+             * @description Present only when the caller has the `cost.read` permission; absent (not null) otherwise (ADR-010).
+             */
+            costPrice?: string;
+            /** Format: decimal */
+            promoPrice: string | null;
+            /** Format: date-time */
+            promoFrom: string | null;
+            /** Format: date-time */
+            promoTo: string | null;
+            isActive: boolean;
+            isFeatured: boolean;
+            /** @description Resolved for the caller's `Accept-Language`. */
+            name: string;
+            description: string | null;
+            locale: components["schemas"]["Locale"];
+            translationFallback: boolean;
+            /** @description Present only when the caller has the `catalog.write` permission; absent otherwise (ADR-010). */
+            translations?: components["schemas"]["Translations"];
+            variants?: components["schemas"]["Variant"][];
+            images?: components["schemas"]["ProductImage"][];
+        };
+        /** @description Defined now for Phase 6's public catalogue (D-32/D-34); no path references it yet. Only active products/variants are ever returned this way; variants carry `availability`, never cost or quantity (hard rule 4/5). */
+        ProductPublic: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            categoryId: string | null;
+            slug: string;
+            sku: string | null;
+            /** Format: uuid */
+            unitId: string;
+            basePrice: components["schemas"]["Decimal"];
+            /** Format: decimal */
+            promoPrice: string | null;
+            /** Format: date-time */
+            promoFrom: string | null;
+            /** Format: date-time */
+            promoTo: string | null;
+            isActive: boolean;
+            isFeatured: boolean;
+            /** @description Resolved for the caller's `Accept-Language`. */
+            name: string;
+            description: string | null;
+            locale: components["schemas"]["Locale"];
+            translationFallback: boolean;
+            variants?: components["schemas"]["VariantPublic"][];
+            images?: components["schemas"]["ProductImage"][];
+        };
+        ProductCreate: {
+            /** Format: uuid */
+            categoryId?: string;
+            slug?: string;
+            sku?: string;
+            /** Format: uuid */
+            unitId: string;
+            basePrice: components["schemas"]["Decimal"];
+            costPrice?: components["schemas"]["Decimal"];
+            promoPrice?: components["schemas"]["Decimal"];
+            /** Format: date-time */
+            promoFrom?: string;
+            /** Format: date-time */
+            promoTo?: string;
+            isActive?: boolean;
+            isFeatured?: boolean;
+            translations: components["schemas"]["Translations"];
+            variants?: components["schemas"]["VariantCreate"][];
+        };
+        /** @description Partial update — only provided fields change. `sku`, `promoPrice`, `promoFrom`, `promoTo`, `categoryId` and `costPrice` are nullable (D-35): explicit `null` clears the field. Variants are managed through `/products/{id}/variants` and `/variants/{id}`, not here. */
+        ProductPatch: {
+            /** Format: uuid */
+            categoryId?: string | null;
+            slug?: string;
+            sku?: string | null;
+            /** Format: uuid */
+            unitId?: string;
+            basePrice?: components["schemas"]["Decimal"];
+            /** Format: decimal */
+            costPrice?: string | null;
+            /** Format: decimal */
+            promoPrice?: string | null;
+            /** Format: date-time */
+            promoFrom?: string | null;
+            /** Format: date-time */
+            promoTo?: string | null;
+            isActive?: boolean;
+            isFeatured?: boolean;
+            translations?: components["schemas"]["Translations"];
+        };
+        /** @description Cursor-paginated envelope for `GET /products`. */
+        ProductList: {
+            items: components["schemas"]["Product"][];
+            nextCursor: string | null;
+        };
+        /** @description Request body for `POST /media` (`multipart/form-data`). */
+        MediaUpload: {
+            /** Format: binary */
+            file: string;
+        };
+        MediaUrls: {
+            /** Format: uri */
+            thumb: string;
+            /** Format: uri */
+            card: string;
+            /** Format: uri */
+            full: string;
+        };
+        /** @description Response for `POST /media` (ADR-008 — thumb 200/card 600/full 1600, WebP). */
+        MediaFile: {
+            /** Format: uuid */
+            id: string;
+            mime: string;
+            width: number;
+            height: number;
+            sizeBytes: number;
+            urls: components["schemas"]["MediaUrls"];
+        };
+        ProductImage: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            mediaId: string;
+            /** Format: uuid */
+            variantId: string | null;
+            isCover: boolean;
+            sortOrder: number;
+            urls: components["schemas"]["MediaUrls"];
+        };
+        ProductImageCreate: {
+            /** Format: uuid */
+            mediaId: string;
+            /**
+             * Format: uuid
+             * @description Ties this image to one variant, e.g. a colour (D-34).
+             */
+            variantId?: string;
+            isCover?: boolean;
+        };
+        /** @description Request body for `PATCH /products/{id}/images/order`. */
+        ProductImageOrder: {
+            /** @description Every image id belonging to the product, in the new display order. */
+            imageIds: string[];
+            /** Format: uuid */
+            coverImageId?: string;
+        };
+        /** @description Envelope for `PATCH /products/{id}/images/order`'s response. */
+        ProductImageList: {
+            items: components["schemas"]["ProductImage"][];
         };
     };
     responses: {
@@ -927,6 +1543,596 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listUnits: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnitList"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+        };
+    };
+    listAttributeDefinitions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttributeDefinitionList"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+        };
+    };
+    createAttributeDefinition: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AttributeDefinitionCreate"];
+            };
+        };
+        responses: {
+            /** @description Created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttributeDefinition"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    updateAttributeDefinition: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AttributeDefinitionPatch"];
+            };
+        };
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttributeDefinition"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    listCategories: {
+        parameters: {
+            query?: {
+                includeInactive?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CategoryList"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+        };
+    };
+    createCategory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CategoryCreate"];
+            };
+        };
+        responses: {
+            /** @description Created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Category"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getCategory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Category"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteCategory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    updateCategory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CategoryPatch"];
+            };
+        };
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Category"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    listProducts: {
+        parameters: {
+            query?: {
+                /** @description Free-text search over product name (Postgres ILIKE/trigram). */
+                q?: string;
+                categoryId?: string;
+                includeInactive?: boolean;
+                /** @description Maximum number of items to return. */
+                limit?: components["parameters"]["Limit"];
+                /** @description Opaque cursor from a previous page's `nextCursor`. */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductList"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+        };
+    };
+    createProduct: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProductCreate"];
+            };
+        };
+        responses: {
+            /** @description Created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Product"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getProduct: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Product"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteProduct: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateProduct: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProductPatch"];
+            };
+        };
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Product"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    listVariants: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VariantList"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createVariant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VariantCreate"];
+            };
+        };
+        responses: {
+            /** @description Created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Variant"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    deleteVariant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateVariant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VariantPatch"];
+            };
+        };
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Variant"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    uploadMedia: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["MediaUpload"];
+            };
+        };
+        responses: {
+            /** @description Created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaFile"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    addProductImage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProductImageCreate"];
+            };
+        };
+        responses: {
+            /** @description Created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductImage"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    removeProductImage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                imageId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    reorderProductImages: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProductImageOrder"];
+            };
+        };
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductImageList"];
+                };
             };
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];

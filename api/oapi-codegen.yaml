@@ -10,3 +10,12 @@ output-options:
   # healthz exists so far) but ADR-002 wants them generated now so future
   # modules import the same Go types instead of hand-declaring them.
   skip-prune: true
+  # D-35: every `["T", "null"]` field in the spec (OpenAPI 3.1's nullable
+  # idiom — see contracts/openapi.yaml's Decimal/Locale-adjacent schemas)
+  # generates github.com/oapi-codegen/nullable's Nullable[T] instead of a
+  # plain pointer, so a PATCH body can tell "absent" (leave unchanged)
+  # apart from a real JSON `null` (clear) — a bare *string cannot. This
+  # affects every nullable field in the spec, not just the PATCH ones it
+  # was added for (StaffPatch.phone); see the affected mapper functions in
+  # internal/auth and internal/shop for the retrofit.
+  nullable-type: true

@@ -11,12 +11,35 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"mime/multipart"
 	"net/http"
 	"time"
 
+	"github.com/oapi-codegen/nullable"
 	"github.com/oapi-codegen/runtime"
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
+
+// Defines values for Availability.
+const (
+	InStock    Availability = "in_stock"
+	Low        Availability = "low"
+	OutOfStock Availability = "out_of_stock"
+)
+
+// Valid indicates whether the value is a known member of the Availability enum.
+func (e Availability) Valid() bool {
+	switch e {
+	case InStock:
+		return true
+	case Low:
+		return true
+	case OutOfStock:
+		return true
+	default:
+		return false
+	}
+}
 
 // Defines values for ErrorCode.
 const (
@@ -219,6 +242,105 @@ func (e AcceptLanguage) Valid() bool {
 	}
 }
 
+// AttributeDefinition A per-shop variant attribute, e.g. size or colour (D-32).
+type AttributeDefinition struct {
+	// Code Stable key `product_variants.attributes` values are keyed by, e.g. `size`.
+	Code string             `json:"code"`
+	Id   openapi_types.UUID `json:"id"`
+
+	// Locale A UI/data locale (ADR-012).
+	Locale Locale `json:"locale"`
+
+	// Name Resolved for the caller's `Accept-Language`.
+	Name                string `json:"name"`
+	SortOrder           int    `json:"sortOrder"`
+	TranslationFallback bool   `json:"translationFallback"`
+
+	// Translations Per-locale name/description (ADR-012), keyed by `Locale`. On create, an entry for the shop's own default locale is required — expressible only as a service-level rule, since the JSON Schema can't know a given shop's `defaultLocale` value. On PATCH, each provided locale entry fully replaces the stored entry for that locale; omitted locales are left unchanged. Response fields outside this object (`name`/`description`/`locale`/ `translationFallback`) are the entity resolved for the caller's `Accept-Language`, fallback order `requested → uz → any`.
+	Translations *Translations `json:"translations,omitempty"`
+}
+
+// AttributeDefinitionCreate defines model for AttributeDefinitionCreate.
+type AttributeDefinitionCreate struct {
+	Code      string `json:"code"`
+	SortOrder *int   `json:"sortOrder,omitempty"`
+
+	// Translations Per-locale name/description (ADR-012), keyed by `Locale`. On create, an entry for the shop's own default locale is required — expressible only as a service-level rule, since the JSON Schema can't know a given shop's `defaultLocale` value. On PATCH, each provided locale entry fully replaces the stored entry for that locale; omitted locales are left unchanged. Response fields outside this object (`name`/`description`/`locale`/ `translationFallback`) are the entity resolved for the caller's `Accept-Language`, fallback order `requested → uz → any`.
+	Translations Translations `json:"translations"`
+}
+
+// AttributeDefinitionList Flat envelope for `GET /attribute-definitions` (not cursor-paginated).
+type AttributeDefinitionList struct {
+	Items []AttributeDefinition `json:"items"`
+}
+
+// AttributeDefinitionPatch Partial update — only provided fields change. `code` is not patchable.
+type AttributeDefinitionPatch struct {
+	SortOrder *int `json:"sortOrder,omitempty"`
+
+	// Translations Per-locale name/description (ADR-012), keyed by `Locale`. On create, an entry for the shop's own default locale is required — expressible only as a service-level rule, since the JSON Schema can't know a given shop's `defaultLocale` value. On PATCH, each provided locale entry fully replaces the stored entry for that locale; omitted locales are left unchanged. Response fields outside this object (`name`/`description`/`locale`/ `translationFallback`) are the entity resolved for the caller's `Accept-Language`, fallback order `requested → uz → any`.
+	Translations *Translations `json:"translations,omitempty"`
+}
+
+// AttributeValues A variant's attribute values, keyed by `attribute_definitions.code` (e.g. `{"size": "L", "color": "blue"}`, D-32).
+type AttributeValues map[string]string
+
+// Availability Public/bot-facing stock signal — never a quantity (ADR-010, hard rule 4/5).
+type Availability string
+
+// Category defines model for Category.
+type Category struct {
+	Description nullable.Nullable[string]             `json:"description"`
+	Id          openapi_types.UUID                    `json:"id"`
+	ImageId     nullable.Nullable[openapi_types.UUID] `json:"imageId"`
+	IsActive    bool                                  `json:"isActive"`
+
+	// Locale A UI/data locale (ADR-012).
+	Locale Locale `json:"locale"`
+
+	// Name Resolved for the caller's `Accept-Language`.
+	Name                string                                `json:"name"`
+	ParentId            nullable.Nullable[openapi_types.UUID] `json:"parentId"`
+	Slug                string                                `json:"slug"`
+	SortOrder           int                                   `json:"sortOrder"`
+	TranslationFallback bool                                  `json:"translationFallback"`
+
+	// Translations Per-locale name/description (ADR-012), keyed by `Locale`. On create, an entry for the shop's own default locale is required — expressible only as a service-level rule, since the JSON Schema can't know a given shop's `defaultLocale` value. On PATCH, each provided locale entry fully replaces the stored entry for that locale; omitted locales are left unchanged. Response fields outside this object (`name`/`description`/`locale`/ `translationFallback`) are the entity resolved for the caller's `Accept-Language`, fallback order `requested → uz → any`.
+	Translations *Translations `json:"translations,omitempty"`
+}
+
+// CategoryCreate defines model for CategoryCreate.
+type CategoryCreate struct {
+	ImageId   *openapi_types.UUID `json:"imageId,omitempty"`
+	IsActive  *bool               `json:"isActive,omitempty"`
+	ParentId  *openapi_types.UUID `json:"parentId,omitempty"`
+	Slug      *string             `json:"slug,omitempty"`
+	SortOrder *int                `json:"sortOrder,omitempty"`
+
+	// Translations Per-locale name/description (ADR-012), keyed by `Locale`. On create, an entry for the shop's own default locale is required — expressible only as a service-level rule, since the JSON Schema can't know a given shop's `defaultLocale` value. On PATCH, each provided locale entry fully replaces the stored entry for that locale; omitted locales are left unchanged. Response fields outside this object (`name`/`description`/`locale`/ `translationFallback`) are the entity resolved for the caller's `Accept-Language`, fallback order `requested → uz → any`.
+	Translations Translations `json:"translations"`
+}
+
+// CategoryList Flat envelope for `GET /categories` (not cursor-paginated; the client builds the tree from `parentId`).
+type CategoryList struct {
+	Items []Category `json:"items"`
+}
+
+// CategoryPatch Partial update — only provided fields change.
+type CategoryPatch struct {
+	// ImageId Explicit `null` removes the category's image.
+	ImageId  nullable.Nullable[openapi_types.UUID] `json:"imageId,omitempty"`
+	IsActive *bool                                 `json:"isActive,omitempty"`
+
+	// ParentId Explicit `null` moves the category to the top level.
+	ParentId  nullable.Nullable[openapi_types.UUID] `json:"parentId,omitempty"`
+	Slug      *string                               `json:"slug,omitempty"`
+	SortOrder *int                                  `json:"sortOrder,omitempty"`
+
+	// Translations Per-locale name/description (ADR-012), keyed by `Locale`. On create, an entry for the shop's own default locale is required — expressible only as a service-level rule, since the JSON Schema can't know a given shop's `defaultLocale` value. On PATCH, each provided locale entry fully replaces the stored entry for that locale; omitted locales are left unchanged. Response fields outside this object (`name`/`description`/`locale`/ `translationFallback`) are the entity resolved for the caller's `Accept-Language`, fallback order `requested → uz → any`.
+	Translations *Translations `json:"translations,omitempty"`
+}
+
 // Decimal money and quantities as decimal strings (ADR-007)
 type Decimal = string
 
@@ -268,8 +390,8 @@ type LocationKind string
 
 // LocationList Cursor-paginated envelope for `GET /locations`.
 type LocationList struct {
-	Items      []Location `json:"items"`
-	NextCursor *string    `json:"nextCursor"`
+	Items      []Location                `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"nextCursor"`
 }
 
 // LocationPatch Partial update — only provided fields change.
@@ -305,6 +427,167 @@ type Me struct {
 	User        User     `json:"user"`
 }
 
+// MediaFile Response for `POST /media` (ADR-008 — thumb 200/card 600/full 1600, WebP).
+type MediaFile struct {
+	Height    int                `json:"height"`
+	Id        openapi_types.UUID `json:"id"`
+	Mime      string             `json:"mime"`
+	SizeBytes int                `json:"sizeBytes"`
+	Urls      MediaUrls          `json:"urls"`
+	Width     int                `json:"width"`
+}
+
+// MediaUpload Request body for `POST /media` (`multipart/form-data`).
+type MediaUpload struct {
+	File openapi_types.File `json:"file"`
+}
+
+// MediaUrls defines model for MediaUrls.
+type MediaUrls struct {
+	Card  string `json:"card"`
+	Full  string `json:"full"`
+	Thumb string `json:"thumb"`
+}
+
+// Product `costPrice` and `translations` are present only when the caller has the `cost.read` / `catalog.write` permission; absent (not null) otherwise (ADR-010).
+type Product struct {
+	// BasePrice money and quantities as decimal strings (ADR-007)
+	BasePrice  Decimal                               `json:"basePrice"`
+	CategoryId nullable.Nullable[openapi_types.UUID] `json:"categoryId"`
+
+	// CostPrice Present only when the caller has the `cost.read` permission; absent (not null) otherwise (ADR-010).
+	CostPrice   *string                   `json:"costPrice,omitempty"`
+	Description nullable.Nullable[string] `json:"description"`
+	Id          openapi_types.UUID        `json:"id"`
+	Images      *[]ProductImage           `json:"images,omitempty"`
+	IsActive    bool                      `json:"isActive"`
+	IsFeatured  bool                      `json:"isFeatured"`
+
+	// Locale A UI/data locale (ADR-012).
+	Locale Locale `json:"locale"`
+
+	// Name Resolved for the caller's `Accept-Language`.
+	Name                string                       `json:"name"`
+	PromoFrom           nullable.Nullable[time.Time] `json:"promoFrom"`
+	PromoPrice          nullable.Nullable[string]    `json:"promoPrice"`
+	PromoTo             nullable.Nullable[time.Time] `json:"promoTo"`
+	Sku                 nullable.Nullable[string]    `json:"sku"`
+	Slug                string                       `json:"slug"`
+	TranslationFallback bool                         `json:"translationFallback"`
+
+	// Translations Present only when the caller has the `catalog.write` permission; absent otherwise (ADR-010).
+	Translations *Translations      `json:"translations,omitempty"`
+	UnitId       openapi_types.UUID `json:"unitId"`
+	Variants     *[]Variant         `json:"variants,omitempty"`
+}
+
+// ProductCreate defines model for ProductCreate.
+type ProductCreate struct {
+	// BasePrice money and quantities as decimal strings (ADR-007)
+	BasePrice  Decimal             `json:"basePrice"`
+	CategoryId *openapi_types.UUID `json:"categoryId,omitempty"`
+
+	// CostPrice money and quantities as decimal strings (ADR-007)
+	CostPrice  *Decimal   `json:"costPrice,omitempty"`
+	IsActive   *bool      `json:"isActive,omitempty"`
+	IsFeatured *bool      `json:"isFeatured,omitempty"`
+	PromoFrom  *time.Time `json:"promoFrom,omitempty"`
+
+	// PromoPrice money and quantities as decimal strings (ADR-007)
+	PromoPrice *Decimal   `json:"promoPrice,omitempty"`
+	PromoTo    *time.Time `json:"promoTo,omitempty"`
+	Sku        *string    `json:"sku,omitempty"`
+	Slug       *string    `json:"slug,omitempty"`
+
+	// Translations Per-locale name/description (ADR-012), keyed by `Locale`. On create, an entry for the shop's own default locale is required — expressible only as a service-level rule, since the JSON Schema can't know a given shop's `defaultLocale` value. On PATCH, each provided locale entry fully replaces the stored entry for that locale; omitted locales are left unchanged. Response fields outside this object (`name`/`description`/`locale`/ `translationFallback`) are the entity resolved for the caller's `Accept-Language`, fallback order `requested → uz → any`.
+	Translations Translations       `json:"translations"`
+	UnitId       openapi_types.UUID `json:"unitId"`
+	Variants     *[]VariantCreate   `json:"variants,omitempty"`
+}
+
+// ProductImage defines model for ProductImage.
+type ProductImage struct {
+	Id        openapi_types.UUID                    `json:"id"`
+	IsCover   bool                                  `json:"isCover"`
+	MediaId   openapi_types.UUID                    `json:"mediaId"`
+	SortOrder int                                   `json:"sortOrder"`
+	Urls      MediaUrls                             `json:"urls"`
+	VariantId nullable.Nullable[openapi_types.UUID] `json:"variantId"`
+}
+
+// ProductImageCreate defines model for ProductImageCreate.
+type ProductImageCreate struct {
+	IsCover *bool              `json:"isCover,omitempty"`
+	MediaId openapi_types.UUID `json:"mediaId"`
+
+	// VariantId Ties this image to one variant, e.g. a colour (D-34).
+	VariantId *openapi_types.UUID `json:"variantId,omitempty"`
+}
+
+// ProductImageList Envelope for `PATCH /products/{id}/images/order`'s response.
+type ProductImageList struct {
+	Items []ProductImage `json:"items"`
+}
+
+// ProductImageOrder Request body for `PATCH /products/{id}/images/order`.
+type ProductImageOrder struct {
+	CoverImageId *openapi_types.UUID `json:"coverImageId,omitempty"`
+
+	// ImageIds Every image id belonging to the product, in the new display order.
+	ImageIds []openapi_types.UUID `json:"imageIds"`
+}
+
+// ProductList Cursor-paginated envelope for `GET /products`.
+type ProductList struct {
+	Items      []Product                 `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"nextCursor"`
+}
+
+// ProductPatch Partial update — only provided fields change. `sku`, `promoPrice`, `promoFrom`, `promoTo`, `categoryId` and `costPrice` are nullable (D-35): explicit `null` clears the field. Variants are managed through `/products/{id}/variants` and `/variants/{id}`, not here.
+type ProductPatch struct {
+	// BasePrice money and quantities as decimal strings (ADR-007)
+	BasePrice  *Decimal                              `json:"basePrice,omitempty"`
+	CategoryId nullable.Nullable[openapi_types.UUID] `json:"categoryId,omitempty"`
+	CostPrice  nullable.Nullable[string]             `json:"costPrice,omitempty"`
+	IsActive   *bool                                 `json:"isActive,omitempty"`
+	IsFeatured *bool                                 `json:"isFeatured,omitempty"`
+	PromoFrom  nullable.Nullable[time.Time]          `json:"promoFrom,omitempty"`
+	PromoPrice nullable.Nullable[string]             `json:"promoPrice,omitempty"`
+	PromoTo    nullable.Nullable[time.Time]          `json:"promoTo,omitempty"`
+	Sku        nullable.Nullable[string]             `json:"sku,omitempty"`
+	Slug       *string                               `json:"slug,omitempty"`
+
+	// Translations Per-locale name/description (ADR-012), keyed by `Locale`. On create, an entry for the shop's own default locale is required — expressible only as a service-level rule, since the JSON Schema can't know a given shop's `defaultLocale` value. On PATCH, each provided locale entry fully replaces the stored entry for that locale; omitted locales are left unchanged. Response fields outside this object (`name`/`description`/`locale`/ `translationFallback`) are the entity resolved for the caller's `Accept-Language`, fallback order `requested → uz → any`.
+	Translations *Translations       `json:"translations,omitempty"`
+	UnitId       *openapi_types.UUID `json:"unitId,omitempty"`
+}
+
+// ProductPublic Defined now for Phase 6's public catalogue (D-32/D-34); no path references it yet. Only active products/variants are ever returned this way; variants carry `availability`, never cost or quantity (hard rule 4/5).
+type ProductPublic struct {
+	// BasePrice money and quantities as decimal strings (ADR-007)
+	BasePrice   Decimal                               `json:"basePrice"`
+	CategoryId  nullable.Nullable[openapi_types.UUID] `json:"categoryId"`
+	Description nullable.Nullable[string]             `json:"description"`
+	Id          openapi_types.UUID                    `json:"id"`
+	Images      *[]ProductImage                       `json:"images,omitempty"`
+	IsActive    bool                                  `json:"isActive"`
+	IsFeatured  bool                                  `json:"isFeatured"`
+
+	// Locale A UI/data locale (ADR-012).
+	Locale Locale `json:"locale"`
+
+	// Name Resolved for the caller's `Accept-Language`.
+	Name                string                       `json:"name"`
+	PromoFrom           nullable.Nullable[time.Time] `json:"promoFrom"`
+	PromoPrice          nullable.Nullable[string]    `json:"promoPrice"`
+	PromoTo             nullable.Nullable[time.Time] `json:"promoTo"`
+	Sku                 nullable.Nullable[string]    `json:"sku"`
+	Slug                string                       `json:"slug"`
+	TranslationFallback bool                         `json:"translationFallback"`
+	UnitId              openapi_types.UUID           `json:"unitId"`
+	Variants            *[]VariantPublic             `json:"variants,omitempty"`
+}
+
 // Readiness Response body for `GET /readyz` (200 and 503 share this shape).
 type Readiness struct {
 	Checks struct {
@@ -332,11 +615,11 @@ type Session struct {
 	Current bool `json:"current"`
 
 	// ExpiresAt Recomputed on every authenticated use, sliding per `client` (D-29): 30 days for `mobile`, 7 days for `web`.
-	ExpiresAt  time.Time          `json:"expiresAt"`
-	Id         openapi_types.UUID `json:"id"`
-	Ip         *string            `json:"ip"`
-	LastSeenAt time.Time          `json:"lastSeenAt"`
-	UserAgent  *string            `json:"userAgent"`
+	ExpiresAt  time.Time                 `json:"expiresAt"`
+	Id         openapi_types.UUID        `json:"id"`
+	Ip         nullable.Nullable[string] `json:"ip"`
+	LastSeenAt time.Time                 `json:"lastSeenAt"`
+	UserAgent  nullable.Nullable[string] `json:"userAgent"`
 }
 
 // SessionClient Which client created a session (D-29).
@@ -344,8 +627,8 @@ type SessionClient string
 
 // SessionList Cursor-paginated envelope for `GET /auth/sessions`.
 type SessionList struct {
-	Items      []Session `json:"items"`
-	NextCursor *string   `json:"nextCursor"`
+	Items      []Session                 `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"nextCursor"`
 }
 
 // SetStaffPassword defines model for SetStaffPassword.
@@ -402,8 +685,8 @@ type StaffPatch struct {
 	IsActive *bool   `json:"isActive,omitempty"`
 
 	// Locale A UI/data locale (ADR-012).
-	Locale *Locale `json:"locale,omitempty"`
-	Phone  *string `json:"phone,omitempty"`
+	Locale *Locale                   `json:"locale,omitempty"`
+	Phone  nullable.Nullable[string] `json:"phone,omitempty"`
 
 	// Role The roles the owner can assign when creating or editing a staff member. `owner` is not assignable — there is exactly one owner, seeded (D-30).
 	Role *StaffRole `json:"role,omitempty"`
@@ -412,17 +695,57 @@ type StaffPatch struct {
 // StaffRole The roles the owner can assign when creating or editing a staff member. `owner` is not assignable — there is exactly one owner, seeded (D-30).
 type StaffRole string
 
-// User defines model for User.
-type User struct {
-	CreatedAt   time.Time          `json:"createdAt"`
-	FullName    string             `json:"fullName"`
-	Id          openapi_types.UUID `json:"id"`
-	IsActive    bool               `json:"isActive"`
-	LastLoginAt *time.Time         `json:"lastLoginAt"`
+// TranslationEntry One locale's name/description for a translatable entity.
+type TranslationEntry struct {
+	Description *string `json:"description,omitempty"`
+	Name        string  `json:"name"`
+}
+
+// Translations Per-locale name/description (ADR-012), keyed by `Locale`. On create, an entry for the shop's own default locale is required — expressible only as a service-level rule, since the JSON Schema can't know a given shop's `defaultLocale` value. On PATCH, each provided locale entry fully replaces the stored entry for that locale; omitted locales are left unchanged. Response fields outside this object (`name`/`description`/`locale`/ `translationFallback`) are the entity resolved for the caller's `Accept-Language`, fallback order `requested → uz → any`.
+type Translations struct {
+	// En One locale's name/description for a translatable entity.
+	En *TranslationEntry `json:"en,omitempty"`
+
+	// Ru One locale's name/description for a translatable entity.
+	Ru *TranslationEntry `json:"ru,omitempty"`
+
+	// Uz One locale's name/description for a translatable entity.
+	Uz *TranslationEntry `json:"uz,omitempty"`
+}
+
+// Unit A unit of measure (docs/04-DATA-MODEL.md § 2). Seeded, read-only in Phase 2.
+type Unit struct {
+	// Code e.g. `pcs`, `kg`, `m`.
+	Code string             `json:"code"`
+	Id   openapi_types.UUID `json:"id"`
 
 	// Locale A UI/data locale (ADR-012).
-	Locale Locale  `json:"locale"`
-	Phone  *string `json:"phone"`
+	Locale Locale `json:"locale"`
+
+	// Name Resolved for the caller's `Accept-Language`.
+	Name string `json:"name"`
+
+	// Precision Decimal places a quantity in this unit is stored/displayed with (0 for `pcs`, 3 for `kg`).
+	Precision           int  `json:"precision"`
+	TranslationFallback bool `json:"translationFallback"`
+}
+
+// UnitList Flat envelope for `GET /units` (not cursor-paginated).
+type UnitList struct {
+	Items []Unit `json:"items"`
+}
+
+// User defines model for User.
+type User struct {
+	CreatedAt   time.Time                    `json:"createdAt"`
+	FullName    string                       `json:"fullName"`
+	Id          openapi_types.UUID           `json:"id"`
+	IsActive    bool                         `json:"isActive"`
+	LastLoginAt nullable.Nullable[time.Time] `json:"lastLoginAt"`
+
+	// Locale A UI/data locale (ADR-012).
+	Locale Locale                    `json:"locale"`
+	Phone  nullable.Nullable[string] `json:"phone"`
 
 	// Role A user's role (04-DATA-MODEL.md § 7 Permissions).
 	Role     Role   `json:"role"`
@@ -431,8 +754,66 @@ type User struct {
 
 // UserList Cursor-paginated envelope for `GET /staff`.
 type UserList struct {
-	Items      []User  `json:"items"`
-	NextCursor *string `json:"nextCursor"`
+	Items      []User                    `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"nextCursor"`
+}
+
+// Variant `costOverride` is present only when the caller has the `cost.read` permission; absent (not null) otherwise (ADR-010).
+type Variant struct {
+	// Attributes A variant's attribute values, keyed by `attribute_definitions.code` (e.g. `{"size": "L", "color": "blue"}`, D-32).
+	Attributes AttributeValues           `json:"attributes"`
+	Barcode    nullable.Nullable[string] `json:"barcode"`
+
+	// CostOverride Present only when the caller has the `cost.read` permission; absent (not null) otherwise (ADR-010).
+	CostOverride  nullable.Nullable[string] `json:"costOverride,omitempty"`
+	Id            openapi_types.UUID        `json:"id"`
+	IsActive      bool                      `json:"isActive"`
+	PriceOverride nullable.Nullable[string] `json:"priceOverride"`
+	Sku           nullable.Nullable[string] `json:"sku"`
+}
+
+// VariantCreate defines model for VariantCreate.
+type VariantCreate struct {
+	// Attributes A variant's attribute values, keyed by `attribute_definitions.code` (e.g. `{"size": "L", "color": "blue"}`, D-32).
+	Attributes AttributeValues `json:"attributes"`
+	Barcode    *string         `json:"barcode,omitempty"`
+
+	// CostOverride money and quantities as decimal strings (ADR-007)
+	CostOverride *Decimal `json:"costOverride,omitempty"`
+	IsActive     *bool    `json:"isActive,omitempty"`
+
+	// PriceOverride money and quantities as decimal strings (ADR-007)
+	PriceOverride *Decimal `json:"priceOverride,omitempty"`
+	Sku           *string  `json:"sku,omitempty"`
+}
+
+// VariantList Flat envelope for `GET /products/{id}/variants` (not cursor-paginated).
+type VariantList struct {
+	Items []Variant `json:"items"`
+}
+
+// VariantPatch Partial update — only provided fields change.
+type VariantPatch struct {
+	// Attributes A variant's attribute values, keyed by `attribute_definitions.code` (e.g. `{"size": "L", "color": "blue"}`, D-32).
+	Attributes    *AttributeValues          `json:"attributes,omitempty"`
+	Barcode       nullable.Nullable[string] `json:"barcode,omitempty"`
+	CostOverride  nullable.Nullable[string] `json:"costOverride,omitempty"`
+	IsActive      *bool                     `json:"isActive,omitempty"`
+	PriceOverride nullable.Nullable[string] `json:"priceOverride,omitempty"`
+	Sku           nullable.Nullable[string] `json:"sku,omitempty"`
+}
+
+// VariantPublic Defined now for Phase 6's public catalogue (D-32/D-34); no path references it yet. No cost, no `isActive` (only active variants are ever returned publicly); `availability` replaces any quantity (hard rule 4/5).
+type VariantPublic struct {
+	// Attributes A variant's attribute values, keyed by `attribute_definitions.code` (e.g. `{"size": "L", "color": "blue"}`, D-32).
+	Attributes AttributeValues `json:"attributes"`
+
+	// Availability Public/bot-facing stock signal — never a quantity (ADR-010, hard rule 4/5).
+	Availability  Availability              `json:"availability"`
+	Barcode       nullable.Nullable[string] `json:"barcode"`
+	Id            openapi_types.UUID        `json:"id"`
+	PriceOverride nullable.Nullable[string] `json:"priceOverride"`
+	Sku           nullable.Nullable[string] `json:"sku"`
 }
 
 // AcceptLanguage defines model for AcceptLanguage.
@@ -474,8 +855,27 @@ type ListSessionsParams struct {
 	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
 }
 
+// ListCategoriesParams defines parameters for ListCategories.
+type ListCategoriesParams struct {
+	IncludeInactive *bool `form:"includeInactive,omitempty" json:"includeInactive,omitempty"`
+}
+
 // ListLocationsParams defines parameters for ListLocations.
 type ListLocationsParams struct {
+	// Limit Maximum number of items to return.
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque cursor from a previous page's `nextCursor`.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// ListProductsParams defines parameters for ListProducts.
+type ListProductsParams struct {
+	// Q Free-text search over product name (Postgres ILIKE/trigram).
+	Q               *string             `form:"q,omitempty" json:"q,omitempty"`
+	CategoryId      *openapi_types.UUID `form:"categoryId,omitempty" json:"categoryId,omitempty"`
+	IncludeInactive *bool               `form:"includeInactive,omitempty" json:"includeInactive,omitempty"`
+
 	// Limit Maximum number of items to return.
 	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
@@ -492,14 +892,44 @@ type ListStaffParams struct {
 	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
 }
 
+// CreateAttributeDefinitionJSONRequestBody defines body for CreateAttributeDefinition for application/json ContentType.
+type CreateAttributeDefinitionJSONRequestBody = AttributeDefinitionCreate
+
+// UpdateAttributeDefinitionJSONRequestBody defines body for UpdateAttributeDefinition for application/json ContentType.
+type UpdateAttributeDefinitionJSONRequestBody = AttributeDefinitionPatch
+
 // LoginJSONRequestBody defines body for Login for application/json ContentType.
 type LoginJSONRequestBody = LoginRequest
+
+// CreateCategoryJSONRequestBody defines body for CreateCategory for application/json ContentType.
+type CreateCategoryJSONRequestBody = CategoryCreate
+
+// UpdateCategoryJSONRequestBody defines body for UpdateCategory for application/json ContentType.
+type UpdateCategoryJSONRequestBody = CategoryPatch
 
 // CreateLocationJSONRequestBody defines body for CreateLocation for application/json ContentType.
 type CreateLocationJSONRequestBody = LocationCreate
 
 // UpdateLocationJSONRequestBody defines body for UpdateLocation for application/json ContentType.
 type UpdateLocationJSONRequestBody = LocationPatch
+
+// UploadMediaMultipartRequestBody defines body for UploadMedia for multipart/form-data ContentType.
+type UploadMediaMultipartRequestBody = MediaUpload
+
+// CreateProductJSONRequestBody defines body for CreateProduct for application/json ContentType.
+type CreateProductJSONRequestBody = ProductCreate
+
+// UpdateProductJSONRequestBody defines body for UpdateProduct for application/json ContentType.
+type UpdateProductJSONRequestBody = ProductPatch
+
+// AddProductImageJSONRequestBody defines body for AddProductImage for application/json ContentType.
+type AddProductImageJSONRequestBody = ProductImageCreate
+
+// ReorderProductImagesJSONRequestBody defines body for ReorderProductImages for application/json ContentType.
+type ReorderProductImagesJSONRequestBody = ProductImageOrder
+
+// CreateVariantJSONRequestBody defines body for CreateVariant for application/json ContentType.
+type CreateVariantJSONRequestBody = VariantCreate
 
 // UpdateShopJSONRequestBody defines body for UpdateShop for application/json ContentType.
 type UpdateShopJSONRequestBody = ShopPatch
@@ -513,8 +943,20 @@ type UpdateStaffJSONRequestBody = StaffPatch
 // SetStaffPasswordJSONRequestBody defines body for SetStaffPassword for application/json ContentType.
 type SetStaffPasswordJSONRequestBody = SetStaffPassword
 
+// UpdateVariantJSONRequestBody defines body for UpdateVariant for application/json ContentType.
+type UpdateVariantJSONRequestBody = VariantPatch
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// ListAttributeDefinitions List the shop's attribute definitions (e.g. size, colour).
+	// (GET /attribute-definitions)
+	ListAttributeDefinitions(w http.ResponseWriter, r *http.Request)
+	// CreateAttributeDefinition Create an attribute definition.
+	// (POST /attribute-definitions)
+	CreateAttributeDefinition(w http.ResponseWriter, r *http.Request)
+	// UpdateAttributeDefinition Update an attribute definition.
+	// (PATCH /attribute-definitions/{id})
+	UpdateAttributeDefinition(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
 	// Login Authenticate with username and password.
 	// (POST /auth/login)
 	Login(w http.ResponseWriter, r *http.Request)
@@ -530,6 +972,21 @@ type ServerInterface interface {
 	// RevokeSession Revoke one of the authenticated user's own sessions.
 	// (DELETE /auth/sessions/{id})
 	RevokeSession(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
+	// ListCategories List the shop's categories as a flat list.
+	// (GET /categories)
+	ListCategories(w http.ResponseWriter, r *http.Request, params ListCategoriesParams)
+	// CreateCategory Create a category.
+	// (POST /categories)
+	CreateCategory(w http.ResponseWriter, r *http.Request)
+	// DeleteCategory Soft-delete a category.
+	// (DELETE /categories/{id})
+	DeleteCategory(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
+	// GetCategory Get a category.
+	// (GET /categories/{id})
+	GetCategory(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
+	// UpdateCategory Update a category.
+	// (PATCH /categories/{id})
+	UpdateCategory(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
 	// GetHealthz Liveness check.
 	// (GET /healthz)
 	GetHealthz(w http.ResponseWriter, r *http.Request)
@@ -542,6 +999,39 @@ type ServerInterface interface {
 	// UpdateLocation Update a location.
 	// (PATCH /locations/{id})
 	UpdateLocation(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
+	// UploadMedia Upload an image.
+	// (POST /media)
+	UploadMedia(w http.ResponseWriter, r *http.Request)
+	// ListProducts List products.
+	// (GET /products)
+	ListProducts(w http.ResponseWriter, r *http.Request, params ListProductsParams)
+	// CreateProduct Create a product.
+	// (POST /products)
+	CreateProduct(w http.ResponseWriter, r *http.Request)
+	// DeleteProduct Soft-delete a product.
+	// (DELETE /products/{id})
+	DeleteProduct(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
+	// GetProduct Get a product, including its variants and images.
+	// (GET /products/{id})
+	GetProduct(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
+	// UpdateProduct Update a product.
+	// (PATCH /products/{id})
+	UpdateProduct(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
+	// AddProductImage Attach an uploaded image to a product.
+	// (POST /products/{id}/images)
+	AddProductImage(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
+	// ReorderProductImages Reorder a product's images and/or change its cover image.
+	// (PATCH /products/{id}/images/order)
+	ReorderProductImages(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
+	// RemoveProductImage Remove an image from a product.
+	// (DELETE /products/{id}/images/{imageId})
+	RemoveProductImage(w http.ResponseWriter, r *http.Request, id openapi_types.UUID, imageId openapi_types.UUID)
+	// ListVariants List a product's variants.
+	// (GET /products/{id}/variants)
+	ListVariants(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
+	// CreateVariant Add a variant to a product.
+	// (POST /products/{id}/variants)
+	CreateVariant(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
 	// GetReadyz Readiness check.
 	// (GET /readyz)
 	GetReadyz(w http.ResponseWriter, r *http.Request)
@@ -563,6 +1053,15 @@ type ServerInterface interface {
 	// SetStaffPassword Set a staff member's password.
 	// (POST /staff/{id}/password)
 	SetStaffPassword(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
+	// ListUnits List the shop's units of measure.
+	// (GET /units)
+	ListUnits(w http.ResponseWriter, r *http.Request)
+	// DeleteVariant Soft-delete a variant.
+	// (DELETE /variants/{id})
+	DeleteVariant(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
+	// UpdateVariant Update a variant.
+	// (PATCH /variants/{id})
+	UpdateVariant(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -573,6 +1072,60 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// ListAttributeDefinitions operation middleware
+func (siw *ServerInterfaceWrapper) ListAttributeDefinitions(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListAttributeDefinitions(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateAttributeDefinition operation middleware
+func (siw *ServerInterfaceWrapper) CreateAttributeDefinition(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateAttributeDefinition(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateAttributeDefinition operation middleware
+func (siw *ServerInterfaceWrapper) UpdateAttributeDefinition(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateAttributeDefinition(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // Login operation middleware
 func (siw *ServerInterfaceWrapper) Login(w http.ResponseWriter, r *http.Request) {
@@ -688,6 +1241,131 @@ func (siw *ServerInterfaceWrapper) RevokeSession(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+// ListCategories operation middleware
+func (siw *ServerInterfaceWrapper) ListCategories(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListCategoriesParams
+
+	// ------------- Optional query parameter "includeInactive" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "includeInactive", r.URL.Query(), &params.IncludeInactive, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "includeInactive"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "includeInactive", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListCategories(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateCategory operation middleware
+func (siw *ServerInterfaceWrapper) CreateCategory(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateCategory(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteCategory operation middleware
+func (siw *ServerInterfaceWrapper) DeleteCategory(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteCategory(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetCategory operation middleware
+func (siw *ServerInterfaceWrapper) GetCategory(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetCategory(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateCategory operation middleware
+func (siw *ServerInterfaceWrapper) UpdateCategory(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateCategory(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetHealthz operation middleware
 func (siw *ServerInterfaceWrapper) GetHealthz(w http.ResponseWriter, r *http.Request) {
 
@@ -779,6 +1457,336 @@ func (siw *ServerInterfaceWrapper) UpdateLocation(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.UpdateLocation(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UploadMedia operation middleware
+func (siw *ServerInterfaceWrapper) UploadMedia(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UploadMedia(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListProducts operation middleware
+func (siw *ServerInterfaceWrapper) ListProducts(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListProductsParams
+
+	// ------------- Optional query parameter "q" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "q", r.URL.Query(), &params.Q, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "q"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "q", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "categoryId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "categoryId", r.URL.Query(), &params.CategoryId, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "categoryId"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "categoryId", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "includeInactive" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "includeInactive", r.URL.Query(), &params.IncludeInactive, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "includeInactive"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "includeInactive", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListProducts(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateProduct operation middleware
+func (siw *ServerInterfaceWrapper) CreateProduct(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateProduct(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteProduct operation middleware
+func (siw *ServerInterfaceWrapper) DeleteProduct(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteProduct(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetProduct operation middleware
+func (siw *ServerInterfaceWrapper) GetProduct(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetProduct(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateProduct operation middleware
+func (siw *ServerInterfaceWrapper) UpdateProduct(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateProduct(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AddProductImage operation middleware
+func (siw *ServerInterfaceWrapper) AddProductImage(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AddProductImage(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ReorderProductImages operation middleware
+func (siw *ServerInterfaceWrapper) ReorderProductImages(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReorderProductImages(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RemoveProductImage operation middleware
+func (siw *ServerInterfaceWrapper) RemoveProductImage(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "imageId" -------------
+	var imageId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "imageId", r.PathValue("imageId"), &imageId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "imageId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RemoveProductImage(w, r, id, imageId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListVariants operation middleware
+func (siw *ServerInterfaceWrapper) ListVariants(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListVariants(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateVariant operation middleware
+func (siw *ServerInterfaceWrapper) CreateVariant(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateVariant(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -942,6 +1950,72 @@ func (siw *ServerInterfaceWrapper) SetStaffPassword(w http.ResponseWriter, r *ht
 	handler.ServeHTTP(w, r)
 }
 
+// ListUnits operation middleware
+func (siw *ServerInterfaceWrapper) ListUnits(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListUnits(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteVariant operation middleware
+func (siw *ServerInterfaceWrapper) DeleteVariant(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteVariant(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateVariant operation middleware
+func (siw *ServerInterfaceWrapper) UpdateVariant(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateVariant(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 type UnescapedCookieParamError struct {
 	ParamName string
 	Err       error
@@ -1078,6 +2152,28 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/staff", wrapper.CreateStaff)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/staff/{id}", wrapper.UpdateStaff)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/staff/{id}/password", wrapper.SetStaffPassword)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/units", wrapper.ListUnits)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/attribute-definitions", wrapper.ListAttributeDefinitions)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/attribute-definitions", wrapper.CreateAttributeDefinition)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/attribute-definitions/{id}", wrapper.UpdateAttributeDefinition)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/categories", wrapper.ListCategories)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/categories", wrapper.CreateCategory)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/categories/{id}", wrapper.DeleteCategory)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/categories/{id}", wrapper.GetCategory)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/categories/{id}", wrapper.UpdateCategory)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/products", wrapper.ListProducts)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/products", wrapper.CreateProduct)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/products/{id}", wrapper.DeleteProduct)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/products/{id}", wrapper.GetProduct)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/products/{id}", wrapper.UpdateProduct)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/products/{id}/variants", wrapper.ListVariants)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/products/{id}/variants", wrapper.CreateVariant)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/variants/{id}", wrapper.DeleteVariant)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/variants/{id}", wrapper.UpdateVariant)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/media", wrapper.UploadMedia)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/products/{id}/images", wrapper.AddProductImage)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/products/{id}/images/{imageId}", wrapper.RemoveProductImage)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/products/{id}/images/order", wrapper.ReorderProductImages)
 
 	return m
 }
@@ -1095,6 +2191,212 @@ type RateLimitedJSONResponse Error
 type UnauthenticatedJSONResponse Error
 
 type ValidationFailedJSONResponse Error
+
+type ListAttributeDefinitionsRequestObject struct {
+}
+
+type ListAttributeDefinitionsResponseObject interface {
+	VisitListAttributeDefinitionsResponse(w http.ResponseWriter) error
+}
+
+type ListAttributeDefinitions200JSONResponse AttributeDefinitionList
+
+func (response ListAttributeDefinitions200JSONResponse) VisitListAttributeDefinitionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAttributeDefinitions401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListAttributeDefinitions401JSONResponse) VisitListAttributeDefinitionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateAttributeDefinitionRequestObject struct {
+	Body *CreateAttributeDefinitionJSONRequestBody
+}
+
+type CreateAttributeDefinitionResponseObject interface {
+	VisitCreateAttributeDefinitionResponse(w http.ResponseWriter) error
+}
+
+type CreateAttributeDefinition201JSONResponse AttributeDefinition
+
+func (response CreateAttributeDefinition201JSONResponse) VisitCreateAttributeDefinitionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateAttributeDefinition400JSONResponse struct{ ValidationFailedJSONResponse }
+
+func (response CreateAttributeDefinition400JSONResponse) VisitCreateAttributeDefinitionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateAttributeDefinition401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CreateAttributeDefinition401JSONResponse) VisitCreateAttributeDefinitionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateAttributeDefinition403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response CreateAttributeDefinition403JSONResponse) VisitCreateAttributeDefinitionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateAttributeDefinition409JSONResponse struct{ ConflictJSONResponse }
+
+func (response CreateAttributeDefinition409JSONResponse) VisitCreateAttributeDefinitionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateAttributeDefinitionRequestObject struct {
+	Id   openapi_types.UUID `json:"id"`
+	Body *UpdateAttributeDefinitionJSONRequestBody
+}
+
+type UpdateAttributeDefinitionResponseObject interface {
+	VisitUpdateAttributeDefinitionResponse(w http.ResponseWriter) error
+}
+
+type UpdateAttributeDefinition200JSONResponse AttributeDefinition
+
+func (response UpdateAttributeDefinition200JSONResponse) VisitUpdateAttributeDefinitionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateAttributeDefinition400JSONResponse struct{ ValidationFailedJSONResponse }
+
+func (response UpdateAttributeDefinition400JSONResponse) VisitUpdateAttributeDefinitionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateAttributeDefinition401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response UpdateAttributeDefinition401JSONResponse) VisitUpdateAttributeDefinitionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateAttributeDefinition403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response UpdateAttributeDefinition403JSONResponse) VisitUpdateAttributeDefinitionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateAttributeDefinition404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response UpdateAttributeDefinition404JSONResponse) VisitUpdateAttributeDefinitionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateAttributeDefinition409JSONResponse struct{ ConflictJSONResponse }
+
+func (response UpdateAttributeDefinition409JSONResponse) VisitUpdateAttributeDefinitionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
 
 type LoginRequestObject struct {
 	Body *LoginJSONRequestBody
@@ -1300,6 +2602,335 @@ func (response RevokeSession404JSONResponse) VisitRevokeSessionResponse(w http.R
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListCategoriesRequestObject struct {
+	Params ListCategoriesParams
+}
+
+type ListCategoriesResponseObject interface {
+	VisitListCategoriesResponse(w http.ResponseWriter) error
+}
+
+type ListCategories200JSONResponse CategoryList
+
+func (response ListCategories200JSONResponse) VisitListCategoriesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListCategories401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListCategories401JSONResponse) VisitListCategoriesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateCategoryRequestObject struct {
+	Body *CreateCategoryJSONRequestBody
+}
+
+type CreateCategoryResponseObject interface {
+	VisitCreateCategoryResponse(w http.ResponseWriter) error
+}
+
+type CreateCategory201JSONResponse Category
+
+func (response CreateCategory201JSONResponse) VisitCreateCategoryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateCategory400JSONResponse struct{ ValidationFailedJSONResponse }
+
+func (response CreateCategory400JSONResponse) VisitCreateCategoryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateCategory401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CreateCategory401JSONResponse) VisitCreateCategoryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateCategory403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response CreateCategory403JSONResponse) VisitCreateCategoryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateCategory409JSONResponse struct{ ConflictJSONResponse }
+
+func (response CreateCategory409JSONResponse) VisitCreateCategoryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteCategoryRequestObject struct {
+	Id openapi_types.UUID `json:"id"`
+}
+
+type DeleteCategoryResponseObject interface {
+	VisitDeleteCategoryResponse(w http.ResponseWriter) error
+}
+
+type DeleteCategory204Response struct {
+}
+
+func (response DeleteCategory204Response) VisitDeleteCategoryResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteCategory401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response DeleteCategory401JSONResponse) VisitDeleteCategoryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteCategory403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response DeleteCategory403JSONResponse) VisitDeleteCategoryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteCategory404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeleteCategory404JSONResponse) VisitDeleteCategoryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteCategory409JSONResponse struct{ ConflictJSONResponse }
+
+func (response DeleteCategory409JSONResponse) VisitDeleteCategoryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetCategoryRequestObject struct {
+	Id openapi_types.UUID `json:"id"`
+}
+
+type GetCategoryResponseObject interface {
+	VisitGetCategoryResponse(w http.ResponseWriter) error
+}
+
+type GetCategory200JSONResponse Category
+
+func (response GetCategory200JSONResponse) VisitGetCategoryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetCategory401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response GetCategory401JSONResponse) VisitGetCategoryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetCategory404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetCategory404JSONResponse) VisitGetCategoryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateCategoryRequestObject struct {
+	Id   openapi_types.UUID `json:"id"`
+	Body *UpdateCategoryJSONRequestBody
+}
+
+type UpdateCategoryResponseObject interface {
+	VisitUpdateCategoryResponse(w http.ResponseWriter) error
+}
+
+type UpdateCategory200JSONResponse Category
+
+func (response UpdateCategory200JSONResponse) VisitUpdateCategoryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateCategory400JSONResponse struct{ ValidationFailedJSONResponse }
+
+func (response UpdateCategory400JSONResponse) VisitUpdateCategoryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateCategory401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response UpdateCategory401JSONResponse) VisitUpdateCategoryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateCategory403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response UpdateCategory403JSONResponse) VisitUpdateCategoryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateCategory404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response UpdateCategory404JSONResponse) VisitUpdateCategoryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateCategory409JSONResponse struct{ ConflictJSONResponse }
+
+func (response UpdateCategory409JSONResponse) VisitUpdateCategoryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -1521,6 +3152,773 @@ func (response UpdateLocation404JSONResponse) VisitUpdateLocationResponse(w http
 type UpdateLocation409JSONResponse struct{ ConflictJSONResponse }
 
 func (response UpdateLocation409JSONResponse) VisitUpdateLocationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UploadMediaRequestObject struct {
+	Body *multipart.Reader
+}
+
+type UploadMediaResponseObject interface {
+	VisitUploadMediaResponse(w http.ResponseWriter) error
+}
+
+type UploadMedia201JSONResponse MediaFile
+
+func (response UploadMedia201JSONResponse) VisitUploadMediaResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UploadMedia400JSONResponse struct{ ValidationFailedJSONResponse }
+
+func (response UploadMedia400JSONResponse) VisitUploadMediaResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UploadMedia401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response UploadMedia401JSONResponse) VisitUploadMediaResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UploadMedia403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response UploadMedia403JSONResponse) VisitUploadMediaResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListProductsRequestObject struct {
+	Params ListProductsParams
+}
+
+type ListProductsResponseObject interface {
+	VisitListProductsResponse(w http.ResponseWriter) error
+}
+
+type ListProducts200JSONResponse ProductList
+
+func (response ListProducts200JSONResponse) VisitListProductsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListProducts400JSONResponse struct{ ValidationFailedJSONResponse }
+
+func (response ListProducts400JSONResponse) VisitListProductsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListProducts401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListProducts401JSONResponse) VisitListProductsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateProductRequestObject struct {
+	Body *CreateProductJSONRequestBody
+}
+
+type CreateProductResponseObject interface {
+	VisitCreateProductResponse(w http.ResponseWriter) error
+}
+
+type CreateProduct201JSONResponse Product
+
+func (response CreateProduct201JSONResponse) VisitCreateProductResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateProduct400JSONResponse struct{ ValidationFailedJSONResponse }
+
+func (response CreateProduct400JSONResponse) VisitCreateProductResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateProduct401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CreateProduct401JSONResponse) VisitCreateProductResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateProduct403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response CreateProduct403JSONResponse) VisitCreateProductResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateProduct409JSONResponse struct{ ConflictJSONResponse }
+
+func (response CreateProduct409JSONResponse) VisitCreateProductResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteProductRequestObject struct {
+	Id openapi_types.UUID `json:"id"`
+}
+
+type DeleteProductResponseObject interface {
+	VisitDeleteProductResponse(w http.ResponseWriter) error
+}
+
+type DeleteProduct204Response struct {
+}
+
+func (response DeleteProduct204Response) VisitDeleteProductResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteProduct401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response DeleteProduct401JSONResponse) VisitDeleteProductResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteProduct403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response DeleteProduct403JSONResponse) VisitDeleteProductResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteProduct404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeleteProduct404JSONResponse) VisitDeleteProductResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetProductRequestObject struct {
+	Id openapi_types.UUID `json:"id"`
+}
+
+type GetProductResponseObject interface {
+	VisitGetProductResponse(w http.ResponseWriter) error
+}
+
+type GetProduct200JSONResponse Product
+
+func (response GetProduct200JSONResponse) VisitGetProductResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetProduct401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response GetProduct401JSONResponse) VisitGetProductResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetProduct404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetProduct404JSONResponse) VisitGetProductResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateProductRequestObject struct {
+	Id   openapi_types.UUID `json:"id"`
+	Body *UpdateProductJSONRequestBody
+}
+
+type UpdateProductResponseObject interface {
+	VisitUpdateProductResponse(w http.ResponseWriter) error
+}
+
+type UpdateProduct200JSONResponse Product
+
+func (response UpdateProduct200JSONResponse) VisitUpdateProductResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateProduct400JSONResponse struct{ ValidationFailedJSONResponse }
+
+func (response UpdateProduct400JSONResponse) VisitUpdateProductResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateProduct401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response UpdateProduct401JSONResponse) VisitUpdateProductResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateProduct403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response UpdateProduct403JSONResponse) VisitUpdateProductResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateProduct404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response UpdateProduct404JSONResponse) VisitUpdateProductResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateProduct409JSONResponse struct{ ConflictJSONResponse }
+
+func (response UpdateProduct409JSONResponse) VisitUpdateProductResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddProductImageRequestObject struct {
+	Id   openapi_types.UUID `json:"id"`
+	Body *AddProductImageJSONRequestBody
+}
+
+type AddProductImageResponseObject interface {
+	VisitAddProductImageResponse(w http.ResponseWriter) error
+}
+
+type AddProductImage201JSONResponse ProductImage
+
+func (response AddProductImage201JSONResponse) VisitAddProductImageResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddProductImage400JSONResponse struct{ ValidationFailedJSONResponse }
+
+func (response AddProductImage400JSONResponse) VisitAddProductImageResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddProductImage401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response AddProductImage401JSONResponse) VisitAddProductImageResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddProductImage403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response AddProductImage403JSONResponse) VisitAddProductImageResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddProductImage404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response AddProductImage404JSONResponse) VisitAddProductImageResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddProductImage409JSONResponse struct{ ConflictJSONResponse }
+
+func (response AddProductImage409JSONResponse) VisitAddProductImageResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReorderProductImagesRequestObject struct {
+	Id   openapi_types.UUID `json:"id"`
+	Body *ReorderProductImagesJSONRequestBody
+}
+
+type ReorderProductImagesResponseObject interface {
+	VisitReorderProductImagesResponse(w http.ResponseWriter) error
+}
+
+type ReorderProductImages200JSONResponse ProductImageList
+
+func (response ReorderProductImages200JSONResponse) VisitReorderProductImagesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReorderProductImages400JSONResponse struct{ ValidationFailedJSONResponse }
+
+func (response ReorderProductImages400JSONResponse) VisitReorderProductImagesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReorderProductImages401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ReorderProductImages401JSONResponse) VisitReorderProductImagesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReorderProductImages403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ReorderProductImages403JSONResponse) VisitReorderProductImagesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReorderProductImages404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ReorderProductImages404JSONResponse) VisitReorderProductImagesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveProductImageRequestObject struct {
+	Id      openapi_types.UUID `json:"id"`
+	ImageId openapi_types.UUID `json:"imageId"`
+}
+
+type RemoveProductImageResponseObject interface {
+	VisitRemoveProductImageResponse(w http.ResponseWriter) error
+}
+
+type RemoveProductImage204Response struct {
+}
+
+func (response RemoveProductImage204Response) VisitRemoveProductImageResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type RemoveProductImage401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RemoveProductImage401JSONResponse) VisitRemoveProductImageResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveProductImage403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response RemoveProductImage403JSONResponse) VisitRemoveProductImageResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveProductImage404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RemoveProductImage404JSONResponse) VisitRemoveProductImageResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListVariantsRequestObject struct {
+	Id openapi_types.UUID `json:"id"`
+}
+
+type ListVariantsResponseObject interface {
+	VisitListVariantsResponse(w http.ResponseWriter) error
+}
+
+type ListVariants200JSONResponse VariantList
+
+func (response ListVariants200JSONResponse) VisitListVariantsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListVariants401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListVariants401JSONResponse) VisitListVariantsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListVariants404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListVariants404JSONResponse) VisitListVariantsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateVariantRequestObject struct {
+	Id   openapi_types.UUID `json:"id"`
+	Body *CreateVariantJSONRequestBody
+}
+
+type CreateVariantResponseObject interface {
+	VisitCreateVariantResponse(w http.ResponseWriter) error
+}
+
+type CreateVariant201JSONResponse Variant
+
+func (response CreateVariant201JSONResponse) VisitCreateVariantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateVariant400JSONResponse struct{ ValidationFailedJSONResponse }
+
+func (response CreateVariant400JSONResponse) VisitCreateVariantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateVariant401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CreateVariant401JSONResponse) VisitCreateVariantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateVariant403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response CreateVariant403JSONResponse) VisitCreateVariantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateVariant404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CreateVariant404JSONResponse) VisitCreateVariantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateVariant409JSONResponse struct{ ConflictJSONResponse }
+
+func (response CreateVariant409JSONResponse) VisitCreateVariantResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -1960,8 +4358,217 @@ func (response SetStaffPassword404JSONResponse) VisitSetStaffPasswordResponse(w 
 	return err
 }
 
+type ListUnitsRequestObject struct {
+}
+
+type ListUnitsResponseObject interface {
+	VisitListUnitsResponse(w http.ResponseWriter) error
+}
+
+type ListUnits200JSONResponse UnitList
+
+func (response ListUnits200JSONResponse) VisitListUnitsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUnits401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListUnits401JSONResponse) VisitListUnitsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteVariantRequestObject struct {
+	Id openapi_types.UUID `json:"id"`
+}
+
+type DeleteVariantResponseObject interface {
+	VisitDeleteVariantResponse(w http.ResponseWriter) error
+}
+
+type DeleteVariant204Response struct {
+}
+
+func (response DeleteVariant204Response) VisitDeleteVariantResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteVariant400JSONResponse struct{ ValidationFailedJSONResponse }
+
+func (response DeleteVariant400JSONResponse) VisitDeleteVariantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteVariant401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response DeleteVariant401JSONResponse) VisitDeleteVariantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteVariant403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response DeleteVariant403JSONResponse) VisitDeleteVariantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteVariant404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeleteVariant404JSONResponse) VisitDeleteVariantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateVariantRequestObject struct {
+	Id   openapi_types.UUID `json:"id"`
+	Body *UpdateVariantJSONRequestBody
+}
+
+type UpdateVariantResponseObject interface {
+	VisitUpdateVariantResponse(w http.ResponseWriter) error
+}
+
+type UpdateVariant200JSONResponse Variant
+
+func (response UpdateVariant200JSONResponse) VisitUpdateVariantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateVariant400JSONResponse struct{ ValidationFailedJSONResponse }
+
+func (response UpdateVariant400JSONResponse) VisitUpdateVariantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateVariant401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response UpdateVariant401JSONResponse) VisitUpdateVariantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateVariant403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response UpdateVariant403JSONResponse) VisitUpdateVariantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateVariant404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response UpdateVariant404JSONResponse) VisitUpdateVariantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateVariant409JSONResponse struct{ ConflictJSONResponse }
+
+func (response UpdateVariant409JSONResponse) VisitUpdateVariantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
+	// ListAttributeDefinitions List the shop's attribute definitions (e.g. size, colour).
+	// (GET /attribute-definitions)
+	ListAttributeDefinitions(ctx context.Context, request ListAttributeDefinitionsRequestObject) (ListAttributeDefinitionsResponseObject, error)
+	// CreateAttributeDefinition Create an attribute definition.
+	// (POST /attribute-definitions)
+	CreateAttributeDefinition(ctx context.Context, request CreateAttributeDefinitionRequestObject) (CreateAttributeDefinitionResponseObject, error)
+	// UpdateAttributeDefinition Update an attribute definition.
+	// (PATCH /attribute-definitions/{id})
+	UpdateAttributeDefinition(ctx context.Context, request UpdateAttributeDefinitionRequestObject) (UpdateAttributeDefinitionResponseObject, error)
 	// Login Authenticate with username and password.
 	// (POST /auth/login)
 	Login(ctx context.Context, request LoginRequestObject) (LoginResponseObject, error)
@@ -1977,6 +4584,21 @@ type StrictServerInterface interface {
 	// RevokeSession Revoke one of the authenticated user's own sessions.
 	// (DELETE /auth/sessions/{id})
 	RevokeSession(ctx context.Context, request RevokeSessionRequestObject) (RevokeSessionResponseObject, error)
+	// ListCategories List the shop's categories as a flat list.
+	// (GET /categories)
+	ListCategories(ctx context.Context, request ListCategoriesRequestObject) (ListCategoriesResponseObject, error)
+	// CreateCategory Create a category.
+	// (POST /categories)
+	CreateCategory(ctx context.Context, request CreateCategoryRequestObject) (CreateCategoryResponseObject, error)
+	// DeleteCategory Soft-delete a category.
+	// (DELETE /categories/{id})
+	DeleteCategory(ctx context.Context, request DeleteCategoryRequestObject) (DeleteCategoryResponseObject, error)
+	// GetCategory Get a category.
+	// (GET /categories/{id})
+	GetCategory(ctx context.Context, request GetCategoryRequestObject) (GetCategoryResponseObject, error)
+	// UpdateCategory Update a category.
+	// (PATCH /categories/{id})
+	UpdateCategory(ctx context.Context, request UpdateCategoryRequestObject) (UpdateCategoryResponseObject, error)
 	// GetHealthz Liveness check.
 	// (GET /healthz)
 	GetHealthz(ctx context.Context, request GetHealthzRequestObject) (GetHealthzResponseObject, error)
@@ -1989,6 +4611,39 @@ type StrictServerInterface interface {
 	// UpdateLocation Update a location.
 	// (PATCH /locations/{id})
 	UpdateLocation(ctx context.Context, request UpdateLocationRequestObject) (UpdateLocationResponseObject, error)
+	// UploadMedia Upload an image.
+	// (POST /media)
+	UploadMedia(ctx context.Context, request UploadMediaRequestObject) (UploadMediaResponseObject, error)
+	// ListProducts List products.
+	// (GET /products)
+	ListProducts(ctx context.Context, request ListProductsRequestObject) (ListProductsResponseObject, error)
+	// CreateProduct Create a product.
+	// (POST /products)
+	CreateProduct(ctx context.Context, request CreateProductRequestObject) (CreateProductResponseObject, error)
+	// DeleteProduct Soft-delete a product.
+	// (DELETE /products/{id})
+	DeleteProduct(ctx context.Context, request DeleteProductRequestObject) (DeleteProductResponseObject, error)
+	// GetProduct Get a product, including its variants and images.
+	// (GET /products/{id})
+	GetProduct(ctx context.Context, request GetProductRequestObject) (GetProductResponseObject, error)
+	// UpdateProduct Update a product.
+	// (PATCH /products/{id})
+	UpdateProduct(ctx context.Context, request UpdateProductRequestObject) (UpdateProductResponseObject, error)
+	// AddProductImage Attach an uploaded image to a product.
+	// (POST /products/{id}/images)
+	AddProductImage(ctx context.Context, request AddProductImageRequestObject) (AddProductImageResponseObject, error)
+	// ReorderProductImages Reorder a product's images and/or change its cover image.
+	// (PATCH /products/{id}/images/order)
+	ReorderProductImages(ctx context.Context, request ReorderProductImagesRequestObject) (ReorderProductImagesResponseObject, error)
+	// RemoveProductImage Remove an image from a product.
+	// (DELETE /products/{id}/images/{imageId})
+	RemoveProductImage(ctx context.Context, request RemoveProductImageRequestObject) (RemoveProductImageResponseObject, error)
+	// ListVariants List a product's variants.
+	// (GET /products/{id}/variants)
+	ListVariants(ctx context.Context, request ListVariantsRequestObject) (ListVariantsResponseObject, error)
+	// CreateVariant Add a variant to a product.
+	// (POST /products/{id}/variants)
+	CreateVariant(ctx context.Context, request CreateVariantRequestObject) (CreateVariantResponseObject, error)
 	// GetReadyz Readiness check.
 	// (GET /readyz)
 	GetReadyz(ctx context.Context, request GetReadyzRequestObject) (GetReadyzResponseObject, error)
@@ -2010,6 +4665,15 @@ type StrictServerInterface interface {
 	// SetStaffPassword Set a staff member's password.
 	// (POST /staff/{id}/password)
 	SetStaffPassword(ctx context.Context, request SetStaffPasswordRequestObject) (SetStaffPasswordResponseObject, error)
+	// ListUnits List the shop's units of measure.
+	// (GET /units)
+	ListUnits(ctx context.Context, request ListUnitsRequestObject) (ListUnitsResponseObject, error)
+	// DeleteVariant Soft-delete a variant.
+	// (DELETE /variants/{id})
+	DeleteVariant(ctx context.Context, request DeleteVariantRequestObject) (DeleteVariantResponseObject, error)
+	// UpdateVariant Update a variant.
+	// (PATCH /variants/{id})
+	UpdateVariant(ctx context.Context, request UpdateVariantRequestObject) (UpdateVariantResponseObject, error)
 }
 
 type StrictHandlerFunc func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error)
@@ -2049,6 +4713,94 @@ type strictHandler struct {
 	ssi         StrictServerInterface
 	middlewares []StrictMiddlewareFunc
 	options     StrictHTTPServerOptions
+}
+
+// ListAttributeDefinitions operation middleware
+func (sh *strictHandler) ListAttributeDefinitions(w http.ResponseWriter, r *http.Request) {
+	var request ListAttributeDefinitionsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListAttributeDefinitions(ctx, request.(ListAttributeDefinitionsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListAttributeDefinitions")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListAttributeDefinitionsResponseObject); ok {
+		if err := validResponse.VisitListAttributeDefinitionsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateAttributeDefinition operation middleware
+func (sh *strictHandler) CreateAttributeDefinition(w http.ResponseWriter, r *http.Request) {
+	var request CreateAttributeDefinitionRequestObject
+
+	var body CreateAttributeDefinitionJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateAttributeDefinition(ctx, request.(CreateAttributeDefinitionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateAttributeDefinition")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateAttributeDefinitionResponseObject); ok {
+		if err := validResponse.VisitCreateAttributeDefinitionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateAttributeDefinition operation middleware
+func (sh *strictHandler) UpdateAttributeDefinition(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	var request UpdateAttributeDefinitionRequestObject
+
+	request.Id = id
+
+	var body UpdateAttributeDefinitionJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateAttributeDefinition(ctx, request.(UpdateAttributeDefinitionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateAttributeDefinition")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateAttributeDefinitionResponseObject); ok {
+		if err := validResponse.VisitUpdateAttributeDefinitionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
 }
 
 // Login operation middleware
@@ -2182,6 +4934,148 @@ func (sh *strictHandler) RevokeSession(w http.ResponseWriter, r *http.Request, i
 	}
 }
 
+// ListCategories operation middleware
+func (sh *strictHandler) ListCategories(w http.ResponseWriter, r *http.Request, params ListCategoriesParams) {
+	var request ListCategoriesRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListCategories(ctx, request.(ListCategoriesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListCategories")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListCategoriesResponseObject); ok {
+		if err := validResponse.VisitListCategoriesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateCategory operation middleware
+func (sh *strictHandler) CreateCategory(w http.ResponseWriter, r *http.Request) {
+	var request CreateCategoryRequestObject
+
+	var body CreateCategoryJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateCategory(ctx, request.(CreateCategoryRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateCategory")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateCategoryResponseObject); ok {
+		if err := validResponse.VisitCreateCategoryResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteCategory operation middleware
+func (sh *strictHandler) DeleteCategory(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	var request DeleteCategoryRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteCategory(ctx, request.(DeleteCategoryRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteCategory")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteCategoryResponseObject); ok {
+		if err := validResponse.VisitDeleteCategoryResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetCategory operation middleware
+func (sh *strictHandler) GetCategory(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	var request GetCategoryRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetCategory(ctx, request.(GetCategoryRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetCategory")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetCategoryResponseObject); ok {
+		if err := validResponse.VisitGetCategoryResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateCategory operation middleware
+func (sh *strictHandler) UpdateCategory(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	var request UpdateCategoryRequestObject
+
+	request.Id = id
+
+	var body UpdateCategoryJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateCategory(ctx, request.(UpdateCategoryRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateCategory")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateCategoryResponseObject); ok {
+		if err := validResponse.VisitUpdateCategoryResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // GetHealthz operation middleware
 func (sh *strictHandler) GetHealthz(w http.ResponseWriter, r *http.Request) {
 	var request GetHealthzRequestObject
@@ -2289,6 +5183,331 @@ func (sh *strictHandler) UpdateLocation(w http.ResponseWriter, r *http.Request, 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(UpdateLocationResponseObject); ok {
 		if err := validResponse.VisitUpdateLocationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UploadMedia operation middleware
+func (sh *strictHandler) UploadMedia(w http.ResponseWriter, r *http.Request) {
+	var request UploadMediaRequestObject
+
+	if reader, err := r.MultipartReader(); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode multipart body: %w", err))
+		return
+	} else {
+		request.Body = reader
+	}
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UploadMedia(ctx, request.(UploadMediaRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UploadMedia")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UploadMediaResponseObject); ok {
+		if err := validResponse.VisitUploadMediaResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListProducts operation middleware
+func (sh *strictHandler) ListProducts(w http.ResponseWriter, r *http.Request, params ListProductsParams) {
+	var request ListProductsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListProducts(ctx, request.(ListProductsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListProducts")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListProductsResponseObject); ok {
+		if err := validResponse.VisitListProductsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateProduct operation middleware
+func (sh *strictHandler) CreateProduct(w http.ResponseWriter, r *http.Request) {
+	var request CreateProductRequestObject
+
+	var body CreateProductJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateProduct(ctx, request.(CreateProductRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateProduct")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateProductResponseObject); ok {
+		if err := validResponse.VisitCreateProductResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteProduct operation middleware
+func (sh *strictHandler) DeleteProduct(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	var request DeleteProductRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteProduct(ctx, request.(DeleteProductRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteProduct")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteProductResponseObject); ok {
+		if err := validResponse.VisitDeleteProductResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetProduct operation middleware
+func (sh *strictHandler) GetProduct(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	var request GetProductRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetProduct(ctx, request.(GetProductRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetProduct")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetProductResponseObject); ok {
+		if err := validResponse.VisitGetProductResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateProduct operation middleware
+func (sh *strictHandler) UpdateProduct(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	var request UpdateProductRequestObject
+
+	request.Id = id
+
+	var body UpdateProductJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateProduct(ctx, request.(UpdateProductRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateProduct")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateProductResponseObject); ok {
+		if err := validResponse.VisitUpdateProductResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// AddProductImage operation middleware
+func (sh *strictHandler) AddProductImage(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	var request AddProductImageRequestObject
+
+	request.Id = id
+
+	var body AddProductImageJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AddProductImage(ctx, request.(AddProductImageRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AddProductImage")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AddProductImageResponseObject); ok {
+		if err := validResponse.VisitAddProductImageResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ReorderProductImages operation middleware
+func (sh *strictHandler) ReorderProductImages(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	var request ReorderProductImagesRequestObject
+
+	request.Id = id
+
+	var body ReorderProductImagesJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ReorderProductImages(ctx, request.(ReorderProductImagesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ReorderProductImages")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ReorderProductImagesResponseObject); ok {
+		if err := validResponse.VisitReorderProductImagesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RemoveProductImage operation middleware
+func (sh *strictHandler) RemoveProductImage(w http.ResponseWriter, r *http.Request, id openapi_types.UUID, imageId openapi_types.UUID) {
+	var request RemoveProductImageRequestObject
+
+	request.Id = id
+	request.ImageId = imageId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RemoveProductImage(ctx, request.(RemoveProductImageRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RemoveProductImage")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RemoveProductImageResponseObject); ok {
+		if err := validResponse.VisitRemoveProductImageResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListVariants operation middleware
+func (sh *strictHandler) ListVariants(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	var request ListVariantsRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListVariants(ctx, request.(ListVariantsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListVariants")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListVariantsResponseObject); ok {
+		if err := validResponse.VisitListVariantsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateVariant operation middleware
+func (sh *strictHandler) CreateVariant(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	var request CreateVariantRequestObject
+
+	request.Id = id
+
+	var body CreateVariantJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateVariant(ctx, request.(CreateVariantRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateVariant")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateVariantResponseObject); ok {
+		if err := validResponse.VisitCreateVariantResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -2491,6 +5710,89 @@ func (sh *strictHandler) SetStaffPassword(w http.ResponseWriter, r *http.Request
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SetStaffPasswordResponseObject); ok {
 		if err := validResponse.VisitSetStaffPasswordResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListUnits operation middleware
+func (sh *strictHandler) ListUnits(w http.ResponseWriter, r *http.Request) {
+	var request ListUnitsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListUnits(ctx, request.(ListUnitsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListUnits")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListUnitsResponseObject); ok {
+		if err := validResponse.VisitListUnitsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteVariant operation middleware
+func (sh *strictHandler) DeleteVariant(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	var request DeleteVariantRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteVariant(ctx, request.(DeleteVariantRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteVariant")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteVariantResponseObject); ok {
+		if err := validResponse.VisitDeleteVariantResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateVariant operation middleware
+func (sh *strictHandler) UpdateVariant(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	var request UpdateVariantRequestObject
+
+	request.Id = id
+
+	var body UpdateVariantJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateVariant(ctx, request.(UpdateVariantRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateVariant")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateVariantResponseObject); ok {
+		if err := validResponse.VisitUpdateVariantResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

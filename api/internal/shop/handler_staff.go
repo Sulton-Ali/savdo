@@ -61,7 +61,7 @@ func (h *Handler) ListStaff(ctx context.Context, req gen.ListStaffRequestObject)
 	for i, u := range items {
 		genItems[i] = toGenUser(u)
 	}
-	return gen.ListStaff200JSONResponse(gen.UserList{Items: genItems, NextCursor: nextCursor}), nil
+	return gen.ListStaff200JSONResponse(gen.UserList{Items: genItems, NextCursor: nullableString(nextCursor)}), nil
 }
 
 // validateUsername trims, lowercases and length/pattern-checks a
@@ -124,6 +124,21 @@ func validatePhone(phone *string) string {
 		return ""
 	}
 	if !phonePattern.MatchString(*phone) {
+		return "invalid"
+	}
+	return ""
+}
+
+// validatePhoneValue reports the vocabulary reason for a PATCH phone
+// value that is present and non-null — i.e. the caller already resolved
+// StaffPatch.phone's tri-state (absent/null/value) and is validating the
+// "value" branch. Unlike validatePhone (CreateStaff's optional plain
+// *string, where a blank phone just means "none"), an empty string here
+// is invalid: D-35 removed the `""`-clears-the-phone convention from
+// PATCH — clearing is `null` now, so `{"phone": ""}` is a bad value, not
+// a no-op.
+func validatePhoneValue(phone string) string {
+	if !phonePattern.MatchString(phone) {
 		return "invalid"
 	}
 	return ""
@@ -240,8 +255,31 @@ func (h *Handler) UpdateStaff(ctx context.Context, req gen.UpdateStaffRequestObj
 		}
 	}
 
-	if reason := validatePhone(body.Phone); reason != "" {
-		fields["phone"] = reason
+	// StaffPatch.phone is now a tri-state nullable.Nullable[string] (D-35,
+	// enabled by oapi-codegen's nullable-type option): unspecified means
+	// "leave unchanged" (phoneInput stays nil, StaffPatchInput's own
+	// "absent" value), an explicit `null` means "clear" (phoneInput
+	// becomes a **string pointing at a nil *string — StaffPatchInput.Phone
+	// distinguishes "leave unchanged" from "clear" this way, since a bare
+	// *string can't tell "absent" apart from "explicit null" any better
+	// than the wire format could before this feature existed), and a
+	// specified non-null value is validated and set. The old `""`-clears
+	// convention is gone: an explicit empty string is now a validation
+	// error, not a synonym for `null`.
+	var phoneInput **string
+	if body.Phone.IsSpecified() {
+		if body.Phone.IsNull() {
+			var cleared *string
+			phoneInput = &cleared
+		} else {
+			value := body.Phone.MustGet()
+			if reason := validatePhoneValue(value); reason != "" {
+				fields["phone"] = reason
+			} else {
+				set := &value
+				phoneInput = &set
+			}
+		}
 	}
 
 	var role *db.UserRole
@@ -268,18 +306,8 @@ func (h *Handler) UpdateStaff(ctx context.Context, req gen.UpdateStaffRequestObj
 		return nil, apierr.Validation(fields)
 	}
 
-	// body.Phone is passed through unchanged, deliberately not
-	// normalized the way CreateStaff's is: nil must keep meaning "leave
-	// unchanged", while a non-nil empty string ("phone": "") is the
-	// "clear" signal UpdateStaff (staff.go) acts on — it routes that
-	// case through the dedicated ClearUserPhone statement instead of
-	// UpdateUser's COALESCE, so the column becomes a true SQL NULL, not
-	// a literal empty string. A JSON `null` is indistinguishable from an
-	// omitted field once oapi-codegen decodes StaffPatch.phone into a
-	// plain *string (Q-20, contract-level, out of scope), so `null` and
-	// absent both mean "leave unchanged" here; only `""` means "clear".
 	updated, err := h.svc.UpdateStaff(ctx, authCtx.ShopID, authCtx.UserID, req.Id, StaffPatchInput{
-		FullName: fullName, Phone: body.Phone, Role: role, IsActive: body.IsActive, Locale: locale,
+		FullName: fullName, Phone: phoneInput, Role: role, IsActive: body.IsActive, Locale: locale,
 	})
 	if err != nil {
 		return nil, err

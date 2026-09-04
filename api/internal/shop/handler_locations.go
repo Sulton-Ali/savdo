@@ -39,7 +39,7 @@ func (h *Handler) ListLocations(ctx context.Context, req gen.ListLocationsReques
 	for i, l := range items {
 		genItems[i] = toGenLocation(l)
 	}
-	return gen.ListLocations200JSONResponse(gen.LocationList{Items: genItems, NextCursor: nextCursor}), nil
+	return gen.ListLocations200JSONResponse(gen.LocationList{Items: genItems, NextCursor: nullableString(nextCursor)}), nil
 }
 
 // CreateLocation creates a location. Requires locations.manage (owner

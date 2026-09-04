@@ -4,7 +4,10 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"time"
 	"unicode/utf8"
+
+	"github.com/oapi-codegen/nullable"
 
 	"github.com/Sulton-Ali/savdo/api/gen"
 	"github.com/Sulton-Ali/savdo/api/internal/apierr"
@@ -166,7 +169,13 @@ func (h *Handler) ListSessions(ctx context.Context, _ gen.ListSessionsRequestObj
 		items[i] = toGenSession(sess, sess.ID == authCtx.SessionID)
 	}
 
-	return gen.ListSessions200JSONResponse(gen.SessionList{Items: items, NextCursor: nil}), nil
+	// Sessions aren't cursor-paginated yet (ListSessions returns every
+	// session for the user); nextCursor is still a required field
+	// (D-35's nullable-type ripple turned it into nullable.Nullable[string]
+	// instead of a bare *string), so it must be explicitly set — an
+	// explicit null, not "unspecified", which would wrongly serialize as
+	// a bare `""` (nullable.Nullable's zero value) instead of `null`.
+	return gen.ListSessions200JSONResponse(gen.SessionList{Items: items, NextCursor: nullable.NewNullNullable[string]()}), nil
 }
 
 // RevokeSession revokes one of the authenticated user's own sessions.
@@ -187,6 +196,28 @@ func (h *Handler) RevokeSession(ctx context.Context, req gen.RevokeSessionReques
 	return gen.RevokeSession204Response{}, nil
 }
 
+// nullableString converts a *string (nil = SQL NULL) to the tri-state
+// nullable.Nullable[string] a response field now requires (D-35's
+// nullable-type ripple: every `["T", "null"]` schema in the spec gets
+// this type, not just the PATCH fields D-35 introduced it for). A
+// response always specifies the field, so the result is either Set(v) or
+// an explicit SetNull() — never left "unspecified", which would
+// serialize as the zero value instead of `null`.
+func nullableString(v *string) nullable.Nullable[string] {
+	if v == nil {
+		return nullable.NewNullNullable[string]()
+	}
+	return nullable.NewNullableWithValue(*v)
+}
+
+// nullableTime is nullableString for *time.Time (User.lastLoginAt).
+func nullableTime(v *time.Time) nullable.Nullable[time.Time] {
+	if v == nil {
+		return nullable.NewNullNullable[time.Time]()
+	}
+	return nullable.NewNullableWithValue(*v)
+}
+
 // toGenUser maps a db.User onto the API's User schema. PasswordHash and
 // ShopID are deliberately not carried across — never serialize a password
 // hash into a response (hard rule 9).
@@ -195,11 +226,11 @@ func toGenUser(u db.User) gen.User {
 		Id:          u.ID,
 		Username:    u.Username,
 		FullName:    u.FullName,
-		Phone:       u.Phone,
+		Phone:       nullableString(u.Phone),
 		Role:        gen.Role(u.Role),
 		Locale:      gen.Locale(u.Locale),
 		IsActive:    u.IsActive,
-		LastLoginAt: u.LastLoginAt,
+		LastLoginAt: nullableTime(u.LastLoginAt),
 		CreatedAt:   u.CreatedAt,
 	}
 }
@@ -229,8 +260,8 @@ func toGenSession(s db.Session, current bool) gen.Session {
 	return gen.Session{
 		Id:         s.ID,
 		Client:     gen.SessionClient(s.Client),
-		UserAgent:  s.UserAgent,
-		Ip:         ip,
+		UserAgent:  nullableString(s.UserAgent),
+		Ip:         nullableString(ip),
 		CreatedAt:  s.CreatedAt,
 		ExpiresAt:  s.ExpiresAt,
 		LastSeenAt: s.LastSeenAt,
