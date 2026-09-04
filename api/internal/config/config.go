@@ -70,6 +70,18 @@ type Config struct {
 	// CPU- and memory-heavy part of an upload, gated in
 	// internal/media/service.go by a semaphore this many slots deep).
 	MediaConcurrency int `env:"MEDIA_CONCURRENCY" envDefault:"2"`
+
+	// MediaQueue bounds how many uploads may be admitted (spooling,
+	// waiting for a decode slot, or decoding) at once, process-wide —
+	// the outer admission gate a Review B follow-up added in front of
+	// MediaConcurrency's inner one: without it, an unbounded number of
+	// requests could each spool up to MediaMaxBytes to disk and then
+	// queue up for a decode slot, filling MEDIA_DIR/.tmp under
+	// sustained load. Default 8 (MediaConcurrency's own default × 4);
+	// the two aren't derived from each other at parse time — sizing
+	// MediaQueue relative to a non-default MediaConcurrency is an
+	// operator concern, not this struct's.
+	MediaQueue int `env:"MEDIA_QUEUE" envDefault:"8"`
 }
 
 // Load parses the environment into a Config, applying defaults. It fails

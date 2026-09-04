@@ -32,6 +32,7 @@ func TestLoad(t *testing.T) {
 				MediaBaseURL:        "/media",
 				MediaMaxBytes:       10485760,
 				MediaConcurrency:    2,
+				MediaQueue:          8,
 			},
 		},
 		{
@@ -54,6 +55,7 @@ func TestLoad(t *testing.T) {
 				"SHOP_SLUG":               "acme-shop",
 				"MEDIA_DIR":               "/data/media",
 				"MEDIA_CONCURRENCY":       "4",
+				"MEDIA_QUEUE":             "16",
 			},
 			want: Config{
 				Addr:                ":9090",
@@ -72,6 +74,7 @@ func TestLoad(t *testing.T) {
 				MediaBaseURL:     "/media",
 				MediaMaxBytes:    10485760,
 				MediaConcurrency: 4,
+				MediaQueue:       16,
 			},
 		},
 		{
@@ -100,6 +103,7 @@ func TestLoad(t *testing.T) {
 				MediaBaseURL:        "/media",
 				MediaMaxBytes:       10485760,
 				MediaConcurrency:    2,
+				MediaQueue:          8,
 			},
 		},
 		{
@@ -148,6 +152,7 @@ func TestLoad(t *testing.T) {
 				MediaBaseURL:        "/media",
 				MediaMaxBytes:       10485760,
 				MediaConcurrency:    2,
+				MediaQueue:          8,
 			},
 		},
 	}
