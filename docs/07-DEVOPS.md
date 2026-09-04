@@ -34,6 +34,10 @@ seed` directly needs `DATABASE_URL` and `MEDIA_DIR` in the environment, same as 
 
 Media files in dev go to `infra/data/media/` (gitignored).
 
+### Stock rebuild
+
+`cd api && go run ./cmd/savdo stock rebuild --shop-slug savdo-demo` recomputes `stock_levels` from `stock_movements` for one shop inside a single transaction under a shop-scoped advisory lock (ADR-006). The flag is required. Stop the API (or make sure nothing writes stock) while it runs: a concurrent movement blocks on the rebuild or makes it abort with a unique violation; levels are never silently overwritten. Prints movement and level counts.
+
 ## Environment variables
 
 The API loads all of these via `config.Load()`. `savdo migrate` reads only

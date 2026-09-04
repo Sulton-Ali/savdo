@@ -24,7 +24,7 @@ Base path `/v1`. JSON only. Server: Go, `api/cmd/api`, port 8080 behind Caddy.
 - **Filtering/sorting**: explicit query params per endpoint, documented in the spec.
   Free-text search via `?q=` uses Postgres `ILIKE`/trigram; no external search engine.
 - **Idempotency**: `POST /sales`, `POST /purchases/{id}/receive` and stock adjustments
-  accept `Idempotency-Key`; a replay returns the original result.
+  accept `Idempotency-Key`; a replay returns the original result. The fingerprint is method + path + actor + canonical body; a different body under the same key returns `409 IDEMPOTENCY_KEY_REUSED`; the resolved locale is not part of it (D-51). Ledger writes that lose a Postgres deadlock return `409 CONFLICT` with `details.reason = deadlock` and may be retried.
 - **Errors** (ADR-013):
 
   ```json
