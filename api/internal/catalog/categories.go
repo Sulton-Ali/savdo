@@ -7,7 +7,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/oapi-codegen/nullable"
 
 	"github.com/Sulton-Ali/savdo/api/gen"
 	"github.com/Sulton-Ali/savdo/api/internal/apierr"
@@ -24,12 +23,11 @@ const maxCategoryDepth = 3
 const categorySlugRetries = 3
 
 // toGenCategory maps a resolved category row onto the API schema.
-// description and translations are always absent: no query in this
-// codebase currently selects category_translations.description (only
-// name is selected for the locale-fallback lookup), and there is no
-// ListCategoryTranslations equivalent to ListProductTranslations to
-// assemble a full per-locale map from — see this task's final report.
-func toGenCategory(id uuid.UUID, parentID *uuid.UUID, slug string, sortOrder int32, isActive bool, imageID *uuid.UUID, name, localeUsed, requested string) gen.Category {
+// translations is nil unless the caller passes one built from
+// categoryTranslationEntries (GetCategory/CreateCategory/UpdateCategory —
+// single-item endpoints only; see ListCategories' own doc comment for why
+// list items never carry it).
+func toGenCategory(id uuid.UUID, parentID *uuid.UUID, slug string, sortOrder int32, isActive bool, imageID *uuid.UUID, name, localeUsed, requested string, description *string, translations *gen.Translations) gen.Category {
 	return gen.Category{
 		Id:                  id,
 		ParentId:            nullableUUID(parentID),
@@ -38,15 +36,39 @@ func toGenCategory(id uuid.UUID, parentID *uuid.UUID, slug string, sortOrder int
 		IsActive:            isActive,
 		ImageId:             nullableUUID(imageID),
 		Name:                name,
-		Description:         nullable.NewNullNullable[string](),
+		Description:         nullableString(description),
 		Locale:              effectiveLocale(localeUsed, requested),
 		TranslationFallback: translationFallback(localeUsed, requested),
+		Translations:        translations,
 	}
+}
+
+// categoryTranslationEntries loads every locale's name/description for
+// categoryID via ListCategoryTranslations, the same shape
+// productTranslationEntries builds from ListProductTranslations.
+func (s *Service) categoryTranslationEntries(ctx context.Context, categoryID uuid.UUID) (map[string]translationEntry, error) {
+	rows, err := s.q.ListCategoryTranslations(ctx, categoryID)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]translationEntry, len(rows))
+	for _, r := range rows {
+		if supportedLocales[r.Locale] {
+			out[r.Locale] = translationEntry{Name: r.Name, Description: r.Description}
+		}
+	}
+	return out, nil
 }
 
 // ListCategories lists the shop's categories as a flat list. Any
 // authenticated role; includeInactive is honoured only for a catalog.write
 // caller (manager+) — other roles always see active categories only.
+// `translations` is always absent on list items: ListCategories has no
+// bulk equivalent of ListCategoryTranslations, so populating the full
+// per-locale map would cost one extra query per row (the same trade-off
+// ListProducts makes for `description`); `description` itself IS
+// populated here — ListCategoriesRow carries it directly, no extra query
+// needed.
 func (h *Handler) ListCategories(ctx context.Context, req gen.ListCategoriesRequestObject) (gen.ListCategoriesResponseObject, error) {
 	authCtx, ok := auth.FromContext(ctx)
 	if !ok {
@@ -66,13 +88,15 @@ func (h *Handler) ListCategories(ctx context.Context, req gen.ListCategoriesRequ
 
 	items := make([]gen.Category, len(rows))
 	for i, r := range rows {
-		items[i] = toGenCategory(r.ID, r.ParentID, r.Slug, r.SortOrder, r.IsActive, r.ImageID, r.Name, r.LocaleUsed, locale)
+		items[i] = toGenCategory(r.ID, r.ParentID, r.Slug, r.SortOrder, r.IsActive, r.ImageID, r.Name, r.LocaleUsed, locale, r.Description, nil)
 	}
 	return gen.ListCategories200JSONResponse(gen.CategoryList{Items: items}), nil
 }
 
 // GetCategory gets a category by id. Any authenticated role; 404 for
-// another shop's id or a soft-deleted category.
+// another shop's id or a soft-deleted category. `translations` (every
+// locale) is present only for a catalog.write caller (manager+), same
+// gating as Product/AttributeDefinition.
 func (h *Handler) GetCategory(ctx context.Context, req gen.GetCategoryRequestObject) (gen.GetCategoryResponseObject, error) {
 	authCtx, ok := auth.FromContext(ctx)
 	if !ok {
@@ -87,7 +111,16 @@ func (h *Handler) GetCategory(ctx context.Context, req gen.GetCategoryRequestObj
 		}
 		return nil, fmt.Errorf("catalog: get category: %w", err)
 	}
-	return gen.GetCategory200JSONResponse(toGenCategory(row.ID, row.ParentID, row.Slug, row.SortOrder, row.IsActive, row.ImageID, row.Name, row.LocaleUsed, locale)), nil
+
+	var translations *gen.Translations
+	if auth.Require(ctx, auth.PermCatalogWrite) == nil {
+		entries, err := h.svc.categoryTranslationEntries(ctx, row.ID)
+		if err != nil {
+			return nil, fmt.Errorf("catalog: list category translations: %w", err)
+		}
+		translations = buildTranslations(entries)
+	}
+	return gen.GetCategory200JSONResponse(toGenCategory(row.ID, row.ParentID, row.Slug, row.SortOrder, row.IsActive, row.ImageID, row.Name, row.LocaleUsed, locale, row.Description, translations)), nil
 }
 
 // categoryDepthOK reports whether parentID (in shopID) exists and placing
@@ -254,18 +287,20 @@ func (h *Handler) CreateCategory(ctx context.Context, req gen.CreateCategoryRequ
 
 	locale := h.svc.resolveLocale(ctx)
 	name, localeUsed := resolveDisplay(entries, locale, h.svc.defaultLocale)
-	resp := toGenCategory(created.ID, created.ParentID, created.Slug, created.SortOrder, created.IsActive, created.ImageID, name, localeUsed, locale)
+	// The caller reaching CreateCategory already has catalog.write, so the
+	// full translations map is always included (unlike GetCategory/
+	// ListCategories, gated per-request since any role can read).
+	resp := toGenCategory(created.ID, created.ParentID, created.Slug, created.SortOrder, created.IsActive, created.ImageID, name, localeUsed, locale, entries[localeUsed].Description, buildTranslations(entries))
 	return gen.CreateCategory201JSONResponse(resp), nil
 }
 
 // UpdateCategory updates a category. Requires catalog.write (manager+).
-//
-// KNOWN GAP (see this task's final report): CategoryPatch documents
-// explicit `null` for parentId/imageId as clearing the field, but
-// UpdateCategoryParams (api/internal/db/categories.sql.go) has no clear
-// flag for either column — only COALESCE-style "set or leave unchanged".
-// An explicit `null` for either field is rejected as 400 invalid rather
-// than silently doing nothing or being mis-applied.
+// Explicit `null` for `parentId` moves the category to the top level
+// (db.UpdateCategoryParams.ClearParent); explicit `null` for `imageId`
+// removes its image (ClearImage). A non-null imageId must reference a
+// media file in this shop, checked proactively here (400
+// fields.imageId: invalid) and, as a backstop, via the FK's own 23503
+// mapped by invalidFKField.
 func (h *Handler) UpdateCategory(ctx context.Context, req gen.UpdateCategoryRequestObject) (gen.UpdateCategoryResponseObject, error) {
 	if _, ok := auth.FromContext(ctx); !ok {
 		return nil, apierr.Unauthenticated()
@@ -279,9 +314,10 @@ func (h *Handler) UpdateCategory(ctx context.Context, req gen.UpdateCategoryRequ
 	fields := map[string]string{}
 
 	var parentID *uuid.UUID
+	var clearParent bool
 	if pp := optionalUUID(body.ParentId); pp != nil {
 		if *pp == nil {
-			fields["parentId"] = "invalid" // explicit null: unsupported, see doc comment above
+			clearParent = true // explicit null: move to the top level
 		} else {
 			ok, err := h.svc.categoryDepthOK(ctx, authCtx.ShopID, **pp)
 			if err != nil {
@@ -304,9 +340,10 @@ func (h *Handler) UpdateCategory(ctx context.Context, req gen.UpdateCategoryRequ
 	}
 
 	var imageID *uuid.UUID
+	var clearImage bool
 	if ip := optionalUUID(body.ImageId); ip != nil {
 		if *ip == nil {
-			fields["imageId"] = "invalid" // explicit null: unsupported, see doc comment above
+			clearImage = true // explicit null: remove the image
 		} else if _, err := h.svc.q.GetMediaFile(ctx, db.GetMediaFileParams{ShopID: authCtx.ShopID, ID: **ip}); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				fields["imageId"] = "invalid"
@@ -348,8 +385,8 @@ func (h *Handler) UpdateCategory(ctx context.Context, req gen.UpdateCategoryRequ
 	qtx := h.svc.q.WithTx(tx)
 
 	updated, err := qtx.UpdateCategory(ctx, db.UpdateCategoryParams{
-		ParentID: parentID, Slug: body.Slug, SortOrder: sortOrder, IsActive: body.IsActive,
-		ImageID: imageID, ShopID: authCtx.ShopID, ID: req.Id,
+		ClearParent: clearParent, ParentID: parentID, Slug: body.Slug, SortOrder: sortOrder, IsActive: body.IsActive,
+		ClearImage: clearImage, ImageID: imageID, ShopID: authCtx.ShopID, ID: req.Id,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -381,7 +418,13 @@ func (h *Handler) UpdateCategory(ctx context.Context, req gen.UpdateCategoryRequ
 	if err != nil {
 		return nil, fmt.Errorf("catalog: get category after update: %w", err)
 	}
-	return gen.UpdateCategory200JSONResponse(toGenCategory(fresh.ID, fresh.ParentID, fresh.Slug, fresh.SortOrder, fresh.IsActive, fresh.ImageID, fresh.Name, fresh.LocaleUsed, locale)), nil
+	// The caller reaching UpdateCategory already has catalog.write, so the
+	// full translations map is always included, same as CreateCategory.
+	entries, err := h.svc.categoryTranslationEntries(ctx, updated.ID)
+	if err != nil {
+		return nil, fmt.Errorf("catalog: list category translations: %w", err)
+	}
+	return gen.UpdateCategory200JSONResponse(toGenCategory(fresh.ID, fresh.ParentID, fresh.Slug, fresh.SortOrder, fresh.IsActive, fresh.ImageID, fresh.Name, fresh.LocaleUsed, locale, fresh.Description, buildTranslations(entries))), nil
 }
 
 // DeleteCategory soft-deletes a category. Requires catalog.write

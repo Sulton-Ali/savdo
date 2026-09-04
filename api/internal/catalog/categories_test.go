@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/oapi-codegen/nullable"
 
 	"github.com/Sulton-Ali/savdo/api/gen"
 	"github.com/Sulton-Ali/savdo/api/internal/apierr"
@@ -158,5 +159,126 @@ func TestListCategories_isolationAndIncludeInactive(t *testing.T) {
 	list := resp.(gen.ListCategories200JSONResponse)
 	if len(list.Items) != 1 || list.Items[0].Name != "A Category" {
 		t.Fatalf("items = %+v, want exactly shop A's own category", list.Items)
+	}
+}
+
+func TestCreateCategory_populatesDescriptionAndTranslations(t *testing.T) {
+	h, q, _ := newTestHandler(t)
+	ctx := context.Background()
+	shopRow := seedShop(ctx, t, q, "shop-a")
+
+	desc := "Erkaklar va ayollar kiyimlari"
+	resp, err := h.CreateCategory(owner(shopRow.ID), gen.CreateCategoryRequestObject{
+		Body: &gen.CreateCategoryJSONRequestBody{
+			Translations: gen.Translations{
+				Uz: &gen.TranslationEntry{Name: "Kiyimlar", Description: &desc},
+				Ru: &gen.TranslationEntry{Name: "Odezhda"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateCategory: %v", err)
+	}
+	created := gen.Category(resp.(gen.CreateCategory201JSONResponse))
+
+	if !created.Description.IsSpecified() || created.Description.IsNull() || created.Description.MustGet() != desc {
+		t.Fatalf("Description = %+v, want %q", created.Description, desc)
+	}
+	if created.Translations == nil || created.Translations.Uz == nil || created.Translations.Uz.Name != "Kiyimlar" {
+		t.Fatalf("Translations.Uz = %+v", created.Translations)
+	}
+	if created.Translations.Ru == nil || created.Translations.Ru.Name != "Odezhda" {
+		t.Fatalf("Translations.Ru = %+v, want the ru entry too", created.Translations.Ru)
+	}
+}
+
+func TestGetCategory_translationsGatedByCatalogWrite(t *testing.T) {
+	h, q, _ := newTestHandler(t)
+	ctx := context.Background()
+	shopRow := seedShop(ctx, t, q, "shop-a")
+
+	created := mustCreateCategory(t, h, shopRow.ID, "Kiyimlar", nil)
+
+	cashierResp, err := h.GetCategory(cashier(shopRow.ID), gen.GetCategoryRequestObject{Id: created.Id})
+	if err != nil {
+		t.Fatalf("GetCategory as cashier: %v", err)
+	}
+	cashierCat := gen.Category(cashierResp.(gen.GetCategory200JSONResponse))
+	if cashierCat.Translations != nil {
+		t.Fatalf("cashier Translations = %+v, want nil (no catalog.write)", cashierCat.Translations)
+	}
+
+	managerResp, err := h.GetCategory(manager(shopRow.ID), gen.GetCategoryRequestObject{Id: created.Id})
+	if err != nil {
+		t.Fatalf("GetCategory as manager: %v", err)
+	}
+	managerCat := gen.Category(managerResp.(gen.GetCategory200JSONResponse))
+	if managerCat.Translations == nil || managerCat.Translations.Uz == nil || managerCat.Translations.Uz.Name != "Kiyimlar" {
+		t.Fatalf("manager Translations = %+v, want the uz entry", managerCat.Translations)
+	}
+}
+
+func TestUpdateCategory_nullParentMovesToRootAndNullImageClears(t *testing.T) {
+	h, q, _ := newTestHandler(t)
+	ctx := context.Background()
+	shopRow := seedShop(ctx, t, q, "shop-a")
+	media := seedMedia(ctx, t, q, shopRow.ID, "shop/cat-image")
+
+	parent := mustCreateCategory(t, h, shopRow.ID, "Parent", nil)
+	resp, err := h.CreateCategory(owner(shopRow.ID), gen.CreateCategoryRequestObject{
+		Body: &gen.CreateCategoryJSONRequestBody{ParentId: &parent.Id, ImageId: &media.ID, Translations: uzTranslations("Child")},
+	})
+	if err != nil {
+		t.Fatalf("CreateCategory: %v", err)
+	}
+	child := gen.Category(resp.(gen.CreateCategory201JSONResponse))
+	if !child.ParentId.IsSpecified() || child.ParentId.IsNull() {
+		t.Fatalf("child.ParentId = %+v, want the parent id set", child.ParentId)
+	}
+	if !child.ImageId.IsSpecified() || child.ImageId.IsNull() {
+		t.Fatalf("child.ImageId = %+v, want the media id set", child.ImageId)
+	}
+
+	var nullParent nullable.Nullable[uuid.UUID]
+	nullParent.SetNull()
+	var nullImage nullable.Nullable[uuid.UUID]
+	nullImage.SetNull()
+
+	updateResp, err := h.UpdateCategory(owner(shopRow.ID), gen.UpdateCategoryRequestObject{
+		Id:   child.Id,
+		Body: &gen.UpdateCategoryJSONRequestBody{ParentId: nullParent, ImageId: nullImage},
+	})
+	if err != nil {
+		t.Fatalf("UpdateCategory: %v", err)
+	}
+	updated := gen.Category(updateResp.(gen.UpdateCategory200JSONResponse))
+	if !updated.ParentId.IsSpecified() || !updated.ParentId.IsNull() {
+		t.Fatalf("updated.ParentId = %+v, want explicit null (moved to root)", updated.ParentId)
+	}
+	if !updated.ImageId.IsSpecified() || !updated.ImageId.IsNull() {
+		t.Fatalf("updated.ImageId = %+v, want explicit null (cleared)", updated.ImageId)
+	}
+}
+
+func TestUpdateCategory_imageIdMustExistInShop(t *testing.T) {
+	h, q, _ := newTestHandler(t)
+	ctx := context.Background()
+	shopRow := seedShop(ctx, t, q, "shop-a")
+
+	created := mustCreateCategory(t, h, shopRow.ID, "Kiyimlar", nil)
+
+	var badImage nullable.Nullable[uuid.UUID]
+	badImage.Set(uuid.New())
+
+	_, err := h.UpdateCategory(owner(shopRow.ID), gen.UpdateCategoryRequestObject{
+		Id: created.Id, Body: &gen.UpdateCategoryJSONRequestBody{ImageId: badImage},
+	})
+	apiErr, ok := err.(*apierr.Error)
+	if !ok || apiErr.Code != gen.VALIDATIONFAILED {
+		t.Fatalf("err = %#v, want 400 VALIDATION_FAILED", err)
+	}
+	fields := apiErr.Details["fields"].(map[string]string)
+	if fields["imageId"] != "invalid" {
+		t.Fatalf("fields = %+v, want imageId=invalid", fields)
 	}
 }
