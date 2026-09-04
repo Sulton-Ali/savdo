@@ -14,6 +14,19 @@ LIMIT sqlc.arg('limit');
 SELECT * FROM locations
 WHERE shop_id = $1 AND id = $2;
 
+-- name: GetLocationForUpdate :one
+SELECT * FROM locations
+WHERE shop_id = $1 AND id = $2
+FOR UPDATE;
+
+-- name: GetDefaultLocationForUpdate :one
+-- Locks the shop's current default location row, so a concurrent default
+-- takeover (ClearDefaultLocation + UpdateLocation) serializes on it.
+-- Returns pgx.ErrNoRows if the shop has no default location yet.
+SELECT * FROM locations
+WHERE shop_id = $1 AND is_default
+FOR UPDATE;
+
 -- name: CreateLocation :one
 INSERT INTO locations (id, shop_id, name, kind, is_default, is_active)
 VALUES ($1, $2, $3, $4, $5, $6)
