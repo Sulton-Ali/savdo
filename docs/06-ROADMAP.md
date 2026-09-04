@@ -33,16 +33,16 @@ green on `main`.
 
 ## Phase 1 — Core API + admin shell (auth, shop, staff, locations)
 
-- [ ] Owner answered Q-11 (D-28), session policy (D-29), seed content (D-30), dependencies (D-31) — 2026-09-04
-- [ ] Config, slog logging, request id, error mapping, `/readyz`
-- [ ] Migrations 0001–0003: `shops`, `users`, `sessions`, `locations`, enums
-- [ ] `auth`: argon2id passwords, opaque sessions, login/logout/me, rate limit on login
-- [ ] Role middleware (owner/manager/cashier) and permission helper
-- [ ] `shop`: get/patch shop, locations CRUD, staff CRUD + password set (owner)
-- [ ] `savdo` CLI: `migrate`, `seed`, `reset-owner-password`
-- [ ] Seed: one shop (family clothing shop placeholder), owner, one manager, one cashier, two locations
-- [ ] Integration tests with testcontainers: login, role denial, shop isolation
-- [ ] Admin web shell: login page, session handling, layout, nav, i18n switcher, staff and locations screens
+- [x] Owner answered Q-11 (D-28), session policy (D-29), seed content (D-30), dependencies (D-31) — 2026-09-04
+- [x] Config, slog logging, request id, error mapping, `/readyz`
+- [x] Migrations 0001–0003: `shops`, `users`, `sessions`, `locations`, enums
+- [x] `auth`: argon2id passwords, opaque sessions, login/logout/me, rate limit on login
+- [x] Role middleware (owner/manager/cashier) and permission helper
+- [x] `shop`: get/patch shop, locations CRUD, staff CRUD + password set (owner)
+- [x] `savdo` CLI: `migrate`, `seed`, `reset-owner-password`
+- [x] Seed: one shop (family clothing shop placeholder), owner, one manager, one cashier, two locations
+- [x] Integration tests with testcontainers: login, role denial, shop isolation
+- [x] Admin web shell: login page, session handling, layout, nav, i18n switcher, staff and locations screens
 
 **Done when:** owner logs in on the admin web, creates a cashier, the cashier logs in
 and is denied `/staff`; `curl` with a bogus token gets `401 UNAUTHENTICATED`; the
@@ -178,3 +178,4 @@ offline mobile mode · bot staff mode · printed receipts · accounting exports.
 | Phase | Closed | Verified by | Deferred |
 | ----- | ------ | ----------- | -------- |
 | 0 — Bootstrap | 2026-09-04 | fresh clone, make dev-infra && make verify exit 0, healthz 200, admin proxy + shell, web SSR "API: ok", Expo Metro boot + Android export, CI run 33800653774 success | On-device mobile screen verified by the owner with Expo Go at acceptance; lucide-react pin to Phase 1; jest-expo (Q-17), brand colour (Q-16), Android package id (Q-18) open |
+| 1 — Core API + admin shell | 2026-09-04 | fresh clone (`f672a8a`), make verify exit 0, isolation tests green (`TestListLocationsIsolation`, `TestListLocationsQueryLevelIsolation`), bogus token → 401 `UNAUTHENTICATED`, owner→cashier→403 flow via the API with the admin's own request shape (`client:"web"` cookie + `X-Requested-With`), cashier sessions revoked on deactivate (401 after `isActive:false`), 409 `field:username` on duplicate staff, cursor paging on `/locations`, admin Vitest 25 tests (12 files) + build green, CI run 33826222743 success | Browser click-through of the admin login/staff screens verified by the owner at acceptance (seeded accounts); Q-19 login abuse horizon and Q-20 nullable PATCH fields open; lucide-react installed; Caddy trusted_proxies and ENV=prod wiring to Phase 8 |
