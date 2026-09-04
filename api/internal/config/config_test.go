@@ -31,6 +31,7 @@ func TestLoad(t *testing.T) {
 				MediaDir:            "../infra/data/media",
 				MediaBaseURL:        "/media",
 				MediaMaxBytes:       10485760,
+				MediaConcurrency:    2,
 			},
 		},
 		{
@@ -51,6 +52,8 @@ func TestLoad(t *testing.T) {
 				"LOGIN_RATE_USER_PER_MIN": "3",
 				"COOKIE_SECURE":           "false",
 				"SHOP_SLUG":               "acme-shop",
+				"MEDIA_DIR":               "/data/media",
+				"MEDIA_CONCURRENCY":       "4",
 			},
 			want: Config{
 				Addr:                ":9090",
@@ -63,11 +66,12 @@ func TestLoad(t *testing.T) {
 				LoginRateUserPerMin: 3,
 				// COOKIE_SECURE explicitly "false" must win over the prod
 				// default of true.
-				CookieSecure:  false,
-				ShopSlug:      "acme-shop",
-				MediaDir:      "../infra/data/media",
-				MediaBaseURL:  "/media",
-				MediaMaxBytes: 10485760,
+				CookieSecure:     false,
+				ShopSlug:         "acme-shop",
+				MediaDir:         "/data/media",
+				MediaBaseURL:     "/media",
+				MediaMaxBytes:    10485760,
+				MediaConcurrency: 4,
 			},
 		},
 		{
@@ -75,6 +79,11 @@ func TestLoad(t *testing.T) {
 			env: map[string]string{
 				"DATABASE_URL": dbURL,
 				"ENV":          "prod",
+				// prod requires an absolute MEDIA_DIR (see the negative
+				// cases below) — set one here so this case can isolate
+				// the CookieSecure-defaulting behavior it's actually
+				// testing.
+				"MEDIA_DIR": "/data/media",
 			},
 			want: Config{
 				Addr:                ":8080",
@@ -87,9 +96,58 @@ func TestLoad(t *testing.T) {
 				LoginRateUserPerMin: 5,
 				CookieSecure:        true,
 				ShopSlug:            "savdo-demo",
-				MediaDir:            "../infra/data/media",
+				MediaDir:            "/data/media",
 				MediaBaseURL:        "/media",
 				MediaMaxBytes:       10485760,
+				MediaConcurrency:    2,
+			},
+		},
+		{
+			// Review A MAJOR 2: a relative MEDIA_DIR in prod would resolve
+			// against whatever directory the process happened to start in,
+			// not necessarily the mounted volume — fail fast, the same way
+			// a missing DATABASE_URL does, rather than silently writing
+			// media to the wrong place. The dev default ("../infra/data/
+			// media") is itself relative, so simply not overriding
+			// MEDIA_DIR is enough to trigger this in prod.
+			name: "prod requires an absolute MEDIA_DIR (default left unset)",
+			env: map[string]string{
+				"DATABASE_URL": dbURL,
+				"ENV":          "prod",
+			},
+			wantErr: true,
+		},
+		{
+			name: "prod rejects an explicit relative MEDIA_DIR",
+			env: map[string]string{
+				"DATABASE_URL": dbURL,
+				"ENV":          "prod",
+				"MEDIA_DIR":    "./data/media",
+			},
+			wantErr: true,
+		},
+		{
+			name: "dev tolerates a relative MEDIA_DIR",
+			env: map[string]string{
+				"DATABASE_URL": dbURL,
+				"ENV":          "dev",
+				"MEDIA_DIR":    "./data/media",
+			},
+			want: Config{
+				Addr:                ":8080",
+				LogLevel:            "info",
+				DatabaseURL:         dbURL,
+				Env:                 "dev",
+				SessionWebTTL:       168 * time.Hour,
+				SessionMobileTTL:    720 * time.Hour,
+				LoginRateIPPerMin:   10,
+				LoginRateUserPerMin: 5,
+				CookieSecure:        false,
+				ShopSlug:            "savdo-demo",
+				MediaDir:            "./data/media",
+				MediaBaseURL:        "/media",
+				MediaMaxBytes:       10485760,
+				MediaConcurrency:    2,
 			},
 		},
 	}
