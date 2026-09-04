@@ -163,7 +163,7 @@ variant_id, location_id, qty)` is a materialized view maintained **in the same
 transaction** by `stock.Service.Move`, with `SELECT … FOR UPDATE` on the level row to
 serialize concurrent sales. A `savdo stock rebuild` CLI recomputes levels from
 movements. Kinds: `purchase_in`, `sale_out`, `sale_void_in`, `return_in`,
-`adjustment`, `transfer_out`, `transfer_in`. Nothing updates `stock_levels` directly. Amended 2026-09-04 (D-41, D-42): a level never goes below zero (`STOCK_INSUFFICIENT`); receiving a purchase sets the variant's `cost_override` to the line's `unit_cost`. Low-stock listing per D-50.
+`adjustment`, `transfer_out`, `transfer_in`. Nothing updates `stock_levels` directly. Amended 2026-09-04 (D-41, D-42): a level never goes below zero (`STOCK_INSUFFICIENT`); receiving a purchase sets the variant's `cost_override` to the line's `unit_cost`. Low-stock listing per D-50. Purchase cancellation reverses with negative `purchase_in` rows (D-51).
 
 ### ADR-007 — Money as `NUMERIC(14,2)` with shop currency
 

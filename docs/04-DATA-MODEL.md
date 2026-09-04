@@ -66,7 +66,7 @@ always reference a variant, never a product.
 `uploaded_by`. Variants (thumb/card/full) derived by key suffix.
 
 **product_images** — `product_id`, `variant_id null`, `media_id`, `sort_order`,
-`is_cover`. Unique `(product_id, media_id)`.
+`is_cover`. Unique `(product_id, media_id)`. At most one cover per product (partial unique index); removing or un-flagging the only cover promotes the next image by `sort_order` (D-51).
 
 ## 3. Stock (`stock`) — correctness-critical
 
@@ -92,7 +92,7 @@ transfer_out|transfer_in`), `qty numeric(12,3)` (signed: positive in, negative o
 
 Receiving a purchase (`draft → received`) writes one `purchase_in` movement per item in
 the same transaction. A received purchase is immutable; cancel writes reversing
-movements.
+movements. (kind `purchase_in`, negative qty, `ref_type = purchase_cancel`, D-51). A cancelled purchase keeps its `total_cost`; purchase reports must filter `status = received`. `line_total` is stored per item but not returned by the API; clients reconcile `totalCost` against the stored rounding (2 dp, half-up).
 
 **idempotency_keys** — `key text`, `request_hash text`, `response_status int`, `response_body jsonb`, `created_at`. PK `(shop_id, key)`. Backs the `Idempotency-Key` header (`05-API.md` § Conventions) for purchase receive and stock adjustments in Phase 3 and sales in Phase 4; a replay with the same key and hash returns the stored response, a different hash returns `409 IDEMPOTENCY_KEY_REUSED`. Rows older than 24 h may be pruned.
 

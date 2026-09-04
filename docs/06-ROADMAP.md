@@ -176,6 +176,8 @@ Debt ledger (nasiya) · barcode scanning in the mobile app · online cart + chec
 Payme/Click · multi-tenant signup and billing · iOS build · loyalty points · SMS OTP ·
 offline mobile mode · bot staff mode · printed receipts · accounting exports.
 
+Engineering debt: Move the `Accept-Language` context helpers out of `catalog` into a small `internal/locale` package so `stock` (and later `sales`) stop importing a sibling domain module · Idempotency helper: run the permission check and request validation before opening the transaction and taking the advisory lock; re-run `auth.Require` on replay · Movement history: add a `createdByName`-style display name to purchase and adjustment audit views; per-row quick actions on the stock levels grid.
+
 ## Phase log
 
 | Phase | Closed | Verified by | Deferred |
