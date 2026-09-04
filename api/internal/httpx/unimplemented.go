@@ -34,9 +34,6 @@ func (notImplementedResponse) write(w http.ResponseWriter) error {
 	return json.NewEncoder(w).Encode(body)
 }
 
-func (r notImplementedResponse) VisitUpdateProductImageResponse(w http.ResponseWriter) error {
-	return r.write(w)
-}
 func (r notImplementedResponse) VisitListSuppliersResponse(w http.ResponseWriter) error {
 	return r.write(w)
 }
@@ -84,12 +81,6 @@ func (r notImplementedResponse) VisitCreateStockTransferResponse(w http.Response
 }
 func (r notImplementedResponse) VisitListLowStockResponse(w http.ResponseWriter) error {
 	return r.write(w)
-}
-
-// UpdateProductImage retags an image's variant and/or cover status.
-// Phase 3 T1: replaced once the media module's handler lands.
-func (server) UpdateProductImage(_ context.Context, _ gen.UpdateProductImageRequestObject) (gen.UpdateProductImageResponseObject, error) {
-	return notImplementedResponse{}, nil
 }
 
 // ListSuppliers lists the shop's suppliers.

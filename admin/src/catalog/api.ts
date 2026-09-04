@@ -22,6 +22,7 @@ export type VariantPatch = components["schemas"]["VariantPatch"];
 export type MediaFile = components["schemas"]["MediaFile"];
 export type ProductImage = components["schemas"]["ProductImage"];
 export type ProductImageCreate = components["schemas"]["ProductImageCreate"];
+export type ProductImagePatch = components["schemas"]["ProductImagePatch"];
 export type ProductImageOrder = components["schemas"]["ProductImageOrder"];
 
 /** Matches every other collection endpoint's default (`docs/05-API.md` §
@@ -268,6 +269,25 @@ export async function addProductImage(
 ): Promise<ProductImage> {
   const { data, error } = await api.POST("/products/{id}/images", {
     params: { path: { id: productId } },
+    body,
+  });
+  if (error) {
+    throw new ApiError(error);
+  }
+  return data;
+}
+
+/** `PATCH /products/{id}/images/{imageId}` — requires `catalog.write`
+ * (D-43). Partial update: `variantId` is nullable (D-35) — pass `null` to
+ * untie the image from its variant, omit the field to leave it unchanged;
+ * `isCover` omitted also leaves it unchanged. */
+export async function updateProductImage(
+  productId: string,
+  imageId: string,
+  body: ProductImagePatch,
+): Promise<ProductImage> {
+  const { data, error } = await api.PATCH("/products/{id}/images/{imageId}", {
+    params: { path: { id: productId, imageId } },
     body,
   });
   if (error) {

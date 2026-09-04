@@ -240,3 +240,54 @@ func (q *Queries) UpdateImageOrder(ctx context.Context, arg UpdateImageOrderPara
 	_, err := q.db.Exec(ctx, updateImageOrder, arg.ShopID, arg.ID, arg.SortOrder)
 	return err
 }
+
+const updateProductImage = `-- name: UpdateProductImage :one
+UPDATE product_images
+SET
+    variant_id = CASE WHEN $1::bool THEN NULL ELSE COALESCE($2, variant_id) END,
+    is_cover = COALESCE($3, is_cover),
+    updated_at = now()
+WHERE shop_id = $4 AND id = $5
+RETURNING id, shop_id, product_id, variant_id, media_id, sort_order, is_cover, created_at, updated_at
+`
+
+type UpdateProductImageParams struct {
+	ClearVariant bool       `json:"clear_variant"`
+	VariantID    *uuid.UUID `json:"variant_id"`
+	IsCover      *bool      `json:"is_cover"`
+	ShopID       uuid.UUID  `json:"shop_id"`
+	ID           uuid.UUID  `json:"id"`
+}
+
+// ProductImagePatch (D-43): patch with an explicit clear flag for
+// variant_id (COALESCE cannot express "set to NULL"), same pattern as
+// UpdateCategory/UpdateProduct/UpdateVariant. is_cover is a plain
+// optional: when the caller sets it true, the service runs ClearCover
+// first in the same transaction so this statement's is_cover = true never
+// collides with product_images_one_cover_key; when false, this statement
+// clears only this row's flag — the service promotes a replacement cover
+// separately (SetCover on another row) when this was the product's only
+// cover, same as RemoveProductImage. RETURNING * so the handler builds its
+// response from the row as committed, not a pre-transaction snapshot.
+func (q *Queries) UpdateProductImage(ctx context.Context, arg UpdateProductImageParams) (ProductImage, error) {
+	row := q.db.QueryRow(ctx, updateProductImage,
+		arg.ClearVariant,
+		arg.VariantID,
+		arg.IsCover,
+		arg.ShopID,
+		arg.ID,
+	)
+	var i ProductImage
+	err := row.Scan(
+		&i.ID,
+		&i.ShopID,
+		&i.ProductID,
+		&i.VariantID,
+		&i.MediaID,
+		&i.SortOrder,
+		&i.IsCover,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
