@@ -4,9 +4,11 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { App as AntApp, ConfigProvider } from "antd";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+const { mockNavigate } = vi.hoisted(() => ({ mockNavigate: vi.fn() }));
+
 vi.mock("@tanstack/react-router", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@tanstack/react-router")>();
-  return { ...actual, useNavigate: () => vi.fn() };
+  return { ...actual, useNavigate: () => mockNavigate };
 });
 
 vi.mock("../../../lib/api", () => ({
@@ -99,6 +101,7 @@ describe("ProductFormPage", () => {
     mockedApi.GET.mockReset();
     mockedApi.POST.mockReset();
     mockedApi.PATCH.mockReset();
+    mockNavigate.mockReset();
   });
 
   afterEach(() => {
@@ -135,9 +138,10 @@ describe("ProductFormPage", () => {
 
     renderForm(undefined);
 
-    // The "uz" locale tab is active by default (shop default locale, first
-    // in `locales`) — its name field is required and already mounted.
-    fireEvent.change(await screen.findByLabelText("Name"), {
+    // D-38: all three locales' name fields render together, labelled with
+    // the language — "uz" is the shop default locale, so only its name is
+    // required.
+    fireEvent.change(await screen.findByLabelText("Name (Oʻzbekcha)"), {
       target: { value: "T-Shirt" },
     });
 
@@ -236,7 +240,7 @@ describe("ProductFormPage", () => {
 
     renderForm(undefined);
 
-    fireEvent.change(await screen.findByLabelText("Name"), {
+    fireEvent.change(await screen.findByLabelText("Name (Oʻzbekcha)"), {
       target: { value: "T-Shirt" },
     });
     fireEvent.mouseDown(screen.getByLabelText("Unit"));
@@ -269,7 +273,7 @@ describe("ProductFormPage", () => {
 
     renderForm(undefined);
 
-    fireEvent.change(await screen.findByLabelText("Name"), {
+    fireEvent.change(await screen.findByLabelText("Name (Oʻzbekcha)"), {
       target: { value: "T-Shirt" },
     });
     fireEvent.mouseDown(screen.getByLabelText("Unit"));
@@ -333,5 +337,64 @@ describe("ProductFormPage", () => {
 
     expect(await screen.findByText("Generate variants")).toBeTruthy();
     expect(screen.getByText("Images")).toBeTruthy();
+  });
+
+  // D-39: breadcrumb + back arrow on the edit and create pages, both
+  // navigating to the product list route.
+  it("shows a Products › <product name> breadcrumb and navigates back to the list", async () => {
+    const existing: Product = {
+      id: "p1",
+      categoryId: null,
+      slug: "existing-product",
+      sku: null,
+      unitId: "unit1",
+      basePrice: "10000.00",
+      promoPrice: null,
+      promoFrom: null,
+      promoTo: null,
+      isActive: true,
+      isFeatured: false,
+      name: "Existing product",
+      description: null,
+      locale: "uz",
+      translationFallback: false,
+      translations: { uz: { name: "Existing product" } },
+    };
+    mockGetByPath({
+      "/categories": { items: [] },
+      "/units": { items: [unit()] },
+      "/products/{id}": existing,
+    });
+
+    renderForm("p1");
+
+    expect(await screen.findByText("Existing product")).toBeTruthy();
+
+    // The "Products" crumb must render as a link (an `href`, review MINOR)
+    // so it's Tab-reachable and Enter-activatable, not a plain `<span>`.
+    const productsCrumb = screen.getByRole("link", { name: "Products" });
+    fireEvent.click(productsCrumb);
+    expect(mockNavigate).toHaveBeenCalledWith({ to: "/products" });
+
+    mockNavigate.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+
+    expect(mockNavigate).toHaveBeenCalledWith({ to: "/products" });
+  });
+
+  it("shows a Products › New product breadcrumb in create mode", async () => {
+    mockGetByPath({
+      "/categories": { items: [] },
+      "/units": { items: [unit()] },
+    });
+
+    renderForm(undefined);
+
+    expect(await screen.findByText("New product")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Products" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+
+    expect(mockNavigate).toHaveBeenCalledWith({ to: "/products" });
   });
 });

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
   App,
+  Breadcrumb,
   Button,
   Card,
   DatePicker,
@@ -11,12 +12,14 @@ import {
   InputNumber,
   Select,
   Skeleton,
+  Space,
   Switch,
   Tabs,
   TreeSelect,
 } from "antd";
 import type { Dayjs } from "dayjs";
 import dayjs from "dayjs";
+import { ArrowLeft } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { useAuth } from "../../auth/AuthContext";
@@ -54,10 +57,12 @@ interface ProductFormValues {
 }
 
 /** Shared by `productNewRoute` (`productId` undefined) and `productEditRoute`
- * (`productId` set). General/Prices/Variants tabs, translation tabs nested
- * inside General (T6a spec). The Variants tab is disabled in create mode —
- * variants and images both hang off a product id, so it only renders
- * `VariantsImagesTab` once the product exists (T6b spec). */
+ * (`productId` set). General/Prices/Variants tabs; the General tab shows all
+ * three locales' name and description fields together, each labelled with
+ * its language, rather than behind nested per-locale tabs (D-38). The
+ * Variants tab is disabled in create mode — variants and images both hang
+ * off a product id, so it only renders `VariantsImagesTab` once the product
+ * exists (T6b spec). */
 export function ProductFormPage({ productId }: { productId?: string }) {
   const { t } = useTranslation();
   const { notification } = App.useApp();
@@ -247,9 +252,40 @@ export function ProductFormPage({ productId }: { productId?: string }) {
     editMutation.mutate(patch);
   }
 
+  // "Products › <product name>" (create: "Products › New product"), plus a
+  // back arrow to the list — both navigate to `productsRoute` (D-39). While
+  // an existing product is still loading, the crumb falls back to the
+  // generic edit title rather than waiting on `product.name`.
+  const breadcrumbLabel = isEdit
+    ? (product?.name ?? t("catalog.products.editTitle"))
+    : t("catalog.products.createTitle");
+  const header = (
+    <Space>
+      <Button
+        type="text"
+        aria-label={t("common.back")}
+        icon={<ArrowLeft size={16} />}
+        onClick={() => navigate({ to: "/products" })}
+      />
+      <Breadcrumb
+        items={[
+          {
+            title: t("catalog.products.title"),
+            href: "/products",
+            onClick: (event) => {
+              event.preventDefault();
+              navigate({ to: "/products" });
+            },
+          },
+          { title: breadcrumbLabel },
+        ]}
+      />
+    </Space>
+  );
+
   if (isEdit && productPending) {
     return (
-      <Card title={t("catalog.products.editTitle")}>
+      <Card title={header}>
         <Skeleton active />
       </Card>
     );
@@ -259,7 +295,7 @@ export function ProductFormPage({ productId }: { productId?: string }) {
 
   return (
     <Card
-      title={isEdit ? t("catalog.products.editTitle") : t("catalog.products.createTitle")}
+      title={header}
       extra={
         <Button type="primary" loading={saving} onClick={() => form.submit()}>
           {t("common.save")}
@@ -279,29 +315,31 @@ export function ProductFormPage({ productId }: { productId?: string }) {
               label: t("catalog.products.tabs.general"),
               children: (
                 <>
-                  <Tabs
-                    items={locales.map((locale) => ({
-                      key: locale,
-                      label: t(`lang.${locale}`),
-                      children: (
-                        <>
-                          <Form.Item
-                            name={["translations", locale, "name"]}
-                            label={t("catalog.products.fields.name")}
-                            rules={[{ required: locale === me.shop.defaultLocale }]}
-                          >
-                            <Input />
-                          </Form.Item>
-                          <Form.Item
-                            name={["translations", locale, "description"]}
-                            label={t("catalog.products.fields.description")}
-                          >
-                            <Input.TextArea rows={3} />
-                          </Form.Item>
-                        </>
-                      ),
-                    }))}
-                  />
+                  {locales.map((locale) => (
+                    <Form.Item
+                      key={`name-${locale}`}
+                      name={["translations", locale, "name"]}
+                      label={t("common.fieldWithLang", {
+                        field: t("catalog.products.fields.name"),
+                        lang: t(`lang.${locale}`),
+                      })}
+                      rules={[{ required: locale === me.shop.defaultLocale }]}
+                    >
+                      <Input />
+                    </Form.Item>
+                  ))}
+                  {locales.map((locale) => (
+                    <Form.Item
+                      key={`description-${locale}`}
+                      name={["translations", locale, "description"]}
+                      label={t("common.fieldWithLang", {
+                        field: t("catalog.products.fields.description"),
+                        lang: t(`lang.${locale}`),
+                      })}
+                    >
+                      <Input.TextArea rows={3} />
+                    </Form.Item>
+                  ))}
                   <Form.Item name="categoryId" label={t("catalog.products.fields.category")}>
                     <TreeSelect allowClear treeData={categoryOptions} treeDefaultExpandAll />
                   </Form.Item>

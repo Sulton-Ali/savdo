@@ -12,7 +12,9 @@
     "retry": "Повторить",
     "loadMore": "Загрузить ещё",
     "search": "Поиск",
-    "showInactive": "Показать неактивные"
+    "showInactive": "Показать неактивные",
+    "fieldWithLang": "{{field}} ({{lang}})",
+    "back": "Назад"
   },
   "errors": {
     "serviceUnavailable": "Сервис недоступен. Попробуйте снова.",

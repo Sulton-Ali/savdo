@@ -12,7 +12,9 @@
     "retry": "Qayta urinish",
     "loadMore": "Yana yuklash",
     "search": "Qidiruv",
-    "showInactive": "Nofaollarni ko‘rsatish"
+    "showInactive": "Nofaollarni ko‘rsatish",
+    "fieldWithLang": "{{field}} ({{lang}})",
+    "back": "Orqaga"
   },
   "errors": {
     "serviceUnavailable": "Xizmat vaqtincha ishlamayapti. Qayta urinib ko‘ring.",
