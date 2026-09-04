@@ -279,7 +279,10 @@ func runStockRebuild(args []string) error {
 	fs := flag.NewFlagSet("stock rebuild", flag.ContinueOnError)
 	shopSlug := fs.String("shop-slug", "", "shop slug to rebuild stock levels for (required)")
 	fs.Usage = func() {
-		fmt.Fprintln(fs.Output(), `usage: savdo stock rebuild --shop-slug <slug>
+		// Best-effort: this is help text on the way to a non-zero exit
+		// either way, so a write failure here has nothing useful to do
+		// with the error other than be silenced explicitly (errcheck).
+		_, _ = fmt.Fprintln(fs.Output(), `usage: savdo stock rebuild --shop-slug <slug>
 
 Recomputes stock_levels for one shop from the append-only stock_movements
 ledger (ADR-006): truncates the shop's levels and rebuilds them from the

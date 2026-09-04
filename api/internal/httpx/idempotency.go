@@ -121,7 +121,7 @@ func ValidateIdempotencyKey(key string) error {
 // blocks in pg_advisory_xact_lock until the first call's transaction ends,
 // then finds the row the first call inserted and replays it (or 409s on a
 // hash mismatch) — so fn runs at most once per key, never twice.
-func Idempotent(ctx context.Context, pool *pgxpool.Pool, shopID, actorID uuid.UUID, key, requestHash string, fn func(qtx *db.Queries) (status int, body []byte, err error)) (int, []byte, error) {
+func Idempotent(ctx context.Context, pool *pgxpool.Pool, shopID uuid.UUID, key, requestHash string, fn func(qtx *db.Queries) (status int, body []byte, err error)) (int, []byte, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return 0, nil, fmt.Errorf("httpx: idempotent: begin tx: %w", err)
@@ -177,7 +177,7 @@ func Idempotent(ctx context.Context, pool *pgxpool.Pool, shopID, actorID uuid.UU
 
 	if _, err := qtx.InsertIdempotencyKey(ctx, db.InsertIdempotencyKeyParams{
 		ShopID: shopID, Key: key, RequestHash: requestHash,
-		ResponseStatus: int32(status), ResponseBody: body,
+		ResponseStatus: int32HTTPStatus(status), ResponseBody: body,
 	}); err != nil {
 		return 0, nil, fmt.Errorf("httpx: idempotent: store response: %w", err)
 	}
@@ -186,6 +186,21 @@ func Idempotent(ctx context.Context, pool *pgxpool.Pool, shopID, actorID uuid.UU
 	}
 	committed = true
 	return status, body, nil
+}
+
+// int32HTTPStatus bounds status to the range an HTTP status code can
+// occupy (100-599, RFC 9110 § 15) before the narrowing conversion
+// idempotency_keys.response_status (int32) needs. Every caller today
+// passes a canned http.StatusXxx constant (stock.go's fn literal), so
+// this never actually clamps in practice — but gosec (G115) has no way to
+// see that statically, so the bound is enforced here, explicitly, rather
+// than silenced with a //nolint. Out-of-range clamps to 500: storing a
+// nonsense status would only surface later as a broken replay.
+func int32HTTPStatus(status int) int32 {
+	if status < 100 || status > 599 {
+		return http.StatusInternalServerError
+	}
+	return int32(status)
 }
 
 // rawJSONResponse writes a pre-serialized JSON body and status code

@@ -133,7 +133,12 @@ func lowCursorPtr(variantID uuid.UUID) *uuid.UUID {
 // when a limit+1'th row proved more data exists. Mirrors catalog.paginateT,
 // specialized to ListLevelsRow's (variant_id, location_id) key.
 func paginateLevels(rows []db.ListLevelsRow, limit int32) ([]db.ListLevelsRow, *string) {
-	if int32(len(rows)) <= limit {
+	// Compare in int (widening limit, never narrowing len(rows)) — mirrors
+	// catalog.paginateT/movements.go's own paginateMovements; avoids a
+	// len(rows)->int32 narrowing conversion gosec (G115) flags on
+	// principle even though a page can never realistically hold anywhere
+	// near math.MaxInt32 rows.
+	if len(rows) <= int(limit) {
 		return rows, nil
 	}
 	items := rows[:limit]
@@ -144,7 +149,12 @@ func paginateLevels(rows []db.ListLevelsRow, limit int32) ([]db.ListLevelsRow, *
 
 // paginateLow is paginateLevels for ListLow's single-column key.
 func paginateLow(rows []db.ListLowRow, limit int32) ([]db.ListLowRow, *string) {
-	if int32(len(rows)) <= limit {
+	// Compare in int (widening limit, never narrowing len(rows)) — mirrors
+	// catalog.paginateT/movements.go's own paginateMovements; avoids a
+	// len(rows)->int32 narrowing conversion gosec (G115) flags on
+	// principle even though a page can never realistically hold anywhere
+	// near math.MaxInt32 rows.
+	if len(rows) <= int(limit) {
 		return rows, nil
 	}
 	items := rows[:limit]

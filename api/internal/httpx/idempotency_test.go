@@ -58,7 +58,6 @@ func TestIdempotent_emptyKeyRunsDirectlyEveryTime(t *testing.T) {
 	testdb.Truncate(t, pool)
 	ctx := context.Background()
 	shopID := idempotencyTestShop(ctx, t, pool, "idem-empty-key")
-	actorID := uuid.New()
 
 	var calls int
 	fn := noopFn(func() (int, []byte, error) {
@@ -67,7 +66,7 @@ func TestIdempotent_emptyKeyRunsDirectlyEveryTime(t *testing.T) {
 	})
 
 	for i := 0; i < 3; i++ {
-		status, body, err := Idempotent(ctx, pool, shopID, actorID, "", "hash", fn)
+		status, body, err := Idempotent(ctx, pool, shopID, "", "hash", fn)
 		if err != nil {
 			t.Fatalf("Idempotent (call %d): %v", i, err)
 		}
@@ -85,7 +84,6 @@ func TestIdempotent_replaySameHashReturnsStoredResponseWithoutRerunningFn(t *tes
 	testdb.Truncate(t, pool)
 	ctx := context.Background()
 	shopID := idempotencyTestShop(ctx, t, pool, "idem-replay")
-	actorID := uuid.New()
 
 	var calls int
 	fn := noopFn(func() (int, []byte, error) {
@@ -93,11 +91,11 @@ func TestIdempotent_replaySameHashReturnsStoredResponseWithoutRerunningFn(t *tes
 		return http.StatusCreated, []byte(`{"n":1}`), nil
 	})
 
-	status1, body1, err := Idempotent(ctx, pool, shopID, actorID, "key-1", "hash-a", fn)
+	status1, body1, err := Idempotent(ctx, pool, shopID, "key-1", "hash-a", fn)
 	if err != nil {
 		t.Fatalf("first call: %v", err)
 	}
-	status2, body2, err := Idempotent(ctx, pool, shopID, actorID, "key-1", "hash-a", fn)
+	status2, body2, err := Idempotent(ctx, pool, shopID, "key-1", "hash-a", fn)
 	if err != nil {
 		t.Fatalf("replay call: %v", err)
 	}
@@ -118,7 +116,6 @@ func TestIdempotent_sameKeyDifferentHashReturns409WithoutRerunningFn(t *testing.
 	testdb.Truncate(t, pool)
 	ctx := context.Background()
 	shopID := idempotencyTestShop(ctx, t, pool, "idem-reuse")
-	actorID := uuid.New()
 
 	var calls int
 	fn := noopFn(func() (int, []byte, error) {
@@ -126,11 +123,11 @@ func TestIdempotent_sameKeyDifferentHashReturns409WithoutRerunningFn(t *testing.
 		return http.StatusCreated, []byte(`{"n":1}`), nil
 	})
 
-	if _, _, err := Idempotent(ctx, pool, shopID, actorID, "key-1", "hash-a", fn); err != nil {
+	if _, _, err := Idempotent(ctx, pool, shopID, "key-1", "hash-a", fn); err != nil {
 		t.Fatalf("first call: %v", err)
 	}
 
-	_, _, err := Idempotent(ctx, pool, shopID, actorID, "key-1", "hash-b", fn)
+	_, _, err := Idempotent(ctx, pool, shopID, "key-1", "hash-b", fn)
 	if err == nil {
 		t.Fatal("want an error for a reused key with a different hash, got none")
 	}
@@ -155,7 +152,6 @@ func TestIdempotent_errorIsNotStoredAndCanBeRetried(t *testing.T) {
 	testdb.Truncate(t, pool)
 	ctx := context.Background()
 	shopID := idempotencyTestShop(ctx, t, pool, "idem-error-retry")
-	actorID := uuid.New()
 
 	wantErr := errors.New("boom")
 	var calls int
@@ -167,12 +163,12 @@ func TestIdempotent_errorIsNotStoredAndCanBeRetried(t *testing.T) {
 		return http.StatusCreated, []byte(`{"n":2}`), nil
 	})
 
-	_, _, err := Idempotent(ctx, pool, shopID, actorID, "key-1", "hash-a", failThenSucceed)
+	_, _, err := Idempotent(ctx, pool, shopID, "key-1", "hash-a", failThenSucceed)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("first call error = %v, want %v", err, wantErr)
 	}
 
-	status, body, err := Idempotent(ctx, pool, shopID, actorID, "key-1", "hash-a", failThenSucceed)
+	status, body, err := Idempotent(ctx, pool, shopID, "key-1", "hash-a", failThenSucceed)
 	if err != nil {
 		t.Fatalf("retry call: %v", err)
 	}
@@ -196,7 +192,6 @@ func TestIdempotent_failureAfterDomainWriteRollsBackEverything(t *testing.T) {
 	testdb.Truncate(t, pool)
 	ctx := context.Background()
 	shopID := idempotencyTestShop(ctx, t, pool, "idem-write-then-fail")
-	actorID := uuid.New()
 	sideKey := "side-effect-key"
 
 	wantErr := errors.New("boom after write")
@@ -211,7 +206,7 @@ func TestIdempotent_failureAfterDomainWriteRollsBackEverything(t *testing.T) {
 		return 0, nil, wantErr
 	}
 
-	_, _, err := Idempotent(ctx, pool, shopID, actorID, "outer-key", "outer-hash", fn)
+	_, _, err := Idempotent(ctx, pool, shopID, "outer-key", "outer-hash", fn)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("Idempotent error = %v, want %v", err, wantErr)
 	}
@@ -234,7 +229,6 @@ func TestIdempotent_concurrentSameKeyRunsFnExactlyOnce(t *testing.T) {
 	testdb.Truncate(t, pool)
 	ctx := context.Background()
 	shopID := idempotencyTestShop(ctx, t, pool, "idem-race")
-	actorID := uuid.New()
 
 	var calls int32
 	fn := noopFn(func() (int, []byte, error) {
@@ -261,7 +255,7 @@ func TestIdempotent_concurrentSameKeyRunsFnExactlyOnce(t *testing.T) {
 	for i := 0; i < n; i++ {
 		go func(i int) {
 			defer wg.Done()
-			status, body, err := Idempotent(ctx, pool, shopID, actorID, "race-key", "race-hash", fn)
+			status, body, err := Idempotent(ctx, pool, shopID, "race-key", "race-hash", fn)
 			results[i] = struct {
 				status int
 				body   string

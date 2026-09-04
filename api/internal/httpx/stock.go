@@ -84,7 +84,7 @@ func (s server) CreateStockAdjustment(ctx context.Context, req gen.CreateStockAd
 		return nil, err
 	}
 
-	status, body, err := Idempotent(ctx, s.pool, authCtx.ShopID, authCtx.UserID, key, hash, func(qtx *db.Queries) (int, []byte, error) {
+	status, body, err := Idempotent(ctx, s.pool, authCtx.ShopID, key, hash, func(qtx *db.Queries) (int, []byte, error) {
 		mv, err := s.stock.CreateAdjustmentTx(ctx, qtx, *req.Body)
 		if err != nil {
 			return 0, nil, err
