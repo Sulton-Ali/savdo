@@ -1,5 +1,6 @@
 // Command savdo is the admin CLI: database migrations, seeding the demo
-// shop (D-30) and resetting the owner's password from the server (D-28).
+// shop (D-30), resetting the owner's password from the server (D-28) and
+// rebuilding stock_levels from the stock_movements ledger (ADR-006).
 package main
 
 import (
@@ -23,6 +24,7 @@ import (
 	apidb "github.com/Sulton-Ali/savdo/api/internal/db"
 	"github.com/Sulton-Ali/savdo/api/internal/media"
 	"github.com/Sulton-Ali/savdo/api/internal/seed"
+	"github.com/Sulton-Ali/savdo/api/internal/stock"
 )
 
 const migrationsDir = "migrations"
@@ -36,7 +38,7 @@ func main() {
 
 func run(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: savdo <migrate|seed|reset-owner-password>")
+		return fmt.Errorf("usage: savdo <migrate|seed|reset-owner-password|stock>")
 	}
 
 	switch args[0] {
@@ -46,6 +48,8 @@ func run(args []string) error {
 		return runSeed(args[1:])
 	case "reset-owner-password":
 		return runResetOwnerPassword(args[1:])
+	case "stock":
+		return runStock(args[1:])
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
@@ -245,6 +249,68 @@ func runResetOwnerPassword(args []string) error {
 	}
 
 	fmt.Printf("owner password updated, %d sessions revoked\n", result.RevokedSessions)
+	return nil
+}
+
+// runStock dispatches `savdo stock <subcommand>`. Only `rebuild` exists
+// today; the extra dispatch level (rather than a flat `stock-rebuild`
+// alongside `migrate`/`seed`/`reset-owner-password`) leaves room for a
+// later stock subcommand without renaming this one.
+func runStock(args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("usage: savdo stock <rebuild>")
+	}
+	switch args[0] {
+	case "rebuild":
+		return runStockRebuild(args[1:])
+	default:
+		return fmt.Errorf("unknown stock command %q", args[0])
+	}
+}
+
+// runStockRebuild recomputes one shop's stock_levels from stock_movements
+// (ADR-006, stock.Rebuild) and prints the resulting counts.
+func runStockRebuild(args []string) error {
+	fs := flag.NewFlagSet("stock rebuild", flag.ContinueOnError)
+	shopSlug := fs.String("shop", seed.DefaultShopSlug, "shop slug to rebuild stock levels for")
+	fs.Usage = func() {
+		fmt.Fprintln(fs.Output(), `usage: savdo stock rebuild [--shop <slug>]
+
+Recomputes stock_levels for one shop from the append-only stock_movements
+ledger (ADR-006): truncates the shop's levels and rebuilds them from the
+ledger, inside one transaction guarded by a per-shop advisory lock (so two
+concurrent rebuilds of the same shop serialize rather than race each
+other). This does not pause other writers: run it only when nothing is
+actively creating stock movements for the shop (no purchase receive,
+adjustment, transfer or sale in flight) — a concurrent stock.Service.Move
+takes no part in the rebuild's lock and could otherwise be summed
+mid-write or have its effect overwritten by a rebuild that started before
+it committed.`)
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	dsn, err := databaseURL()
+	if err != nil {
+		return err
+	}
+
+	ctx := context.Background()
+	pool, err := openPool(ctx, dsn)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+
+	result, err := stock.Rebuild(ctx, pool, *shopSlug)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("stock rebuild: shop %q: %d stock_levels rows rebuilt from %d stock_movements rows\n",
+		*shopSlug, result.Levels, result.Movements)
 	return nil
 }
 
