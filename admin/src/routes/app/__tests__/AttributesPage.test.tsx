@@ -39,6 +39,7 @@ function buildMe(): Me {
       defaultLocale: "uz",
       allowNegativeStock: false,
       updateCostOnPurchase: true,
+      lowStockThreshold: 2,
     },
     permissions: ["catalog.write"],
   };

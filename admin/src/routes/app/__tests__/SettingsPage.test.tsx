@@ -29,6 +29,7 @@ const shop = {
   defaultLocale: "uz" as const,
   allowNegativeStock: false,
   updateCostOnPurchase: true,
+  lowStockThreshold: 2,
 };
 
 /**

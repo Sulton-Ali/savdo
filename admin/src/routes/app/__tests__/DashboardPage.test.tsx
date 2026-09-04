@@ -36,6 +36,7 @@ const me: Me = {
     defaultLocale: "en",
     allowNegativeStock: false,
     updateCostOnPurchase: true,
+    lowStockThreshold: 2,
   },
   permissions: [],
 };
