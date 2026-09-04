@@ -198,7 +198,66 @@
         "sortOrder": "Sort order"
       }
     },
-    "variantsPlaceholder": "Variants and images are managed on the next tab, coming in a later update.",
+    "variants": {
+      "title": "Variants",
+      "saveFirst": "Save the product first to manage its variants and images.",
+      "matrix": {
+        "title": "Generate variants",
+        "attribute": "Attribute",
+        "values": "Values",
+        "valuesPlaceholder": "Type a value and press Enter",
+        "preview": "Combinations to create",
+        "noNew": "Every combination already has a variant.",
+        "generate": "Create {{count}} variants",
+        "created": "{{count}} variant(s) created.",
+        "partial": "Created {{created}} of {{total}} before an error stopped the rest."
+      },
+      "columns": {
+        "sku": "SKU",
+        "barcode": "Barcode",
+        "priceOverride": "Price override",
+        "costOverride": "Cost override",
+        "active": "Active"
+      },
+      "edit": "Edit variant",
+      "fields": {
+        "sku": "SKU",
+        "barcode": "Barcode",
+        "priceOverride": "Price override",
+        "costOverride": "Cost override",
+        "isActive": "Active"
+      },
+      "delete": "Delete",
+      "confirmDelete": "Delete this variant?",
+      "deleteOnly": "A product must always keep at least one variant.",
+      "saved": "Variant saved."
+    },
+    "images": {
+      "title": "Images",
+      "upload": "Upload image",
+      "uploadHint": "JPEG, PNG or WebP, up to 10 MB. Up to 8 images per product.",
+      "capReached": "This product already has the maximum of 8 images.",
+      "cover": "Cover",
+      "setCover": "Set as cover",
+      "moveUp": "Move up",
+      "moveDown": "Move down",
+      "remove": "Remove",
+      "confirmRemove": "Remove this image?",
+      "variantTag": "Variant",
+      "noVariant": "All variants",
+      "invalidType": "Unsupported image format.",
+      "tooLarge": "Image is larger than 10 MB.",
+      "alreadyAttached": "This image is already attached to this product.",
+      "uploaded": "Image uploaded.",
+      "crop": {
+        "title": "Crop image",
+        "apply": "Apply",
+        "cancel": "Cancel",
+        "free": "Free",
+        "square": "1:1",
+        "portrait": "4:5"
+      }
+    },
     "errors": {
       "categoryHasProducts": "This category still has products and can't be deleted."
     }
