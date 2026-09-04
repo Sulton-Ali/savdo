@@ -15,6 +15,10 @@ export type Product = components["schemas"]["Product"];
 export type ProductCreate = components["schemas"]["ProductCreate"];
 export type ProductPatch = components["schemas"]["ProductPatch"];
 export type Translations = components["schemas"]["Translations"];
+export type AttributeValues = components["schemas"]["AttributeValues"];
+export type Variant = components["schemas"]["Variant"];
+export type VariantCreate = components["schemas"]["VariantCreate"];
+export type VariantPatch = components["schemas"]["VariantPatch"];
 
 /** Matches every other collection endpoint's default (`docs/05-API.md` §
  * Conventions). */
@@ -176,4 +180,52 @@ export async function updateProduct(id: string, body: ProductPatch): Promise<Pro
     throw new ApiError(error);
   }
   return data;
+}
+
+/** `GET /products/{id}/variants` — not cursor-paginated (a product's
+ * variants are always few). */
+export async function fetchVariants(productId: string): Promise<Variant[]> {
+  const { data, error } = await api.GET("/products/{id}/variants", {
+    params: { path: { id: productId } },
+  });
+  if (error) {
+    throw new ApiError(error);
+  }
+  return data.items;
+}
+
+/** `POST /products/{id}/variants` — requires `catalog.write`. */
+export async function createVariant(productId: string, body: VariantCreate): Promise<Variant> {
+  const { data, error } = await api.POST("/products/{id}/variants", {
+    params: { path: { id: productId } },
+    body,
+  });
+  if (error) {
+    throw new ApiError(error);
+  }
+  return data;
+}
+
+/** `PATCH /variants/{id}` — requires `catalog.write`. Partial update; `null`
+ * clears `priceOverride`/`costOverride` (D-35). */
+export async function updateVariant(id: string, body: VariantPatch): Promise<Variant> {
+  const { data, error } = await api.PATCH("/variants/{id}", {
+    params: { path: { id } },
+    body,
+  });
+  if (error) {
+    throw new ApiError(error);
+  }
+  return data;
+}
+
+/** `DELETE /variants/{id}` — requires `catalog.write`. `400
+ * fields.variantId: invalid` when this is the product's only variant. */
+export async function deleteVariant(id: string): Promise<void> {
+  const { error } = await api.DELETE("/variants/{id}", {
+    params: { path: { id } },
+  });
+  if (error) {
+    throw new ApiError(error);
+  }
 }
