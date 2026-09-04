@@ -14,6 +14,7 @@ import {
   Skeleton,
   Space,
   Table,
+  Typography,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { ArrowLeft } from "lucide-react";
@@ -49,13 +50,17 @@ interface PurchaseMainFormValues {
 }
 
 /** One row of the items editor, staged client-side. `productName`/
- * `variantLabel` are display-only, resolved from the product/variant
- * search — the wire shape (`PurchaseItemCreate`) only ever carries
- * `variantId`/`qty`/`unitCost`. */
+ * `variantLabel`/`sku` are display-only — the wire shape
+ * (`PurchaseItemCreate`) only ever carries `variantId`/`qty`/`unitCost`. For
+ * a purchase loaded from the server they come straight off `PurchaseItem`
+ * (read-only fields added alongside T4's purchases endpoints); for an item
+ * added in this session, before the purchase is saved, they come from the
+ * product/variant search instead. */
 interface ItemRow {
   variantId: string;
   productName: string;
   variantLabel: string;
+  sku: string | null;
   qty: number;
   unitCost: number;
 }
@@ -113,10 +118,11 @@ export function PurchaseFormPage({ purchaseId }: { purchaseId?: string }) {
   const editable = !isEdit || purchase?.status === "draft";
 
   // Display labels for a variantId, resolved as the user searches products
-  // to add an item. The API has no endpoint to resolve an arbitrary
-  // variantId back to its product/variant (`PurchaseItem` only carries
-  // `variantId`) — an existing purchase's already-saved items fall back to
-  // a short id until the same variant is searched again in this session.
+  // to add an item in this session. `PurchaseItem` itself now carries
+  // read-only `productName`/`variantLabel`/`sku` (T4), so this cache only
+  // ever matters for an item added this session that isn't in the server's
+  // `purchase.items` yet (e.g. before the first save) — it's a fallback,
+  // not the primary source.
   const [resolvedLabels, setResolvedLabels] = useState<
     Record<string, { productName: string; variantLabel: string }>
   >({});
@@ -131,9 +137,11 @@ export function PurchaseFormPage({ purchaseId }: { purchaseId?: string }) {
       purchase.items.map((item) => ({
         variantId: item.variantId,
         productName:
-          resolvedLabels[item.variantId]?.productName ??
+          item.productName ||
+          resolvedLabels[item.variantId]?.productName ||
           t("purchases.form.items.unresolvedVariant", { id: item.variantId.slice(0, 8) }),
-        variantLabel: resolvedLabels[item.variantId]?.variantLabel ?? "—",
+        variantLabel: item.variantLabel || resolvedLabels[item.variantId]?.variantLabel || "—",
+        sku: item.sku,
         qty: parseQty(item.qty),
         unitCost: parseMoney(item.unitCost) ?? 0,
       })),
@@ -195,6 +203,7 @@ export function PurchaseFormPage({ purchaseId }: { purchaseId?: string }) {
         variantId: variant.id,
         productName: product.name,
         variantLabel: label,
+        sku: variant.sku,
         qty: newQty,
         unitCost: newUnitCost ?? 0,
       };
@@ -339,9 +348,8 @@ export function PurchaseFormPage({ purchaseId }: { purchaseId?: string }) {
     onError: (error) => {
       if (error instanceof ApiError && error.code === "STOCK_INSUFFICIENT") {
         const details = error.details as { variantId?: string; available?: string };
-        const variant = details.variantId
-          ? (resolvedLabels[details.variantId]?.productName ?? details.variantId.slice(0, 8))
-          : "—";
+        const serverItem = purchase?.items.find((item) => item.variantId === details.variantId);
+        const variant = serverItem?.productName ?? details.variantId?.slice(0, 8) ?? "—";
         notification.error({
           message: t("purchases.errors.stockInsufficient", {
             variant,
@@ -405,7 +413,16 @@ export function PurchaseFormPage({ purchaseId }: { purchaseId?: string }) {
 
   const itemColumns: ColumnsType<ItemRow> = [
     { title: t("purchases.form.items.columns.product"), dataIndex: "productName" },
-    { title: t("purchases.form.items.columns.variant"), dataIndex: "variantLabel" },
+    {
+      title: t("purchases.form.items.columns.variant"),
+      key: "variantLabel",
+      render: (_, row) => (
+        <>
+          <span>{row.variantLabel}</span>
+          {row.sku && <Typography.Text type="secondary"> ({row.sku})</Typography.Text>}
+        </>
+      ),
+    },
     {
       title: t("purchases.form.items.columns.qty"),
       key: "qty",
@@ -456,10 +473,8 @@ export function PurchaseFormPage({ purchaseId }: { purchaseId?: string }) {
 
   const receiveSummary = (purchase?.items ?? []).map((item) => ({
     variantId: item.variantId,
-    productName:
-      resolvedLabels[item.variantId]?.productName ??
-      t("purchases.form.items.unresolvedVariant", { id: item.variantId.slice(0, 8) }),
-    variantLabel: resolvedLabels[item.variantId]?.variantLabel ?? "—",
+    productName: item.productName,
+    variantLabel: item.variantLabel,
     qty: item.qty,
     unitCost: item.unitCost,
   }));
