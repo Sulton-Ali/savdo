@@ -99,6 +99,42 @@ SET status = 'received', received_at = now(), total_cost = $3, updated_at = now(
 WHERE shop_id = $1 AND id = $2 AND status = 'draft'
 RETURNING *;
 
+-- name: ListPurchaseItemsWithLabels :many
+-- Joins each purchase_items row to its variant and product for the
+-- response-only productName/variantLabel/sku fields
+-- (contracts/openapi.yaml's PurchaseItem, T4): variantLabel itself is
+-- built in Go from variant_sku/variant_attributes plus
+-- attribute_definitions' sort order (mirrors
+-- admin/src/catalog/variants.ts's own variantLabel), not computed in SQL.
+-- productName uses the same locale-fallback (requested -> 'uz' -> any,
+-- ADR-012) as ListProductsForStaff. v.shop_id/p.shop_id are joined
+-- explicitly, not just pi.shop_id, so a row can never resolve through
+-- another shop's variant/product even though every id here was already
+-- validated at CreatePurchase time (hard rule 1, defense in depth).
+SELECT
+    pi.id, pi.purchase_id, pi.variant_id, pi.qty, pi.unit_cost, pi.line_total, pi.created_at,
+    v.sku AS variant_sku,
+    v.attributes AS variant_attributes,
+    COALESCE(t.locale, '') AS locale_used,
+    COALESCE(t.name, '') AS product_name
+FROM purchase_items pi
+JOIN product_variants v ON v.id = pi.variant_id AND v.shop_id = pi.shop_id
+JOIN products p ON p.id = v.product_id AND p.shop_id = pi.shop_id
+LEFT JOIN LATERAL (
+    SELECT pt.locale, pt.name
+    FROM product_translations pt
+    WHERE pt.product_id = p.id
+    ORDER BY
+        CASE
+            WHEN pt.locale = sqlc.arg('locale') THEN 0
+            WHEN pt.locale = 'uz' THEN 1
+            ELSE 2
+        END
+    LIMIT 1
+) t ON true
+WHERE pi.shop_id = sqlc.arg('shop_id') AND pi.purchase_id = sqlc.arg('purchase_id')
+ORDER BY pi.created_at, pi.id;
+
 -- name: SetPurchaseCancelled :one
 -- Cancellable from 'draft' or 'received'; not from 'cancelled' again (the
 -- WHERE clause maps a second cancel to PURCHASE_ALREADY_CANCELLED in the
