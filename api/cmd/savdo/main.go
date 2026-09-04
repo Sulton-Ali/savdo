@@ -269,12 +269,17 @@ func runStock(args []string) error {
 }
 
 // runStockRebuild recomputes one shop's stock_levels from stock_movements
-// (ADR-006, stock.Rebuild) and prints the resulting counts.
+// (ADR-006, stock.Rebuild) and prints the resulting counts. --shop-slug
+// (named to match reset-owner-password's own flag, MINOR 5) is required —
+// unlike seed and reset-owner-password, this command rewrites existing
+// levels, so it never falls back to the demo shop by default (NIT 14): a
+// bare `savdo stock rebuild` with no flag is a mistake worth failing loudly
+// on, not a convenience worth guessing at.
 func runStockRebuild(args []string) error {
 	fs := flag.NewFlagSet("stock rebuild", flag.ContinueOnError)
-	shopSlug := fs.String("shop", seed.DefaultShopSlug, "shop slug to rebuild stock levels for")
+	shopSlug := fs.String("shop-slug", "", "shop slug to rebuild stock levels for (required)")
 	fs.Usage = func() {
-		fmt.Fprintln(fs.Output(), `usage: savdo stock rebuild [--shop <slug>]
+		fmt.Fprintln(fs.Output(), `usage: savdo stock rebuild --shop-slug <slug>
 
 Recomputes stock_levels for one shop from the append-only stock_movements
 ledger (ADR-006): truncates the shop's levels and rebuilds them from the
@@ -290,6 +295,10 @@ it committed.`)
 	}
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *shopSlug == "" {
+		fs.Usage()
+		return fmt.Errorf("stock rebuild: --shop-slug is required")
 	}
 
 	dsn, err := databaseURL()

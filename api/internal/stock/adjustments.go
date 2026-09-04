@@ -13,20 +13,47 @@ import (
 	"github.com/Sulton-Ali/savdo/api/internal/db"
 )
 
-// CreateAdjustment records a manual stock adjustment (D-46). Requires
-// stock.write (manager+). Not itself one of gen.StrictServerInterface's
-// methods: httpx.server.CreateStockAdjustment (httpx/stock.go) calls this
-// after wrapping it in httpx.Idempotent, since that helper — needed here
-// because POST /stock/adjustments accepts an Idempotency-Key — lives in
-// internal/httpx and this package cannot import it without a cycle
-// (internal/httpx already imports internal/stock to wire the router).
+// auditAfter is the JSON shape CreateAdjustmentTx's audit_log.after column
+// carries (NIT 11): the resulting level quantity alongside the movement
+// itself, so an auditor reading the row does not have to separately look
+// up the movement to see what the adjustment actually did to the level.
+type auditAfter struct {
+	Qty      string          `json:"qty"`
+	Movement db.StockMovement `json:"movement"`
+}
+
+// auditBefore is audit_log.before's shape: just the level quantity
+// immediately before the movement (there is no "before" movement to
+// pair it with).
+type auditBefore struct {
+	Qty string `json:"qty"`
+}
+
+// CreateAdjustmentTx records a manual stock adjustment (D-46) using qtx —
+// the caller's own transaction — rather than opening one itself. Requires
+// stock.write (manager+).
 //
-// Runs Move (kind adjustment) and audit.Write (action stock.adjust,
-// D-47) in one transaction: both commit together, or — on
-// ErrInsufficient or any other error — both roll back, so a partially
-// recorded adjustment (a movement with no audit trail, or vice versa)
-// can never happen.
-func (h *Handler) CreateAdjustment(ctx context.Context, body gen.StockAdjustmentCreate) (gen.StockMovement, error) {
+// Callers: httpx.server.CreateStockAdjustment (httpx/stock.go) is the only
+// one today. It runs this inside httpx.Idempotent's own transaction, on
+// the same connection Idempotent's advisory lock and idempotency_keys
+// bookkeeping already hold — not a second, separately-opened transaction —
+// so the movement, the audit row and the idempotency_keys row all commit
+// or roll back together, and a request never needs two pooled connections
+// at once (a prior version opened its own transaction here, which under a
+// small connection pool and many concurrent Idempotency-Key'd requests
+// could exhaust the pool: every in-flight request held one connection for
+// Idempotent's transaction while waiting for a second, for this one, that
+// only becomes available once another request's pair releases both —
+// nothing ever could). If a future caller needs the write without
+// Idempotent (nothing does yet), it opens its own transaction the way
+// MoveInTx does for a single Move and calls this with that transaction's
+// *db.Queries.
+//
+// Not itself one of gen.StrictServerInterface's methods, and does not
+// itself commit or roll back qtx's transaction — the caller does, after
+// (for httpx.server.CreateStockAdjustment) also storing the
+// Idempotency-Key response in the same transaction.
+func (h *Handler) CreateAdjustmentTx(ctx context.Context, qtx *db.Queries, body gen.StockAdjustmentCreate) (gen.StockMovement, error) {
 	authCtx, ok := auth.FromContext(ctx)
 	if !ok {
 		return gen.StockMovement{}, apierr.Unauthenticated()
@@ -56,14 +83,7 @@ func (h *Handler) CreateAdjustment(ctx context.Context, body gen.StockAdjustment
 		}
 	}
 
-	tx, err := h.svc.pool.Begin(ctx)
-	if err != nil {
-		return gen.StockMovement{}, fmt.Errorf("stock: begin tx: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	qtx := h.svc.q.WithTx(tx)
-
-	mv, err := Move(ctx, qtx, MoveParams{
+	result, err := Move(ctx, qtx, MoveParams{
 		ShopID: authCtx.ShopID, VariantID: body.VariantId, LocationID: body.LocationId,
 		Kind: db.StockMovementKindAdjustment, Qty: qty, AdjustmentReason: &reason, Note: note,
 		ActorID: &authCtx.UserID,
@@ -72,25 +92,25 @@ func (h *Handler) CreateAdjustment(ctx context.Context, body gen.StockAdjustment
 		return gen.StockMovement{}, mapMoveError(err)
 	}
 
-	after, err := json.Marshal(mv)
+	before, err := json.Marshal(auditBefore{Qty: qtyString(result.Before)})
 	if err != nil {
-		return gen.StockMovement{}, fmt.Errorf("stock: marshal movement for audit: %w", err)
+		return gen.StockMovement{}, fmt.Errorf("stock: marshal audit before: %w", err)
+	}
+	after, err := json.Marshal(auditAfter{Qty: qtyString(result.After), Movement: result.Movement})
+	if err != nil {
+		return gen.StockMovement{}, fmt.Errorf("stock: marshal audit after: %w", err)
 	}
 	if err := audit.Write(ctx, qtx, audit.Entry{
 		ShopID: authCtx.ShopID, ActorID: authCtx.UserID, Action: "stock.adjust",
-		EntityType: "stock_movement", EntityID: mv.ID, After: after,
+		EntityType: "stock_movement", EntityID: result.Movement.ID, Before: before, After: after,
 	}); err != nil {
 		return gen.StockMovement{}, fmt.Errorf("stock: write audit: %w", err)
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return gen.StockMovement{}, fmt.Errorf("stock: commit adjustment: %w", err)
-	}
-
-	name, err := h.svc.createdByName(ctx, authCtx.ShopID, &authCtx.UserID)
+	name, err := createdByName(ctx, qtx, authCtx.ShopID, &authCtx.UserID)
 	if err != nil {
 		return gen.StockMovement{}, err
 	}
 	includeCost := auth.Require(ctx, auth.PermCostRead) == nil
-	return toGenMovement(mv, name, includeCost)
+	return toGenMovement(result.Movement, name, includeCost)
 }

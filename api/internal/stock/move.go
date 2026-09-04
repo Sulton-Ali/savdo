@@ -20,6 +20,16 @@ import (
 // never infers it from Kind. UnitCost/RefType/RefID/AdjustmentReason/Note
 // are all optional (nil = SQL NULL); ActorID is nil for a system-written
 // movement (e.g. a seed) and set to the acting user's id otherwise.
+//
+// Multi-line callers (a transfer's two legs, a future purchase receive's
+// per-line writes): call Move for your lines in ascending (variant_id,
+// location_id) order. Move locks each line's stock_levels row (step 3
+// below) in whatever order you call it, so two callers touching the same
+// two rows in opposite orders can deadlock under Postgres (SQLSTATE
+// 40P01) — sorting lines the same way in every caller makes every
+// transaction acquire the rows in the same order, so they queue instead of
+// deadlocking. CreateStockTransfer (transfers.go) is the first caller and
+// follows this rule; T4's purchase receive must too.
 type MoveParams struct {
 	ShopID           uuid.UUID
 	VariantID        uuid.UUID
@@ -32,6 +42,19 @@ type MoveParams struct {
 	AdjustmentReason *db.AdjustmentReason
 	Note             *string
 	ActorID          *uuid.UUID
+}
+
+// MoveResult is what a successful Move produced: the movement row itself,
+// plus the level's quantity immediately before and after it — callers that
+// need to record both (e.g. CreateAdjustmentTx's audit_log row, NIT 11)
+// would otherwise have to re-derive Before by subtracting Qty back out
+// (error-prone with a signed decimal) or re-read the row (a second query,
+// racy outside the lock Move already held it under); Move already computed
+// both internally, so it returns them.
+type MoveResult struct {
+	Movement db.StockMovement
+	Before   decimal.Decimal
+	After    decimal.Decimal
 }
 
 // ErrInsufficient is Move's signal that applying Qty would take the level
@@ -85,47 +108,54 @@ func (e *ErrInsufficient) Error() string {
 //     sales of the last unit race-free under Postgres' default READ
 //     COMMITTED (the reviewer measured this; do not raise the isolation
 //     level, it would only add contention/serialization-failure handling
-//     the row lock already makes unnecessary).
+//     the row lock already makes unnecessary). See MoveParams' own doc
+//     comment for the deadlock a multi-line caller must avoid by sorting
+//     its lines before calling Move.
 //  4. Compute new = current + Qty. If new < 0 and the shop does not allow
 //     negative stock, return ErrInsufficient without writing anything
 //     else — UpsertLevelRow's own write (a zero row, ON CONFLICT DO
 //     NOTHING) is undone by the caller's mandatory rollback.
 //  5. InsertMovement, then ApplyLevelDelta — the actual, only write to
-//     stock_levels.
-func Move(ctx context.Context, qtx *db.Queries, p MoveParams) (db.StockMovement, error) {
+//     stock_levels. A resulting quantity too large for numeric(12,3) (12
+//     total digits) maps to 400 VALIDATION_FAILED on "qty" (NIT 13)
+//     rather than surfacing Postgres' own numeric_value_out_of_range as an
+//     opaque 500 — this is a backstop (parseQty already bounds every
+//     wire-supplied quantity before it reaches here), reachable only if
+//     enough movements accumulate on one line to overflow the column.
+func Move(ctx context.Context, qtx *db.Queries, p MoveParams) (MoveResult, error) {
 	if _, err := qtx.GetVariantForStaff(ctx, db.GetVariantForStaffParams{ShopID: p.ShopID, ID: p.VariantID}); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return db.StockMovement{}, apierr.NotFound("variant")
+			return MoveResult{}, apierr.NotFound("variant")
 		}
-		return db.StockMovement{}, fmt.Errorf("stock: get variant: %w", err)
+		return MoveResult{}, fmt.Errorf("stock: get variant: %w", err)
 	}
 	if _, err := qtx.GetLocation(ctx, db.GetLocationParams{ShopID: p.ShopID, ID: p.LocationID}); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return db.StockMovement{}, apierr.NotFound("location")
+			return MoveResult{}, apierr.NotFound("location")
 		}
-		return db.StockMovement{}, fmt.Errorf("stock: get location: %w", err)
+		return MoveResult{}, fmt.Errorf("stock: get location: %w", err)
 	}
 
 	shopRow, err := qtx.GetShop(ctx, p.ShopID)
 	if err != nil {
-		return db.StockMovement{}, fmt.Errorf("stock: get shop: %w", err)
+		return MoveResult{}, fmt.Errorf("stock: get shop: %w", err)
 	}
 
 	if err := qtx.UpsertLevelRow(ctx, db.UpsertLevelRowParams{ShopID: p.ShopID, VariantID: p.VariantID, LocationID: p.LocationID}); err != nil {
-		return db.StockMovement{}, fmt.Errorf("stock: upsert level row: %w", err)
+		return MoveResult{}, fmt.Errorf("stock: upsert level row: %w", err)
 	}
 	current, err := qtx.GetLevelForUpdate(ctx, db.GetLevelForUpdateParams{ShopID: p.ShopID, VariantID: p.VariantID, LocationID: p.LocationID})
 	if err != nil {
-		return db.StockMovement{}, fmt.Errorf("stock: get level for update: %w", err)
+		return MoveResult{}, fmt.Errorf("stock: get level for update: %w", err)
 	}
 
 	currentQty, err := money.FromNumeric(current.Qty)
 	if err != nil {
-		return db.StockMovement{}, fmt.Errorf("stock: current level qty: %w", err)
+		return MoveResult{}, fmt.Errorf("stock: current level qty: %w", err)
 	}
 	newQty := currentQty.Add(p.Qty)
 	if newQty.IsNegative() && !shopRow.AllowNegativeStock {
-		return db.StockMovement{}, &ErrInsufficient{VariantID: p.VariantID, LocationID: p.LocationID, Available: currentQty}
+		return MoveResult{}, &ErrInsufficient{VariantID: p.VariantID, LocationID: p.LocationID, Available: currentQty}
 	}
 
 	mv, err := qtx.InsertMovement(ctx, db.InsertMovementParams{
@@ -135,16 +165,33 @@ func Move(ctx context.Context, qtx *db.Queries, p MoveParams) (db.StockMovement,
 		Reason: p.Note, CreatedBy: p.ActorID,
 	})
 	if err != nil {
-		return db.StockMovement{}, fmt.Errorf("stock: insert movement: %w", err)
+		if apiErr, ok := mapOutOfRange(err); ok {
+			return MoveResult{}, apiErr
+		}
+		return MoveResult{}, fmt.Errorf("stock: insert movement: %w", err)
 	}
 
 	if _, err := qtx.ApplyLevelDelta(ctx, db.ApplyLevelDeltaParams{
 		Delta: money.ToNumeric(p.Qty), ShopID: p.ShopID, VariantID: p.VariantID, LocationID: p.LocationID,
 	}); err != nil {
-		return db.StockMovement{}, fmt.Errorf("stock: apply level delta: %w", err)
+		if apiErr, ok := mapOutOfRange(err); ok {
+			return MoveResult{}, apiErr
+		}
+		return MoveResult{}, fmt.Errorf("stock: apply level delta: %w", err)
 	}
 
-	return mv, nil
+	return MoveResult{Movement: mv, Before: currentQty, After: newQty}, nil
+}
+
+// mapOutOfRange reports whether err is Postgres' numeric_value_out_of_range
+// (money.IsOutOfRange), returning the 400 VALIDATION_FAILED "qty" error
+// Move's InsertMovement/ApplyLevelDelta call sites use in place of it
+// (NIT 13).
+func mapOutOfRange(err error) (*apierr.Error, bool) {
+	if money.IsOutOfRange(err) {
+		return apierr.Validation(map[string]string{"qty": "invalid"}), true
+	}
+	return nil, false
 }
 
 // MoveInTx is Move for a caller that only needs to write one movement and
@@ -155,22 +202,22 @@ func Move(ctx context.Context, qtx *db.Queries, p MoveParams) (db.StockMovement,
 // pair, a purchase receive's per-line movements) opens its own transaction
 // and calls Move directly instead, so every line shares one commit/
 // rollback.
-func (s *Service) MoveInTx(ctx context.Context, p MoveParams) (db.StockMovement, error) {
+func (s *Service) MoveInTx(ctx context.Context, p MoveParams) (MoveResult, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return db.StockMovement{}, fmt.Errorf("stock: begin tx: %w", err)
+		return MoveResult{}, fmt.Errorf("stock: begin tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	qtx := s.q.WithTx(tx)
 
-	mv, err := Move(ctx, qtx, p)
+	result, err := Move(ctx, qtx, p)
 	if err != nil {
-		return db.StockMovement{}, err
+		return MoveResult{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return db.StockMovement{}, fmt.Errorf("stock: commit move: %w", err)
+		return MoveResult{}, fmt.Errorf("stock: commit move: %w", err)
 	}
-	return mv, nil
+	return result, nil
 }
 
 // optionalNumeric converts *decimal.Decimal to a pgtype.Numeric: nil (no

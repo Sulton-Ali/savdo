@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"regexp"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/shopspring/decimal"
 
 	"github.com/Sulton-Ali/savdo/api/gen"
@@ -39,6 +40,27 @@ func mapMoveError(err error) error {
 // equals toLocationId, per contracts/openapi.yaml's POST /stock/transfers
 // 409 description.
 var errSameLocation = &apierr.Error{Status: http.StatusConflict, Code: gen.SAMELOCATION}
+
+// deadlockSQLState is Postgres' "deadlock_detected" SQLSTATE — what a
+// transaction Postgres chose to kill to break a lock cycle fails with
+// (MINOR 4). Checked at commit time too, not just per-statement: pgx
+// surfaces a deadlock either way depending on exactly which statement lost.
+const deadlockSQLState = "40P01"
+
+// isDeadlock reports whether err is a Postgres deadlock (SQLSTATE 40P01).
+func isDeadlock(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == deadlockSQLState
+}
+
+// errTransferDeadlock is CONFLICT (409): CreateStockTransfer's own retry
+// (transfers.go) already tried runTransfer twice and both attempts
+// deadlocked against some other concurrent transfer — reported as a clear,
+// retryable-by-the-client conflict rather than an opaque 500.
+var errTransferDeadlock = &apierr.Error{
+	Status: http.StatusConflict, Code: gen.CONFLICT,
+	Details: map[string]any{"reason": "deadlock"},
+}
 
 // qtyPattern is the wire shape a quantity field (docs/05-API.md §
 // Conventions: "Quantities: decimal strings") must have: an optional sign,

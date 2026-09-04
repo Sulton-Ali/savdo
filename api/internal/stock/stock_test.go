@@ -3,9 +3,11 @@ package stock_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
@@ -131,21 +133,28 @@ func seedUser(ctx context.Context, t *testing.T, q *db.Queries, shopID uuid.UUID
 // readLevel reads the raw stock_levels row for (shopID, variantID,
 // locationID) with a plain, non-locking SELECT — a test's own
 // verification query, never the codepath under test (which always goes
-// through GetLevelForUpdate inside a transaction). exists is false when no
-// row was ever written for the combination (UpsertLevelRow never ran, or
-// ran and then rolled back). Returned as decimal.Decimal, compared with
-// .Equal rather than a rendered string: numeric addition can return a
-// pgtype.Numeric whose Int/Exp round-trips to "0" rather than "0.000" for
-// an exact-zero result (the same reason api/internal/db/stock_schema_test.go
-// has its own normalizeScale3 helper) — decimal.Decimal.Equal is exponent-
-// agnostic, so it is not fooled by that either way.
+// through GetLevelForUpdate inside a transaction). exists is false only
+// for pgx.ErrNoRows (NIT 12) — no row was ever written for the
+// combination (UpsertLevelRow never ran, or ran and then rolled back);
+// any other error (a bad connection, a malformed query) fails the test
+// loudly instead of being silently folded into "absent", which would let
+// a real bug masquerade as a passing "no row" assertion. Returned as
+// decimal.Decimal, compared with .Equal rather than a rendered string:
+// numeric addition can return a pgtype.Numeric whose Int/Exp round-trips
+// to "0" rather than "0.000" for an exact-zero result (the same reason
+// api/internal/db/stock_schema_test.go has its own normalizeScale3
+// helper) — decimal.Decimal.Equal is exponent-agnostic, so it is not
+// fooled by that either way.
 func readLevel(ctx context.Context, t *testing.T, pool *pgxpool.Pool, shopID, variantID, locationID uuid.UUID) (qty decimal.Decimal, exists bool) {
 	t.Helper()
 	var n pgtype.Numeric
 	err := pool.QueryRow(ctx, `SELECT qty FROM stock_levels WHERE shop_id = $1 AND variant_id = $2 AND location_id = $3`,
 		shopID, variantID, locationID).Scan(&n)
 	if err != nil {
-		return decimal.Decimal{}, false
+		if errors.Is(err, pgx.ErrNoRows) {
+			return decimal.Decimal{}, false
+		}
+		t.Fatalf("readLevel: %v", err)
 	}
 	d, err := money.FromNumeric(n)
 	if err != nil {

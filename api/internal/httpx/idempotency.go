@@ -18,67 +18,110 @@ import (
 	"github.com/Sulton-Ali/savdo/api/internal/db"
 )
 
-// RequestHash is the "same key, same request" fingerprint docs/05-API.md §
-// Conventions and docs/04-DATA-MODEL.md § 3 (idempotency_keys) describe:
-// SHA-256 of the method, the path and a canonical rendering of body.
+// idempotencyLockClassID is the first argument to the two-argument
+// pg_advisory_xact_lock(classid, key) Idempotent uses (NIT 9) — a second,
+// independent advisory-lock namespace from stock.Rebuild's own
+// rebuildLockClassID, so a coincidental hashtext() collision between an
+// idempotency key and a shop id can never make the two locks interfere.
+const idempotencyLockClassID = 1
+
+// maxIdempotencyKeyLen matches contracts/openapi.yaml's IdempotencyKey
+// schema (`maxLength: 128`, NIT 10) — the strict server does not enforce
+// JSON Schema constraints on header parameters at runtime, so this is
+// re-checked explicitly rather than trusted from the generated type alone.
+const maxIdempotencyKeyLen = 128
+
+// RequestHash is the "same key, same request, same caller" fingerprint
+// docs/05-API.md § Conventions and docs/04-DATA-MODEL.md § 3
+// (idempotency_keys) describe: SHA-256 of the method, the path, the acting
+// user's id and a canonical rendering of body. actorID is part of the hash
+// (MINOR 7), not just the lookup key, because Idempotent's stored response
+// body was already role-shaped for whoever made the first request (e.g.
+// unitCost present or null per their cost.read) — Phase 4 shares this
+// helper across cashiers and owners on the same shop, so two different
+// actors reusing the same client-chosen key must never let the second one
+// silently receive a body rendered for the first; they get 409
+// IDEMPOTENCY_KEY_REUSED instead, the same as any other hash mismatch.
 // "Canonical" here means json.Marshal of the request's already-decoded Go
 // value (the strict server hands every handler a typed *Body, never raw
 // bytes) — deterministic because it walks the struct's fields in their
 // fixed declaration order, not a map, so two decodes of logically the same
 // JSON always marshal back to the same bytes regardless of how the
 // client's original bytes were formatted or ordered.
-func RequestHash(method, path string, body any) (string, error) {
+func RequestHash(method, path string, actorID uuid.UUID, body any) (string, error) {
 	canonical, err := json.Marshal(body)
 	if err != nil {
 		return "", fmt.Errorf("httpx: canonicalize request body: %w", err)
 	}
-	sum := sha256.Sum256([]byte(method + " " + path + " " + string(canonical)))
+	sum := sha256.Sum256([]byte(method + "|" + path + "|" + actorID.String() + "|" + string(canonical)))
 	return hex.EncodeToString(sum[:]), nil
 }
 
 // errIdempotencyKeyReused is IDEMPOTENCYKEYREUSED (409): the same
 // Idempotency-Key was already used for a request whose canonical hash
-// differs from this one.
+// differs from this one — including, since RequestHash folds the actor id
+// in, the same logical request replayed by a different user (MINOR 7).
 var errIdempotencyKeyReused = &apierr.Error{Status: http.StatusConflict, Code: gen.IDEMPOTENCYKEYREUSED}
 
+// ValidateIdempotencyKey checks key against contracts/openapi.yaml's
+// IdempotencyKey schema (NIT 10: `maxLength: 128`) — an empty key is valid
+// (it means "no header sent", handled by Idempotent itself), only an
+// over-length one is rejected, as 400 VALIDATION_FAILED naming the header.
+func ValidateIdempotencyKey(key string) error {
+	if len(key) > maxIdempotencyKeyLen {
+		return apierr.Validation(map[string]string{"Idempotency-Key": "too_long"})
+	}
+	return nil
+}
+
 // Idempotent wraps fn with the Idempotency-Key replay semantics
-// docs/05-API.md § Conventions and docs/04-DATA-MODEL.md § 3 describe:
+// docs/05-API.md § Conventions and docs/04-DATA-MODEL.md § 3 describe, and
+// runs fn on Idempotent's own transaction rather than a second one fn
+// opens itself (BLOCKER 1 / MAJOR 2 fix — see the "single connection"
+// paragraph below):
 //
-//   - key == "": no header was sent — run fn directly, no bookkeeping.
+//   - key == "": no header was sent — fn still runs inside a transaction
+//     (Move and audit.Write both need one), but with no advisory lock, no
+//     idempotency_keys lookup and nothing stored: every call is a fresh
+//     write.
 //   - key already used with the same requestHash: fn does not run again;
 //     the response stored the first time is returned unchanged.
-//   - key already used with a different requestHash: fn does not run;
-//     Idempotent returns errIdempotencyKeyReused (409 IDEMPOTENCY_KEY_REUSED).
-//   - key unused: fn runs. If it returns a nil error, its (status, body)
-//     is stored (only ever for a 2xx status — fn is only ever asked to
-//     return one on success) and returned; if it returns an error, nothing
-//     is stored and the error propagates unchanged (so a genuine failure,
-//     e.g. 409 STOCK_INSUFFICIENT, can always be retried with the same key).
+//   - key already used with a different requestHash (including, per
+//     RequestHash's own doc comment, the same body replayed by a
+//     different actor): fn does not run; Idempotent returns
+//     errIdempotencyKeyReused (409 IDEMPOTENCY_KEY_REUSED).
+//   - key unused: fn(qtx) runs. If it returns a nil error, its
+//     (status, body) is stored in the same transaction and the whole
+//     thing commits together; if it returns an error, the whole
+//     transaction rolls back and nothing is stored (so a genuine failure,
+//     e.g. 409 STOCK_INSUFFICIENT, can always be retried with the same
+//     key, and a failure that happens after fn's domain write — e.g. the
+//     key-row insert itself failing — takes the domain write back out
+//     with it, never leaving a durable movement with no matching key row).
 //
-// Concurrency (two requests racing the same, previously-unused key): guarded
-// by pg_advisory_xact_lock(hashtext(shopID+key)) held for the lifetime of
-// one Postgres transaction that Idempotent itself opens, checks the
-// idempotency_keys row inside, and — only for the first caller to reach
-// it — keeps open across fn's own execution before storing fn's result and
-// committing. A second concurrent call for the same key blocks in
-// pg_advisory_xact_lock until the first call's transaction ends, then finds
-// the row the first call inserted and replays it (or 409s on a hash
-// mismatch) — so fn runs at most once per key, never twice. This does mean
-// fn's own writes (which run in their own, separate transaction against
-// pool — Move's caller opens that transaction itself) and Idempotent's
-// bookkeeping transaction are not one atomic unit: a crash between fn
-// committing and Idempotent's own commit leaves the operation's effect
-// applied but no idempotency_keys row recorded, so a client retry after
-// such a crash would run fn a second time. Storing inside fn's own
-// transaction instead (avoiding that gap entirely) would need every fn to
-// accept and thread through Idempotent's *db.Queries, coupling every
-// idempotent write's transaction shape to this helper; documented here as
-// the accepted, narrow gap rather than taken on.
-func Idempotent(ctx context.Context, pool *pgxpool.Pool, shopID uuid.UUID, key, requestHash string, fn func() (status int, body []byte, err error)) (int, []byte, error) {
-	if key == "" {
-		return fn()
-	}
-
+// Single connection, single transaction: fn used to open its own,
+// separate transaction (a second pooled connection) while this function's
+// own transaction sat idle-in-transaction holding the advisory lock for
+// fn's entire duration. Under a bounded pool, N concurrent
+// Idempotency-Key'd requests could then each hold one connection for their
+// own Idempotent transaction while waiting for a second, for fn — a
+// connection that only becomes free once some other request's *pair*
+// releases both — which can deadlock the whole pool (reproduced with
+// MaxConns=4 and enough concurrent callers). Running fn(qtx) on this
+// function's own transaction means one request needs exactly one
+// connection, end to end, so that failure mode cannot occur; it also
+// closes the earlier "movement committed, key row not" gap for free, since
+// there is now only one commit.
+//
+// Concurrency (two requests racing the same, previously-unused key):
+// guarded by pg_advisory_xact_lock(idempotencyLockClassID, hashtext(...))
+// (NIT 9's two-argument form — a class id distinct from stock.Rebuild's
+// own, so the two locks' key spaces can never collide) held for the
+// lifetime of this transaction. A second concurrent call for the same key
+// blocks in pg_advisory_xact_lock until the first call's transaction ends,
+// then finds the row the first call inserted and replays it (or 409s on a
+// hash mismatch) — so fn runs at most once per key, never twice.
+func Idempotent(ctx context.Context, pool *pgxpool.Pool, shopID, actorID uuid.UUID, key, requestHash string, fn func(qtx *db.Queries) (status int, body []byte, err error)) (int, []byte, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return 0, nil, fmt.Errorf("httpx: idempotent: begin tx: %w", err)
@@ -91,9 +134,19 @@ func Idempotent(ctx context.Context, pool *pgxpool.Pool, shopID uuid.UUID, key, 
 	}()
 	qtx := db.New(tx)
 
-	// pg_advisory_xact_lock releases automatically at commit or rollback
-	// of this transaction — never held past Idempotent returning.
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, shopID.String()+"|"+key); err != nil {
+	if key == "" {
+		status, body, ferr := fn(qtx)
+		if ferr != nil {
+			return 0, nil, ferr
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return 0, nil, fmt.Errorf("httpx: idempotent: commit: %w", err)
+		}
+		committed = true
+		return status, body, nil
+	}
+
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1, hashtext($2))`, idempotencyLockClassID, shopID.String()+"|"+key); err != nil {
 		return 0, nil, fmt.Errorf("httpx: idempotent: advisory lock: %w", err)
 	}
 
@@ -109,14 +162,15 @@ func Idempotent(ctx context.Context, pool *pgxpool.Pool, shopID uuid.UUID, key, 
 		committed = true
 		return int(existing.ResponseStatus), existing.ResponseBody, nil
 	case errors.Is(err, pgx.ErrNoRows):
-		// First use of this key: fall through and run fn while still
-		// holding the advisory lock, so a concurrent second caller for the
-		// same key blocks until this one commits or rolls back.
+		// First use of this key: fall through and run fn on this same
+		// transaction, still holding the advisory lock, so a concurrent
+		// second caller for the same key blocks until this one commits or
+		// rolls back.
 	default:
 		return 0, nil, fmt.Errorf("httpx: idempotent: get key: %w", err)
 	}
 
-	status, body, ferr := fn()
+	status, body, ferr := fn(qtx)
 	if ferr != nil {
 		return 0, nil, ferr
 	}
@@ -137,10 +191,15 @@ func Idempotent(ctx context.Context, pool *pgxpool.Pool, shopID uuid.UUID, key, 
 // rawJSONResponse writes a pre-serialized JSON body and status code
 // verbatim — the shape Idempotent's stored-or-fresh (status, body) pair
 // needs on a replay, since there is no gen.StockMovement (or other typed
-// response) to re-encode: a replayed response is returned byte-for-byte
-// as it was stored, not reconstructed. Each operation that uses Idempotent
-// adds the one Visit method its own *ResponseObject interface needs (see
-// stock.go's VisitCreateStockAdjustmentResponse).
+// response) to re-encode. A replay's bytes are not guaranteed byte-
+// identical to the original response: response_body is a jsonb column,
+// which re-serializes on the way back out (e.g. inserting a space after
+// ':'), so what comes back is JSON-equal to what was stored, not
+// necessarily byte-equal — never compare a replay by raw string equality,
+// only by decoding both sides (see idempotency_test.go's jsonEqual).
+// Each operation that uses Idempotent adds the one Visit method its own
+// *ResponseObject interface needs (see stock.go's
+// VisitCreateStockAdjustmentResponse).
 type rawJSONResponse struct {
 	status int
 	body   []byte

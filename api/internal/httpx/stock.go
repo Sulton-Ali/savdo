@@ -9,6 +9,7 @@ import (
 	"github.com/Sulton-Ali/savdo/api/gen"
 	"github.com/Sulton-Ali/savdo/api/internal/apierr"
 	"github.com/Sulton-Ali/savdo/api/internal/auth"
+	"github.com/Sulton-Ali/savdo/api/internal/db"
 )
 
 // The four methods below satisfy gen.StrictServerInterface's read and
@@ -24,8 +25,9 @@ import (
 // internal/stock, because internal/httpx already imports internal/stock to
 // wire the router and the reverse import would cycle. So this method does
 // the request-hash/replay orchestration itself and calls
-// stock.Handler.CreateAdjustment (a plain (gen.StockMovement, error)
-// method, not one of gen.StrictServerInterface's) for the actual write.
+// stock.Handler.CreateAdjustmentTx (a plain (gen.StockMovement, error)
+// method taking the transaction Idempotent opened, not one of
+// gen.StrictServerInterface's) for the actual write.
 
 // ListStockLevels lists stock levels per variant and location.
 func (s server) ListStockLevels(ctx context.Context, req gen.ListStockLevelsRequestObject) (gen.ListStockLevelsResponseObject, error) {
@@ -56,7 +58,11 @@ const stockAdjustmentPath = "/stock/adjustments"
 
 // CreateStockAdjustment records a manual stock adjustment, replaying a
 // previous response for a repeated Idempotency-Key (docs/05-API.md §
-// Conventions) instead of running the write again.
+// Conventions) instead of running the write again. The whole operation —
+// the movement, the audit row and (if a key was sent) the idempotency_keys
+// row — runs on the one transaction Idempotent opens; see
+// stock.Handler.CreateAdjustmentTx's and Idempotent's own doc comments for
+// why that matters (BLOCKER 1 / MAJOR 2).
 func (s server) CreateStockAdjustment(ctx context.Context, req gen.CreateStockAdjustmentRequestObject) (gen.CreateStockAdjustmentResponseObject, error) {
 	authCtx, ok := auth.FromContext(ctx)
 	if !ok {
@@ -70,13 +76,16 @@ func (s server) CreateStockAdjustment(ctx context.Context, req gen.CreateStockAd
 	if req.Params.IdempotencyKey != nil {
 		key = *req.Params.IdempotencyKey
 	}
-	hash, err := RequestHash(http.MethodPost, stockAdjustmentPath, *req.Body)
+	if err := ValidateIdempotencyKey(key); err != nil {
+		return nil, err
+	}
+	hash, err := RequestHash(http.MethodPost, stockAdjustmentPath, authCtx.UserID, *req.Body)
 	if err != nil {
 		return nil, err
 	}
 
-	status, body, err := Idempotent(ctx, s.pool, authCtx.ShopID, key, hash, func() (int, []byte, error) {
-		mv, err := s.stock.CreateAdjustment(ctx, *req.Body)
+	status, body, err := Idempotent(ctx, s.pool, authCtx.ShopID, authCtx.UserID, key, hash, func(qtx *db.Queries) (int, []byte, error) {
+		mv, err := s.stock.CreateAdjustmentTx(ctx, qtx, *req.Body)
 		if err != nil {
 			return 0, nil, err
 		}

@@ -3,10 +3,11 @@ package stock_test
 import (
 	"context"
 	"errors"
-	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 
 	"github.com/Sulton-Ali/savdo/api/internal/apierr"
@@ -132,14 +133,104 @@ func TestMove_insufficientRollsBackNoLevelRowNoMovementRow(t *testing.T) {
 	}
 }
 
+// moveStep is one goroutine's half of a deterministic two-transaction
+// interleaving (MINOR 3): it begins its own transaction, runs Move — which
+// blocks inside GetLevelForUpdate if some other transaction already holds
+// the row's lock — and, once Move returns, waits on commit before
+// finishing. locked closes the instant Move returns (the transaction is
+// still open at that point: this is the moment to assert a second,
+// concurrent Move on the same row is genuinely blocked, not just "hasn't
+// happened to run yet").
+type moveStep struct {
+	result stock.MoveResult
+	err    error
+	locked chan struct{}
+	commit chan struct{}
+	done   chan error
+}
+
+// startMoveHoldingLock begins a transaction, runs Move inside it, and
+// blocks (holding whatever row lock Move took) until the test sends on
+// commit — letting the test observe "Move returned, but the transaction
+// (and its lock) is still open" as a distinct, assertable moment rather
+// than a race between two goroutines' real wall-clock timing.
+func startMoveHoldingLock(ctx context.Context, t *testing.T, pool *pgxpool.Pool, q *db.Queries, p stock.MoveParams) *moveStep {
+	t.Helper()
+	s := &moveStep{locked: make(chan struct{}), commit: make(chan struct{}), done: make(chan error, 1)}
+	go func() {
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			s.err = err
+			close(s.locked)
+			s.done <- err
+			return
+		}
+		s.result, s.err = stock.Move(ctx, q.WithTx(tx), p)
+		close(s.locked)
+
+		<-s.commit
+		if s.err != nil {
+			s.done <- tx.Rollback(ctx)
+			return
+		}
+		s.done <- tx.Commit(ctx)
+	}()
+	return s
+}
+
+// assertStillBlocked asserts s.locked has not closed within timeout — a
+// bounded wait (channel + select), not a bare sleep used as a
+// synchronization primitive: a false pass here (s actually finished, just
+// slower than the wait) is impossible by construction, since we only ever
+// assert "still blocked" for a goroutine we know is contending for a row
+// lock another, still-open transaction holds.
+func assertStillBlocked(t *testing.T, label string, s *moveStep, timeout time.Duration) {
+	t.Helper()
+	select {
+	case <-s.locked:
+		t.Fatalf("%s: Move returned before the blocking transaction committed, want it still blocked", label)
+	case <-time.After(timeout):
+	}
+}
+
+// waitLocked waits (with a generous timeout, not a bare sleep) for s.Move
+// to have returned, then returns its error.
+func waitLocked(t *testing.T, label string, s *moveStep, timeout time.Duration) error {
+	t.Helper()
+	select {
+	case <-s.locked:
+		return s.err
+	case <-time.After(timeout):
+		t.Fatalf("%s: Move did not return within %s", label, timeout)
+		return nil
+	}
+}
+
+// finish tells s to commit (or roll back, if Move itself failed) and waits
+// for that to complete.
+func finish(t *testing.T, label string, s *moveStep, timeout time.Duration) error {
+	t.Helper()
+	close(s.commit)
+	select {
+	case err := <-s.done:
+		return err
+	case <-time.After(timeout):
+		t.Fatalf("%s: commit/rollback did not complete within %s", label, timeout)
+		return nil
+	}
+}
+
+const (
+	blockedWait = 200 * time.Millisecond
+	resultWait  = 5 * time.Second
+)
+
 // TestMove_concurrentLastUnit_exactlyOneSucceeds is the correctness-
-// critical race test: two goroutines each try to move the last unit away
-// (kind adjustment, qty -1) in their own, separate transactions. Move's
-// UpsertLevelRow + GetLevelForUpdate (SELECT ... FOR UPDATE) sequence must
-// serialize them — the second to reach the lock blocks until the first
-// commits or rolls back, then reads the now-zero level and gets
-// ErrInsufficient itself — so exactly one succeeds, never both and never
-// neither.
+// critical race test, made deterministic (MINOR 3): goroutine A locks and
+// applies its -1 adjustment inside its own, still-open transaction; the
+// test confirms goroutine B is genuinely blocked (not just not-yet-
+// scheduled) trying to do the same before letting A commit; only then does
+// B's Move unblock, see the now-zero level and fail with ErrInsufficient.
 func TestMove_concurrentLastUnit_exactlyOneSucceeds(t *testing.T) {
 	pool, q := newTestQueries(t)
 	ctx := context.Background()
@@ -164,48 +255,30 @@ func TestMove_concurrentLastUnit_exactlyOneSucceeds(t *testing.T) {
 		t.Fatalf("commit seed: %v", err)
 	}
 
-	run := func() error {
-		tx, err := pool.Begin(ctx)
-		if err != nil {
-			return err
-		}
-		_, moveErr := stock.Move(ctx, q.WithTx(tx), stock.MoveParams{
-			ShopID: shop.ID, VariantID: variant.ID, LocationID: loc.ID,
-			Kind: db.StockMovementKindAdjustment, Qty: d(t, "-1.000"), AdjustmentReason: adjReason(db.AdjustmentReasonCountCorrection),
-		})
-		if moveErr != nil {
-			_ = tx.Rollback(ctx)
-			return moveErr
-		}
-		return tx.Commit(ctx)
+	adjustment := stock.MoveParams{
+		ShopID: shop.ID, VariantID: variant.ID, LocationID: loc.ID,
+		Kind: db.StockMovementKindAdjustment, Qty: d(t, "-1.000"), AdjustmentReason: adjReason(db.AdjustmentReasonCountCorrection),
 	}
 
-	const n = 2
-	results := make([]error, n)
-	var wg sync.WaitGroup
-	wg.Add(n)
-	for i := 0; i < n; i++ {
-		go func(i int) {
-			defer wg.Done()
-			results[i] = run()
-		}(i)
+	stepA := startMoveHoldingLock(ctx, t, pool, q, adjustment)
+	if err := waitLocked(t, "A", stepA, resultWait); err != nil {
+		t.Fatalf("A: want Move to succeed (first to the lock), got: %v", err)
 	}
-	wg.Wait()
 
-	succeeded, failed := 0, 0
-	for _, err := range results {
-		if err == nil {
-			succeeded++
-			continue
-		}
-		failed++
-		var insufficient *stock.ErrInsufficient
-		if !errors.As(err, &insufficient) {
-			t.Fatalf("want ErrInsufficient for the losing goroutine, got: %v", err)
-		}
+	stepB := startMoveHoldingLock(ctx, t, pool, q, adjustment)
+	assertStillBlocked(t, "B", stepB, blockedWait)
+
+	if err := finish(t, "A", stepA, resultWait); err != nil {
+		t.Fatalf("A: commit: %v", err)
 	}
-	if succeeded != 1 || failed != 1 {
-		t.Fatalf("succeeded=%d failed=%d, want exactly 1 and 1", succeeded, failed)
+
+	bMoveErr := waitLocked(t, "B", stepB, resultWait)
+	var insufficient *stock.ErrInsufficient
+	if !errors.As(bMoveErr, &insufficient) {
+		t.Fatalf("B: want ErrInsufficient once unblocked (level already at 0), got: %v", bMoveErr)
+	}
+	if err := finish(t, "B", stepB, resultWait); err != nil {
+		t.Fatalf("B: rollback: %v", err)
 	}
 
 	qty, exists := readLevel(ctx, t, pool, shop.ID, variant.ID, loc.ID)
@@ -215,10 +288,10 @@ func TestMove_concurrentLastUnit_exactlyOneSucceeds(t *testing.T) {
 	if !qty.Equal(d(t, "0.000")) {
 		t.Fatalf("final level = %s, want 0.000", qty)
 	}
-	// The seed purchase_in (1) plus exactly one successful adjustment (1) —
-	// the losing goroutine's adjustment must not have been written.
+	// The seed purchase_in (1) plus exactly A's successful adjustment (1) —
+	// B's adjustment must not have been written.
 	if got := countMovements(ctx, t, pool, shop.ID, variant.ID, loc.ID, db.StockMovementKindAdjustment); got != 1 {
-		t.Fatalf("adjustment movement count = %d, want 1 (the loser's rolled back)", got)
+		t.Fatalf("adjustment movement count = %d, want 1 (B's rolled back)", got)
 	}
 	if got := countMovements(ctx, t, pool, shop.ID, variant.ID, loc.ID, ""); got != 2 {
 		t.Fatalf("total movement count = %d, want 2 (1 seed purchase_in + 1 adjustment)", got)
@@ -226,10 +299,11 @@ func TestMove_concurrentLastUnit_exactlyOneSucceeds(t *testing.T) {
 }
 
 // TestMove_concurrentLastUnit_allowNegativeStockLetsBothSucceed is the same
-// race as above, but on a shop with allow_negative_stock = true (D-41/
-// D-48's second branch): the row lock still serializes the two
-// transactions (one still waits for the other), but neither is rejected —
-// both succeed, and the level goes negative.
+// deterministic interleaving as above, but on a shop with
+// allow_negative_stock = true (D-41/D-48's second branch): B still blocks
+// on A's row lock (locking is unconditional — it does not depend on
+// whether negative stock is allowed), but once unblocked it succeeds too,
+// and the level goes negative.
 func TestMove_concurrentLastUnit_allowNegativeStockLetsBothSucceed(t *testing.T) {
 	pool, q := newTestQueries(t)
 	ctx := context.Background()
@@ -254,38 +328,28 @@ func TestMove_concurrentLastUnit_allowNegativeStockLetsBothSucceed(t *testing.T)
 		t.Fatalf("commit seed: %v", err)
 	}
 
-	run := func() error {
-		tx, err := pool.Begin(ctx)
-		if err != nil {
-			return err
-		}
-		_, moveErr := stock.Move(ctx, q.WithTx(tx), stock.MoveParams{
-			ShopID: shop.ID, VariantID: variant.ID, LocationID: loc.ID,
-			Kind: db.StockMovementKindAdjustment, Qty: d(t, "-1.000"), AdjustmentReason: adjReason(db.AdjustmentReasonCountCorrection),
-		})
-		if moveErr != nil {
-			_ = tx.Rollback(ctx)
-			return moveErr
-		}
-		return tx.Commit(ctx)
+	adjustment := stock.MoveParams{
+		ShopID: shop.ID, VariantID: variant.ID, LocationID: loc.ID,
+		Kind: db.StockMovementKindAdjustment, Qty: d(t, "-1.000"), AdjustmentReason: adjReason(db.AdjustmentReasonCountCorrection),
 	}
 
-	const n = 2
-	results := make([]error, n)
-	var wg sync.WaitGroup
-	wg.Add(n)
-	for i := 0; i < n; i++ {
-		go func(i int) {
-			defer wg.Done()
-			results[i] = run()
-		}(i)
+	stepA := startMoveHoldingLock(ctx, t, pool, q, adjustment)
+	if err := waitLocked(t, "A", stepA, resultWait); err != nil {
+		t.Fatalf("A: want Move to succeed (first to the lock), got: %v", err)
 	}
-	wg.Wait()
 
-	for i, err := range results {
-		if err != nil {
-			t.Fatalf("goroutine %d: want success (allow_negative_stock=true), got: %v", i, err)
-		}
+	stepB := startMoveHoldingLock(ctx, t, pool, q, adjustment)
+	assertStillBlocked(t, "B", stepB, blockedWait)
+
+	if err := finish(t, "A", stepA, resultWait); err != nil {
+		t.Fatalf("A: commit: %v", err)
+	}
+
+	if bMoveErr := waitLocked(t, "B", stepB, resultWait); bMoveErr != nil {
+		t.Fatalf("B: want success once unblocked (allow_negative_stock=true), got: %v", bMoveErr)
+	}
+	if err := finish(t, "B", stepB, resultWait); err != nil {
+		t.Fatalf("B: commit: %v", err)
 	}
 
 	qty, exists := readLevel(ctx, t, pool, shop.ID, variant.ID, loc.ID)
@@ -315,15 +379,18 @@ func TestMoveInTx_commitsOnSuccessRollsBackOnFailure(t *testing.T) {
 	variant := seedVariant(ctx, t, q, shop.ID, product.ID, "{}")
 	loc := seedLocation(ctx, t, q, shop.ID, "Main")
 
-	mv, err := svc.MoveInTx(ctx, stock.MoveParams{
+	result, err := svc.MoveInTx(ctx, stock.MoveParams{
 		ShopID: shop.ID, VariantID: variant.ID, LocationID: loc.ID,
 		Kind: db.StockMovementKindPurchaseIn, Qty: d(t, "3.000"),
 	})
 	if err != nil {
 		t.Fatalf("MoveInTx (success): %v", err)
 	}
-	if mv.ID == uuid.Nil {
+	if result.Movement.ID == uuid.Nil {
 		t.Fatal("MoveInTx returned a zero-value movement on success")
+	}
+	if !result.Before.Equal(d(t, "0.000")) || !result.After.Equal(d(t, "3.000")) {
+		t.Fatalf("MoveInTx (success) Before/After = %s/%s, want 0.000/3.000", result.Before, result.After)
 	}
 	qty, exists := readLevel(ctx, t, pool, shop.ID, variant.ID, loc.ID)
 	if !exists || !qty.Equal(d(t, "3.000")) {

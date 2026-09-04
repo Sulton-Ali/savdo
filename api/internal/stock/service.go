@@ -52,7 +52,7 @@ func NewHandler(svc *Service) *Handler {
 }
 
 // createdByName resolves userID's display name for a single-movement
-// response (CreateAdjustment, CreateStockTransfer) — the list endpoint
+// response (CreateAdjustmentTx, CreateStockTransfer) — the list endpoint
 // (ListStockMovements) gets it from ListMovementsWithCreatedByName's own
 // join instead, so as not to pay one extra query per row. Returns nil,
 // nil for a nil userID (a system-written movement — not expected from a
@@ -61,11 +61,24 @@ func NewHandler(svc *Service) *Handler {
 // (mirrors the sqlc query's LEFT JOIN: "createdBy is set but the name is
 // unknown" is not an error, per the contract's own createdByName doc
 // comment).
-func (s *Service) createdByName(ctx context.Context, shopID uuid.UUID, userID *uuid.UUID) (*string, error) {
+//
+// Takes q explicitly rather than always using the Service's own pool-
+// bound *db.Queries (this used to be a *Service method that did exactly
+// that): a caller running inside an already-open transaction — as
+// CreateAdjustmentTx now always is, called from httpx.Idempotent's own
+// transaction — must pass that transaction's qtx, not reach for a second,
+// separately-pooled connection while the first is still held open. Under
+// a bounded pool and enough concurrent callers, that second-connection
+// pattern is exactly BLOCKER 1's deadlock (reproduced by
+// TestCreateStockAdjustment_concurrentDistinctKeysUnderSmallPoolCompletes
+// when this function still used s.q unconditionally). A caller with no
+// open transaction of its own (CreateStockTransfer, which calls this only
+// after its own transaction already committed) passes its Service's q.
+func createdByName(ctx context.Context, q *db.Queries, shopID uuid.UUID, userID *uuid.UUID) (*string, error) {
 	if userID == nil {
 		return nil, nil
 	}
-	user, err := s.q.GetUserByID(ctx, db.GetUserByIDParams{ShopID: shopID, ID: *userID})
+	user, err := q.GetUserByID(ctx, db.GetUserByIDParams{ShopID: shopID, ID: *userID})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil

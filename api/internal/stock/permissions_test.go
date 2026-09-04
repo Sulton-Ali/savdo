@@ -46,11 +46,11 @@ func TestStockPermissions_cashier(t *testing.T) {
 		return err
 	})
 
-	// POST /stock/adjustments: manager+ — 403 (CreateAdjustment checks
-	// permission before validating the body, so an otherwise-invalid body
-	// is fine here).
-	assertForbidden(t, "CreateAdjustment (cashier)", func() error {
-		_, err := h.CreateAdjustment(cashierCtx, gen.StockAdjustmentCreate{
+	// POST /stock/adjustments: manager+ — 403 (CreateAdjustmentTx checks
+	// permission before it ever touches qtx, so a nil qtx and an otherwise-
+	// invalid body are both fine here).
+	assertForbidden(t, "CreateAdjustmentTx (cashier)", func() error {
+		_, err := h.CreateAdjustmentTx(cashierCtx, nil, gen.StockAdjustmentCreate{
 			VariantId: variant.ID, LocationId: loc.ID, Qty: "1.000", Reason: gen.Found,
 		})
 		return err

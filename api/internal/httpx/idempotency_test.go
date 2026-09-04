@@ -45,20 +45,29 @@ func idempotencyTestShop(ctx context.Context, t *testing.T, pool *pgxpool.Pool, 
 	return shopRow.ID
 }
 
+// noopFn adapts a body-producing closure that ignores qtx into the
+// func(qtx *db.Queries) (int, []byte, error) shape Idempotent expects —
+// most of the tests below don't need to write anything through qtx, just
+// count calls and return a canned response.
+func noopFn(fn func() (int, []byte, error)) func(*db.Queries) (int, []byte, error) {
+	return func(*db.Queries) (int, []byte, error) { return fn() }
+}
+
 func TestIdempotent_emptyKeyRunsDirectlyEveryTime(t *testing.T) {
 	pool := testdb.New(t)
 	testdb.Truncate(t, pool)
 	ctx := context.Background()
 	shopID := idempotencyTestShop(ctx, t, pool, "idem-empty-key")
+	actorID := uuid.New()
 
 	var calls int
-	fn := func() (int, []byte, error) {
+	fn := noopFn(func() (int, []byte, error) {
 		calls++
 		return http.StatusCreated, []byte(`{"n":1}`), nil
-	}
+	})
 
 	for i := 0; i < 3; i++ {
-		status, body, err := Idempotent(ctx, pool, shopID, "", "hash", fn)
+		status, body, err := Idempotent(ctx, pool, shopID, actorID, "", "hash", fn)
 		if err != nil {
 			t.Fatalf("Idempotent (call %d): %v", i, err)
 		}
@@ -76,18 +85,19 @@ func TestIdempotent_replaySameHashReturnsStoredResponseWithoutRerunningFn(t *tes
 	testdb.Truncate(t, pool)
 	ctx := context.Background()
 	shopID := idempotencyTestShop(ctx, t, pool, "idem-replay")
+	actorID := uuid.New()
 
 	var calls int
-	fn := func() (int, []byte, error) {
+	fn := noopFn(func() (int, []byte, error) {
 		calls++
 		return http.StatusCreated, []byte(`{"n":1}`), nil
-	}
+	})
 
-	status1, body1, err := Idempotent(ctx, pool, shopID, "key-1", "hash-a", fn)
+	status1, body1, err := Idempotent(ctx, pool, shopID, actorID, "key-1", "hash-a", fn)
 	if err != nil {
 		t.Fatalf("first call: %v", err)
 	}
-	status2, body2, err := Idempotent(ctx, pool, shopID, "key-1", "hash-a", fn)
+	status2, body2, err := Idempotent(ctx, pool, shopID, actorID, "key-1", "hash-a", fn)
 	if err != nil {
 		t.Fatalf("replay call: %v", err)
 	}
@@ -108,18 +118,19 @@ func TestIdempotent_sameKeyDifferentHashReturns409WithoutRerunningFn(t *testing.
 	testdb.Truncate(t, pool)
 	ctx := context.Background()
 	shopID := idempotencyTestShop(ctx, t, pool, "idem-reuse")
+	actorID := uuid.New()
 
 	var calls int
-	fn := func() (int, []byte, error) {
+	fn := noopFn(func() (int, []byte, error) {
 		calls++
 		return http.StatusCreated, []byte(`{"n":1}`), nil
-	}
+	})
 
-	if _, _, err := Idempotent(ctx, pool, shopID, "key-1", "hash-a", fn); err != nil {
+	if _, _, err := Idempotent(ctx, pool, shopID, actorID, "key-1", "hash-a", fn); err != nil {
 		t.Fatalf("first call: %v", err)
 	}
 
-	_, _, err := Idempotent(ctx, pool, shopID, "key-1", "hash-b", fn)
+	_, _, err := Idempotent(ctx, pool, shopID, actorID, "key-1", "hash-b", fn)
 	if err == nil {
 		t.Fatal("want an error for a reused key with a different hash, got none")
 	}
@@ -144,23 +155,24 @@ func TestIdempotent_errorIsNotStoredAndCanBeRetried(t *testing.T) {
 	testdb.Truncate(t, pool)
 	ctx := context.Background()
 	shopID := idempotencyTestShop(ctx, t, pool, "idem-error-retry")
+	actorID := uuid.New()
 
 	wantErr := errors.New("boom")
 	var calls int
-	failThenSucceed := func() (int, []byte, error) {
+	failThenSucceed := noopFn(func() (int, []byte, error) {
 		calls++
 		if calls == 1 {
 			return 0, nil, wantErr
 		}
 		return http.StatusCreated, []byte(`{"n":2}`), nil
-	}
+	})
 
-	_, _, err := Idempotent(ctx, pool, shopID, "key-1", "hash-a", failThenSucceed)
+	_, _, err := Idempotent(ctx, pool, shopID, actorID, "key-1", "hash-a", failThenSucceed)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("first call error = %v, want %v", err, wantErr)
 	}
 
-	status, body, err := Idempotent(ctx, pool, shopID, "key-1", "hash-a", failThenSucceed)
+	status, body, err := Idempotent(ctx, pool, shopID, actorID, "key-1", "hash-a", failThenSucceed)
 	if err != nil {
 		t.Fatalf("retry call: %v", err)
 	}
@@ -169,6 +181,47 @@ func TestIdempotent_errorIsNotStoredAndCanBeRetried(t *testing.T) {
 	}
 	if status != http.StatusCreated || string(body) != `{"n":2}` {
 		t.Fatalf("retry response = %d %s, want 201 {\"n\":2}", status, body)
+	}
+}
+
+// TestIdempotent_failureAfterDomainWriteRollsBackEverything is MAJOR 2's
+// own test: fn writes something real (an idempotency_keys row for an
+// unrelated key, standing in for "the domain write" — Idempotent itself
+// has no other table to write to) through qtx and then fails. Since fn
+// runs on Idempotent's own transaction (BLOCKER 1's fix), that failure
+// must roll the domain write back too, leaving neither it nor an
+// idempotency_keys row for the key under test.
+func TestIdempotent_failureAfterDomainWriteRollsBackEverything(t *testing.T) {
+	pool := testdb.New(t)
+	testdb.Truncate(t, pool)
+	ctx := context.Background()
+	shopID := idempotencyTestShop(ctx, t, pool, "idem-write-then-fail")
+	actorID := uuid.New()
+	sideKey := "side-effect-key"
+
+	wantErr := errors.New("boom after write")
+	fn := func(qtx *db.Queries) (int, []byte, error) {
+		// The "domain write": a real row, on the same transaction
+		// Idempotent holds its own lock and bookkeeping on.
+		if _, err := qtx.InsertIdempotencyKey(ctx, db.InsertIdempotencyKeyParams{
+			ShopID: shopID, Key: sideKey, RequestHash: "side-hash", ResponseStatus: 200, ResponseBody: []byte(`{}`),
+		}); err != nil {
+			return 0, nil, err
+		}
+		return 0, nil, wantErr
+	}
+
+	_, _, err := Idempotent(ctx, pool, shopID, actorID, "outer-key", "outer-hash", fn)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("Idempotent error = %v, want %v", err, wantErr)
+	}
+
+	q := db.New(pool)
+	if _, err := q.GetIdempotencyKey(ctx, db.GetIdempotencyKeyParams{ShopID: shopID, Key: sideKey}); err == nil {
+		t.Fatal("want the domain write (side-effect key row) rolled back, but it is present")
+	}
+	if _, err := q.GetIdempotencyKey(ctx, db.GetIdempotencyKeyParams{ShopID: shopID, Key: "outer-key"}); err == nil {
+		t.Fatal("want no idempotency_keys row for the outer key after a failure, found one")
 	}
 }
 
@@ -181,9 +234,10 @@ func TestIdempotent_concurrentSameKeyRunsFnExactlyOnce(t *testing.T) {
 	testdb.Truncate(t, pool)
 	ctx := context.Background()
 	shopID := idempotencyTestShop(ctx, t, pool, "idem-race")
+	actorID := uuid.New()
 
 	var calls int32
-	fn := func() (int, []byte, error) {
+	fn := noopFn(func() (int, []byte, error) {
 		n := atomic.AddInt32(&calls, 1)
 		// A tiny amount of real work widens the race window so a broken
 		// implementation (no lock) reliably shows two calls instead of
@@ -193,7 +247,7 @@ func TestIdempotent_concurrentSameKeyRunsFnExactlyOnce(t *testing.T) {
 			return 0, nil, err
 		}
 		return http.StatusCreated, []byte(`{"n":` + string(rune('0'+n)) + `}`), nil
-	}
+	})
 
 	const n = 5
 	results := make([]struct {
@@ -207,7 +261,7 @@ func TestIdempotent_concurrentSameKeyRunsFnExactlyOnce(t *testing.T) {
 	for i := 0; i < n; i++ {
 		go func(i int) {
 			defer wg.Done()
-			status, body, err := Idempotent(ctx, pool, shopID, "race-key", "race-hash", fn)
+			status, body, err := Idempotent(ctx, pool, shopID, actorID, "race-key", "race-hash", fn)
 			results[i] = struct {
 				status int
 				body   string
@@ -238,12 +292,13 @@ func TestRequestHash_sameLogicalBodySameHash(t *testing.T) {
 		Qty    string `json:"qty"`
 		Reason string `json:"reason"`
 	}
+	actorID := uuid.New()
 
-	h1, err := RequestHash(http.MethodPost, "/stock/adjustments", body{Qty: "1.000", Reason: "found"})
+	h1, err := RequestHash(http.MethodPost, "/stock/adjustments", actorID, body{Qty: "1.000", Reason: "found"})
 	if err != nil {
 		t.Fatalf("RequestHash: %v", err)
 	}
-	h2, err := RequestHash(http.MethodPost, "/stock/adjustments", body{Qty: "1.000", Reason: "found"})
+	h2, err := RequestHash(http.MethodPost, "/stock/adjustments", actorID, body{Qty: "1.000", Reason: "found"})
 	if err != nil {
 		t.Fatalf("RequestHash: %v", err)
 	}
@@ -251,11 +306,33 @@ func TestRequestHash_sameLogicalBodySameHash(t *testing.T) {
 		t.Fatalf("RequestHash is not deterministic for the same logical body: %q != %q", h1, h2)
 	}
 
-	h3, err := RequestHash(http.MethodPost, "/stock/adjustments", body{Qty: "2.000", Reason: "found"})
+	h3, err := RequestHash(http.MethodPost, "/stock/adjustments", actorID, body{Qty: "2.000", Reason: "found"})
 	if err != nil {
 		t.Fatalf("RequestHash: %v", err)
 	}
 	if h1 == h3 {
 		t.Fatal("RequestHash produced the same hash for two different bodies")
+	}
+}
+
+// TestRequestHash_differentActorSameBodyDifferentHash is MINOR 7's own
+// test: two different actors sending the byte-identical body under the
+// same method/path must not hash the same, or Idempotent would let the
+// second actor replay a response rendered for the first (RequestHash's
+// own doc comment).
+func TestRequestHash_differentActorSameBodyDifferentHash(t *testing.T) {
+	type body struct{ Qty string `json:"qty"` }
+	b := body{Qty: "1.000"}
+
+	h1, err := RequestHash(http.MethodPost, "/stock/adjustments", uuid.New(), b)
+	if err != nil {
+		t.Fatalf("RequestHash: %v", err)
+	}
+	h2, err := RequestHash(http.MethodPost, "/stock/adjustments", uuid.New(), b)
+	if err != nil {
+		t.Fatalf("RequestHash: %v", err)
+	}
+	if h1 == h2 {
+		t.Fatal("RequestHash produced the same hash for two different actors with the same body")
 	}
 }
