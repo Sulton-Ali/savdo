@@ -17,6 +17,7 @@ import (
 	"github.com/Sulton-Ali/savdo/api/internal/apierr"
 	"github.com/Sulton-Ali/savdo/api/internal/auth"
 	"github.com/Sulton-Ali/savdo/api/internal/catalog"
+	"github.com/Sulton-Ali/savdo/api/internal/crm"
 	"github.com/Sulton-Ali/savdo/api/internal/media"
 	"github.com/Sulton-Ali/savdo/api/internal/shop"
 	"github.com/Sulton-Ali/savdo/api/internal/stock"
@@ -47,18 +48,20 @@ import (
 // (catalog.go); catalog.AcceptLanguageMiddleware runs alongside
 // authSvc.Middleware so those handlers can resolve `Accept-Language` (not
 // modelled as a per-operation parameter in the contract) off the context.
-// stockSvc backs the five `/stock/*` operations via stock.NewHandler
-// (stock.go); CreateStockAdjustment additionally uses pool directly, for
-// httpx.Idempotent's Idempotency-Key bookkeeping (stock.go's own doc
-// comment).
-func NewRouter(logger *slog.Logger, pool *pgxpool.Pool, authSvc *auth.Service, shopSvc *shop.Service, mediaSvc *media.Service, devMedia http.Handler, catalogSvc *catalog.Service, stockSvc *stock.Service) http.Handler {
+// stockSvc backs the `/stock/*` and `/purchases*` operations via
+// stock.NewHandler (stock.go, purchases.go); CreateStockAdjustment and
+// ReceivePurchase additionally use pool directly, for httpx.Idempotent's
+// Idempotency-Key bookkeeping (stock.go's/purchases.go's own doc
+// comments). crmSvc backs the five `/suppliers` operations via
+// crm.NewHandler (crm.go).
+func NewRouter(logger *slog.Logger, pool *pgxpool.Pool, authSvc *auth.Service, shopSvc *shop.Service, mediaSvc *media.Service, devMedia http.Handler, catalogSvc *catalog.Service, stockSvc *stock.Service, crmSvc *crm.Service) http.Handler {
 	mux := http.NewServeMux()
 
 	strictHandler := gen.NewStrictHandlerWithOptions(
 		server{
 			pool: pool, Handler: auth.NewHandler(authSvc), shop: shop.NewHandler(shopSvc),
 			media: media.NewHandler(mediaSvc), catalog: catalog.NewHandler(catalogSvc),
-			stock: stock.NewHandler(stockSvc),
+			crm: crm.NewHandler(crmSvc), stock: stock.NewHandler(stockSvc),
 		},
 		[]gen.StrictMiddlewareFunc{authSvc.Middleware, catalog.AcceptLanguageMiddleware},
 		gen.StrictHTTPServerOptions{

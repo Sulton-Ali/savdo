@@ -15,6 +15,7 @@ import (
 	"github.com/Sulton-Ali/savdo/api/internal/auth"
 	"github.com/Sulton-Ali/savdo/api/internal/catalog"
 	"github.com/Sulton-Ali/savdo/api/internal/config"
+	"github.com/Sulton-Ali/savdo/api/internal/crm"
 	"github.com/Sulton-Ali/savdo/api/internal/media"
 	"github.com/Sulton-Ali/savdo/api/internal/shop"
 	"github.com/Sulton-Ali/savdo/api/internal/stock"
@@ -56,10 +57,17 @@ func testCatalogService() *catalog.Service {
 }
 
 // testStockService builds a stock.Service safe to wire into NewRouter for
-// tests that never exercise a `/stock/*` route — a nil pool and nil
-// *db.Queries are never dereferenced in that case.
+// tests that never exercise a `/stock/*` or `/purchases*` route — a nil
+// pool and nil *db.Queries are never dereferenced in that case.
 func testStockService() *stock.Service {
 	return stock.NewService(nil, nil)
+}
+
+// testCrmService builds a crm.Service safe to wire into NewRouter for
+// tests that never exercise a `/suppliers` route — a nil *db.Queries is
+// never dereferenced in that case.
+func testCrmService() *crm.Service {
+	return crm.NewService(nil)
 }
 
 func TestHealthz(t *testing.T) {
@@ -87,7 +95,7 @@ func TestHealthz(t *testing.T) {
 		},
 	}
 
-	router := NewRouter(testLogger(), nil, testAuthService(), testShopService(), testMediaService(), nil, testCatalogService(), testStockService())
+	router := NewRouter(testLogger(), nil, testAuthService(), testShopService(), testMediaService(), nil, testCatalogService(), testStockService(), testCrmService())
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -15,6 +15,7 @@ import (
 	"github.com/Sulton-Ali/savdo/api/internal/auth"
 	"github.com/Sulton-Ali/savdo/api/internal/catalog"
 	"github.com/Sulton-Ali/savdo/api/internal/config"
+	crmmod "github.com/Sulton-Ali/savdo/api/internal/crm"
 	"github.com/Sulton-Ali/savdo/api/internal/db"
 	"github.com/Sulton-Ali/savdo/api/internal/db/testdb"
 	mediamod "github.com/Sulton-Ali/savdo/api/internal/media"
@@ -76,9 +77,10 @@ func newAuthTestFixture(t *testing.T, cfgOverrides func(*config.Config)) authTes
 	mediaSvc := mediamod.NewService(q, nil, "/media", 10<<20, 2, 10)
 	catalogSvc := catalog.NewService(pool, q, "uz", "/media")
 	stockSvc := stockmod.NewService(pool, q)
+	crmSvc := crmmod.NewService(q)
 
 	return authTestFixture{
-		router:   NewRouter(testLogger(), pool, authSvc, shopSvc, mediaSvc, nil, catalogSvc, stockSvc),
+		router:   NewRouter(testLogger(), pool, authSvc, shopSvc, mediaSvc, nil, catalogSvc, stockSvc, crmSvc),
 		shopID:   shop.ID,
 		userID:   user.ID,
 		username: user.Username,
