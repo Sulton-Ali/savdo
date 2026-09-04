@@ -38,7 +38,7 @@ confirm_action`), `code_hash bytea`, `expires_at`, `used_at`, `attempts int`.
 **units** — `code text` (`pcs`, `kg`, `m`, …), `name_*` via translations, `precision
 smallint` (0 for pcs, 3 for kg). Unique `(shop_id, code)`. Seeded per shop.
 
-**categories** — `parent_id`, `slug`, `sort_order`, `is_active`, `image_id`.
+**categories** — `parent_id`, `slug`, `sort_order`, `is_active`, `image_id`, `deleted_at` (soft delete, O-14).
 Unique `(shop_id, slug)`. Depth ≤ 3 enforced in service.
 
 **category_translations** — `category_id`, `locale`, `name`, `description`.
@@ -173,7 +173,7 @@ voids, role changes, settings changes.
    `NNNN_<slug>.sql`, `-- +goose Up` / `-- +goose Down`. Down must be real, not a
    comment, except for data backfills where the owner approved "no down".
 6. **sqlc output is committed and must be fresh** — `make verify` runs `sqlc diff`.
-7. **Soft delete** products, variants, customers, suppliers (`deleted_at`); hard delete
+7. **Soft delete** categories, products, variants, customers, suppliers (`deleted_at`); hard delete
    join rows (`product_images`). Never hard-delete a variant referenced by a movement
    or a sale item — the FK prevents it; do not weaken the FK.
 8. **`sale_items.unit_cost` and `products.cost_price` never appear in a query used by a
