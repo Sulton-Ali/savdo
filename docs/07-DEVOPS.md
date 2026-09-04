@@ -25,13 +25,21 @@ without `--force`): shop `savdo-demo`; `owner` / `owner-dev-pass`, `manager` /
 `printf 'new-password\n' | go run ./cmd/savdo reset-owner-password --password-stdin`
 (from `api/`); it revokes the owner's sessions (D-28).
 
+`make seed` also seeds a full demo clothing catalogue for `savdo-demo` (Phase 2 T5): 4
+units, size/colour attribute definitions, ~8 categories (Men/Women/Kids), ~30 products
+with variants and generated placeholder images, entirely through the catalog service and
+media pipeline — idempotent, so re-running it never duplicates anything. This step needs
+`MEDIA_DIR` set (`infra/.env` already sets it for `make seed`; running `go run ./cmd/savdo
+seed` directly needs `DATABASE_URL` and `MEDIA_DIR` in the environment, same as `cmd/api`).
+
 Media files in dev go to `infra/data/media/` (gitignored).
 
 ## Environment variables
 
 The API loads all of these via `config.Load()`. `savdo migrate` reads only
-`DATABASE_URL`; `savdo seed` reads `DATABASE_URL` and `ENV` directly, not via
-`config.Load()`. Defaults shown are from `api/internal/config/config.go`. `config.Load()`
+`DATABASE_URL`; `savdo seed` loads the full config via `config.Load()` (it needs
+`MEDIA_DIR` and `MEDIA_BASE_URL` for the catalogue images). Defaults shown are from
+`api/internal/config/config.go`. `config.Load()`
 also enforces that, in **production, `MEDIA_DIR` must be an absolute path**; the dev
 default is relative, and `config.Load()` fails fast when `ENV=prod` and it isn't
 absolute (config.go L120-129).

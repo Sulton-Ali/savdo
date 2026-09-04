@@ -1,16 +1,24 @@
 -- name: ListVariantsForStaff :many
+-- `, id` breaks ties deterministically: every variant of one product is
+-- inserted inside the same transaction (createProductAttempt,
+-- api/internal/catalog/products.go), and Postgres' now() returns that
+-- transaction's start time for every call within it, so created_at alone
+-- can be identical across all of a product's variants — ORDER BY
+-- created_at with no tiebreaker then leaves their relative order
+-- unspecified from one call to the next.
 SELECT * FROM product_variants
 WHERE shop_id = $1 AND product_id = $2 AND deleted_at IS NULL
-ORDER BY created_at;
+ORDER BY created_at, id;
 
 -- name: ListVariantsForCashier :many
--- No cost_override (§ 04-DATA-MODEL.md rule 8, ADR-010).
+-- No cost_override (§ 04-DATA-MODEL.md rule 8, ADR-010). Same `, id`
+-- tiebreaker as ListVariantsForStaff, same reason.
 SELECT
     id, shop_id, product_id, sku, barcode, attributes,
     price_override, is_active, deleted_at, created_at, updated_at
 FROM product_variants
 WHERE shop_id = $1 AND product_id = $2 AND deleted_at IS NULL
-ORDER BY created_at;
+ORDER BY created_at, id;
 
 -- name: GetVariantForStaff :one
 SELECT * FROM product_variants
