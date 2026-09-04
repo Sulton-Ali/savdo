@@ -469,8 +469,8 @@ type Shop struct {
 	AiDailyTokenBudget   *int32    `json:"ai_daily_token_budget"`
 	CreatedAt            time.Time `json:"created_at"`
 	UpdatedAt            time.Time `json:"updated_at"`
-	NextPurchaseNumber   int64     `json:"next_purchase_number"`
 	LowStockThreshold    int32     `json:"low_stock_threshold"`
+	NextPurchaseNumber   int64     `json:"next_purchase_number"`
 }
 
 type StockLevel struct {

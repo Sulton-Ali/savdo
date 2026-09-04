@@ -1,4 +1,10 @@
 -- +goose Up
+-- Same shape as shops.next_sale_number (0001_shops.sql) — a per-shop,
+-- gap-free counter advanced only under row lock by this migration's own
+-- NextPurchaseNumber query (D-45), never by a settings update.
+ALTER TABLE shops
+    ADD COLUMN next_purchase_number bigint NOT NULL DEFAULT 1;
+
 CREATE TYPE purchase_status AS ENUM ('draft', 'received', 'cancelled');
 
 CREATE TABLE purchases (
@@ -50,3 +56,4 @@ CREATE INDEX purchase_items_variant_id_idx ON purchase_items (variant_id);
 DROP TABLE purchase_items;
 DROP TABLE purchases;
 DROP TYPE purchase_status;
+ALTER TABLE shops DROP COLUMN next_purchase_number;
