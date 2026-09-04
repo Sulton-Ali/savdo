@@ -3,7 +3,9 @@ package stock_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -163,5 +165,79 @@ func TestCreateStockTransfer_variantFromAnotherShop404(t *testing.T) {
 	var apiErr *apierr.Error
 	if !errors.As(err, &apiErr) || apiErr.Status != 404 {
 		t.Fatalf("error = %v, want 404", err)
+	}
+}
+
+// TestCreateStockTransfer_opposingConcurrentTransfersDoNotDeadlock is
+// MINOR 4's own reproduction: many concurrent A->B and B->A transfers of
+// the same variant, run together so some of them genuinely overlap.
+// Before sortedTransferLegs (transfers.go), each direction locked its two
+// rows out-then-in — A->B locks A then B, B->A locks B then A — the
+// classic opposite-order pattern Postgres detects as SQLSTATE 40P01 and
+// kills one side of; some runs of this exact test, unfixed, surfaced that
+// as a raw error from CreateStockTransfer. With rows locked in a
+// consistent (locationID) order regardless of direction, every transfer
+// queues on whichever row sorts first instead of deadlocking, so every
+// call here must succeed (allow_negative_stock is on, so none can fail on
+// insufficient stock either — the only thing this test wants to rule out
+// is the deadlock).
+func TestCreateStockTransfer_opposingConcurrentTransfersDoNotDeadlock(t *testing.T) {
+	pool, q := newTestQueries(t)
+	ctx := context.Background()
+	svc := stock.NewService(pool, q)
+	h := stock.NewHandler(svc)
+
+	shop := seedShopAllowNegative(ctx, t, q, "transfer-opposing-race")
+	manager := seedUser(ctx, t, q, shop.ID, "manager1", db.UserRoleManager)
+	unit := seedUnit(ctx, t, q, shop.ID, "pcs")
+	product := seedProduct(ctx, t, q, shop.ID, unit.ID, "transfer-opposing-race-product")
+	variant := seedVariant(ctx, t, q, shop.ID, product.ID, "{}")
+	locA := seedLocation(ctx, t, q, shop.ID, "A")
+	locB := seedLocation(ctx, t, q, shop.ID, "B")
+	mCtx := ctxAs(shop.ID, manager)
+
+	const pairs = 15
+	errs := make([]error, pairs*2)
+	var wg sync.WaitGroup
+	wg.Add(pairs * 2)
+	for i := 0; i < pairs; i++ {
+		go func(i int) {
+			defer wg.Done()
+			_, err := h.CreateStockTransfer(mCtx, transferReq(variant.ID, locA.ID, locB.ID, "1.000"))
+			errs[2*i] = err
+		}(i)
+		go func(i int) {
+			defer wg.Done()
+			_, err := h.CreateStockTransfer(mCtx, transferReq(variant.ID, locB.ID, locA.ID, "1.000"))
+			errs[2*i+1] = err
+		}(i)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(20 * time.Second):
+		t.Fatal("opposing concurrent transfers did not complete within 20s — likely deadlocked")
+	}
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("transfer %d: want success (or a clean retry), got: %v", i, err)
+		}
+	}
+
+	// Net effect: pairs A->B and pairs B->A cancel out.
+	aQty, _ := readLevel(ctx, t, pool, shop.ID, variant.ID, locA.ID)
+	if !aQty.Equal(d(t, "0.000")) {
+		t.Fatalf("location A level = %s, want 0.000 (equal traffic both ways)", aQty)
+	}
+	bQty, _ := readLevel(ctx, t, pool, shop.ID, variant.ID, locB.ID)
+	if !bQty.Equal(d(t, "0.000")) {
+		t.Fatalf("location B level = %s, want 0.000 (equal traffic both ways)", bQty)
 	}
 }

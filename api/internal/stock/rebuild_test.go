@@ -73,6 +73,46 @@ func TestRebuild_matchesLedgerSum(t *testing.T) {
 	}
 }
 
+// TestRebuild_zeroNetLevelRowSurvives is MINOR 6's own test: a
+// (variant, location) whose movements net to exactly zero still has a
+// stock_levels row (qty 0) before the rebuild — D-50's `/stock/low` rules
+// depend on that row existing and counting as "stocked" rather than
+// "never tracked" (docs/00-DECISIONS.md D-50, api/db/queries/stock.sql's
+// own ListLow comment) — and RebuildLevelsFromMovements' GROUP BY still
+// produces a row for it (SUM = 0 is still a group with one member, not an
+// empty group), so the rebuild must not make that row disappear.
+func TestRebuild_zeroNetLevelRowSurvives(t *testing.T) {
+	pool, q := newTestQueries(t)
+	ctx := context.Background()
+	svc := stock.NewService(pool, q)
+
+	shop := seedShop(ctx, t, q, "rebuild-zero-net")
+	unit := seedUnit(ctx, t, q, shop.ID, "pcs")
+	product := seedProduct(ctx, t, q, shop.ID, unit.ID, "rebuild-zero-net-product")
+	variant := seedVariant(ctx, t, q, shop.ID, product.ID, "{}")
+	loc := seedLocation(ctx, t, q, shop.ID, "Main")
+
+	mustMove(ctx, t, svc, shop.ID, variant.ID, loc.ID, db.StockMovementKindPurchaseIn, "5.000")
+	mustMove(ctx, t, svc, shop.ID, variant.ID, loc.ID, db.StockMovementKindSaleOut, "-5.000")
+
+	before, exists := readLevel(ctx, t, pool, shop.ID, variant.ID, loc.ID)
+	if !exists || !before.Equal(d(t, "0.000")) {
+		t.Fatalf("before rebuild = (%s, exists=%v), want (0.000, true)", before, exists)
+	}
+
+	if _, err := stock.Rebuild(ctx, pool, shop.Slug); err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+
+	after, exists := readLevel(ctx, t, pool, shop.ID, variant.ID, loc.ID)
+	if !exists {
+		t.Fatal("want the zero-net row to survive the rebuild, found none")
+	}
+	if !after.Equal(d(t, "0.000")) {
+		t.Fatalf("after rebuild = %s, want 0.000", after)
+	}
+}
+
 func TestRebuild_unknownShopSlugErrors(t *testing.T) {
 	pool, _ := newTestQueries(t)
 	if _, err := stock.Rebuild(context.Background(), pool, "no-such-shop"); err == nil {

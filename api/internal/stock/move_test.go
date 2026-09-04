@@ -414,3 +414,47 @@ func TestMoveInTx_commitsOnSuccessRollsBackOnFailure(t *testing.T) {
 		t.Fatalf("adjustment movement count after a failed MoveInTx = %d, want 0", got)
 	}
 }
+
+// TestMove_numericOverflowIs400 is NIT 13's own test: a level already at
+// numeric(12,3)'s max (999999999.999, 9 integer digits) pushed one more
+// unit over — a magnitude parseQty's own bound (also 999999999.999) could
+// never let a single request's qty alone reach, so this drives Move
+// directly rather than through a handler — must map Postgres'
+// numeric_field_overflow to 400 VALIDATION_FAILED on "qty", not a raw
+// 500.
+func TestMove_numericOverflowIs400(t *testing.T) {
+	pool, q := newTestQueries(t)
+	ctx := context.Background()
+	svc := stock.NewService(pool, q)
+
+	shop := seedShop(ctx, t, q, "move-overflow")
+	unit := seedUnit(ctx, t, q, shop.ID, "pcs")
+	product := seedProduct(ctx, t, q, shop.ID, unit.ID, "move-overflow-product")
+	variant := seedVariant(ctx, t, q, shop.ID, product.ID, "{}")
+	loc := seedLocation(ctx, t, q, shop.ID, "Main")
+
+	if _, err := svc.MoveInTx(ctx, stock.MoveParams{
+		ShopID: shop.ID, VariantID: variant.ID, LocationID: loc.ID,
+		Kind: db.StockMovementKindPurchaseIn, Qty: d(t, "999999999.999"),
+	}); err != nil {
+		t.Fatalf("seed max-magnitude opening stock: %v", err)
+	}
+
+	_, err := svc.MoveInTx(ctx, stock.MoveParams{
+		ShopID: shop.ID, VariantID: variant.ID, LocationID: loc.ID,
+		Kind: db.StockMovementKindPurchaseIn, Qty: d(t, "0.001"),
+	})
+	if err == nil {
+		t.Fatal("want a numeric overflow error pushing the level past 999999999.999, got none")
+	}
+	var apiErr *apierr.Error
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("error type = %T, want *apierr.Error", err)
+	}
+	if apiErr.Status != 400 {
+		t.Fatalf("status = %d, want 400 VALIDATION_FAILED", apiErr.Status)
+	}
+	if apiErr.Details["fields"].(map[string]string)["qty"] != "invalid" {
+		t.Fatalf("details = %v, want fields.qty=invalid", apiErr.Details)
+	}
+}
