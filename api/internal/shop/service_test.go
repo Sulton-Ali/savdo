@@ -514,11 +514,16 @@ func TestUpdateLocationTakeoverClearsOldDefault(t *testing.T) {
 // TestUpdateLocationConcurrentTakeoverExactlyOneDefaultRemains is
 // MAJOR-1's concurrency check: two goroutines each try to make a
 // different (currently non-default) location the shop's default at the
-// same time. Per the review, both outcomes below are acceptable — what
-// is never acceptable is a 500 or more than one default surviving:
-// locations_shop_id_default_key (mapped to 409 CONFLICT
-// details.field=isDefault by conflictField) is the backstop for
-// whichever request loses the race.
+// same time. Both lock the shop's current default row
+// (GetDefaultLocationForUpdate) before deciding anything, so they
+// serialize on it: the loser sees the winner's committed result rather
+// than a stale snapshot, and — with that ordering — both calls are
+// expected to succeed (last writer wins). The assertion is deliberately
+// the weaker "no 500 and exactly one default" rather than "both must
+// return nil": locations_shop_id_default_key (mapped to 409 CONFLICT
+// details.field=isDefault by conflictField) still stands as a backstop
+// for any interleaving the locking order doesn't itself rule out, and a
+// 409 there is a correct outcome too, just never a 500.
 func TestUpdateLocationConcurrentTakeoverExactlyOneDefaultRemains(t *testing.T) {
 	svc, q, ctx := newTestService(t)
 	shopRow := seedShop(ctx, t, q, "shop-a")

@@ -36,12 +36,25 @@ func (s *Service) ListLocations(ctx context.Context, shopID uuid.UUID, limit int
 }
 
 // CreateLocation creates a location for shopID. It runs inside a
-// transaction because it must first find out whether this is the shop's
-// first location (which becomes the default automatically regardless of
-// wantDefault) and, when the new location is to be the default, clear
-// any existing default first — the same ClearDefaultLocation-then-write
-// ordering UpdateLocation uses, so the partial "one default per shop"
-// unique index is never violated.
+// transaction and, before deciding anything, locks the shop's current
+// default location row via GetDefaultLocationForUpdate — the same lock
+// UpdateLocation takes first when it might change the default — so a
+// concurrent CreateLocation/UpdateLocation racing to become the default
+// serializes on that row instead of both reading a stale snapshot.
+// GetDefaultLocationForUpdate returning pgx.ErrNoRows means the shop has
+// no location yet (given the invariant every shop with ≥1 location has
+// exactly one default), which is also how this method decides "this is
+// the first location" — it becomes the default automatically regardless
+// of wantDefault. When the new location is to be the default, any
+// existing one is cleared first, in the same transaction as the insert,
+// so the partial "one default per shop" unique index is never violated
+// by this method's own write.
+//
+// The one race this lock cannot close is two concurrent creates that
+// are BOTH the shop's very first location: there is no default row yet
+// for either to lock. locations_shop_id_default_key (mapped to 409
+// CONFLICT details.field=isDefault by conflictField) is the backstop
+// for that narrow, onboarding-only window.
 func (s *Service) CreateLocation(ctx context.Context, shopID uuid.UUID, name string, kind db.LocationKind, wantDefault bool) (db.Location, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -50,11 +63,12 @@ func (s *Service) CreateLocation(ctx context.Context, shopID uuid.UUID, name str
 	defer func() { _ = tx.Rollback(ctx) }()
 	qtx := s.q.WithTx(tx)
 
-	existing, err := qtx.ListLocations(ctx, db.ListLocationsParams{ShopID: shopID, Limit: 1})
-	if err != nil {
-		return db.Location{}, fmt.Errorf("shop: check existing locations: %w", err)
+	_, err = qtx.GetDefaultLocationForUpdate(ctx, shopID)
+	isFirst := errors.Is(err, pgx.ErrNoRows)
+	if err != nil && !isFirst {
+		return db.Location{}, fmt.Errorf("shop: lock default location: %w", err)
 	}
-	isDefault := wantDefault || len(existing) == 0
+	isDefault := wantDefault || isFirst
 
 	if isDefault {
 		if err := qtx.ClearDefaultLocation(ctx, shopID); err != nil {
@@ -101,21 +115,19 @@ type LocationPatchInput struct {
 // actually sent. Setting isDefault: true clears any existing default
 // first, in the same transaction as the write.
 //
-// Whenever isDefault or isActive is part of the patch, the read that
-// decides those guards, the ClearDefaultLocation-if-needed, and the
-// write all run inside one transaction (reusing the plain
-// GetLocation/UpdateLocation queries via WithTx), instead of the read
-// happening before any transaction starts. That narrows, but does not
-// fully close, the race two concurrent "make this the default" requests
-// can hit: without a `SELECT … FOR UPDATE` variant of GetLocation — a
-// query change outside this package's scope (api/db) — two transactions
-// can still each decide "I should become the default" from their own
-// snapshot before either commits. The partial unique index
-// locations_shop_id_default_key is the backstop for that remaining
-// window: conflictField maps its 23505 to 409 CONFLICT
-// details.field=isDefault, so the loser of such a race gets a clean 409
-// instead of a 500, and the index itself guarantees at most one default
-// row ever exists no matter how the two transactions interleave.
+// Whenever isDefault or isActive is part of the patch, everything runs
+// inside one transaction that locks, in order: the shop's current
+// default location row (GetDefaultLocationForUpdate — every caller that
+// might change the default, including CreateLocation, takes this same
+// lock first), then the target row itself (GetLocationForUpdate). Two
+// concurrent "make this the default" requests targeting different rows
+// therefore serialize on the shared default-row lock before either
+// reaches its own target: whichever commits first wins outright, and
+// the second sees the first's result already committed rather than a
+// stale snapshot — so both succeed (last writer wins), never a 500.
+// locations_shop_id_default_key (mapped to 409 CONFLICT
+// details.field=isDefault by conflictField) remains as a backstop for
+// any interleaving this locking order doesn't itself rule out.
 func (s *Service) UpdateLocation(ctx context.Context, shopID, id uuid.UUID, in LocationPatchInput) (db.Location, error) {
 	if in.IsDefault == nil && in.IsActive == nil {
 		// Fast path: neither field that can violate the "exactly one
@@ -148,7 +160,11 @@ func (s *Service) UpdateLocation(ctx context.Context, shopID, id uuid.UUID, in L
 	defer func() { _ = tx.Rollback(ctx) }()
 	qtx := s.q.WithTx(tx)
 
-	current, err := qtx.GetLocation(ctx, db.GetLocationParams{ShopID: shopID, ID: id})
+	if _, err := qtx.GetDefaultLocationForUpdate(ctx, shopID); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return db.Location{}, fmt.Errorf("shop: lock default location: %w", err)
+	}
+
+	current, err := qtx.GetLocationForUpdate(ctx, db.GetLocationForUpdateParams{ShopID: shopID, ID: id})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return db.Location{}, apierr.NotFound("location")

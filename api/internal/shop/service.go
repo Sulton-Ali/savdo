@@ -72,12 +72,15 @@ func conflictField(err error) (string, bool) {
 		return "name", true
 	case "locations_shop_id_default_key":
 		// The partial unique index enforcing "at most one default
-		// location per shop" — the backstop for the race
-		// UpdateLocation/CreateLocation's own guards narrow but cannot
-		// fully close without a locking query change (see
-		// locations.go's UpdateLocation doc comment): a concurrent
-		// request that also ended up trying to set is_default=true
-		// loses here with a clean 409 instead of a 500.
+		// location per shop". CreateLocation and UpdateLocation lock
+		// the current default row (GetDefaultLocationForUpdate) before
+		// deciding anything, which serializes the common race; this
+		// mapping is the backstop for what that locking order doesn't
+		// itself rule out — e.g. two shops-with-zero-locations creates
+		// racing to be the very first, with no default row yet for
+		// either to lock (see CreateLocation's doc comment) — so a
+		// concurrent request that also ended up trying to set
+		// is_default=true loses here with a clean 409 instead of a 500.
 		return "isDefault", true
 	default:
 		return "", false
