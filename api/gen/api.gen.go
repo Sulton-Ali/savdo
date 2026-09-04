@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/oapi-codegen/nullable"
 	"github.com/oapi-codegen/runtime"
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
@@ -268,8 +269,8 @@ type LocationKind string
 
 // LocationList Cursor-paginated envelope for `GET /locations`.
 type LocationList struct {
-	Items      []Location `json:"items"`
-	NextCursor *string    `json:"nextCursor"`
+	Items      []Location                `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"nextCursor"`
 }
 
 // LocationPatch Partial update — only provided fields change.
@@ -332,11 +333,11 @@ type Session struct {
 	Current bool `json:"current"`
 
 	// ExpiresAt Recomputed on every authenticated use, sliding per `client` (D-29): 30 days for `mobile`, 7 days for `web`.
-	ExpiresAt  time.Time          `json:"expiresAt"`
-	Id         openapi_types.UUID `json:"id"`
-	Ip         *string            `json:"ip"`
-	LastSeenAt time.Time          `json:"lastSeenAt"`
-	UserAgent  *string            `json:"userAgent"`
+	ExpiresAt  time.Time                 `json:"expiresAt"`
+	Id         openapi_types.UUID        `json:"id"`
+	Ip         nullable.Nullable[string] `json:"ip"`
+	LastSeenAt time.Time                 `json:"lastSeenAt"`
+	UserAgent  nullable.Nullable[string] `json:"userAgent"`
 }
 
 // SessionClient Which client created a session (D-29).
@@ -344,8 +345,8 @@ type SessionClient string
 
 // SessionList Cursor-paginated envelope for `GET /auth/sessions`.
 type SessionList struct {
-	Items      []Session `json:"items"`
-	NextCursor *string   `json:"nextCursor"`
+	Items      []Session                 `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"nextCursor"`
 }
 
 // SetStaffPassword defines model for SetStaffPassword.
@@ -402,8 +403,8 @@ type StaffPatch struct {
 	IsActive *bool   `json:"isActive,omitempty"`
 
 	// Locale A UI/data locale (ADR-012).
-	Locale *Locale `json:"locale,omitempty"`
-	Phone  *string `json:"phone,omitempty"`
+	Locale *Locale                   `json:"locale,omitempty"`
+	Phone  nullable.Nullable[string] `json:"phone,omitempty"`
 
 	// Role The roles the owner can assign when creating or editing a staff member. `owner` is not assignable — there is exactly one owner, seeded (D-30).
 	Role *StaffRole `json:"role,omitempty"`
@@ -414,15 +415,15 @@ type StaffRole string
 
 // User defines model for User.
 type User struct {
-	CreatedAt   time.Time          `json:"createdAt"`
-	FullName    string             `json:"fullName"`
-	Id          openapi_types.UUID `json:"id"`
-	IsActive    bool               `json:"isActive"`
-	LastLoginAt *time.Time         `json:"lastLoginAt"`
+	CreatedAt   time.Time                    `json:"createdAt"`
+	FullName    string                       `json:"fullName"`
+	Id          openapi_types.UUID           `json:"id"`
+	IsActive    bool                         `json:"isActive"`
+	LastLoginAt nullable.Nullable[time.Time] `json:"lastLoginAt"`
 
 	// Locale A UI/data locale (ADR-012).
-	Locale Locale  `json:"locale"`
-	Phone  *string `json:"phone"`
+	Locale Locale                    `json:"locale"`
+	Phone  nullable.Nullable[string] `json:"phone"`
 
 	// Role A user's role (04-DATA-MODEL.md § 7 Permissions).
 	Role     Role   `json:"role"`
@@ -431,8 +432,8 @@ type User struct {
 
 // UserList Cursor-paginated envelope for `GET /staff`.
 type UserList struct {
-	Items      []User  `json:"items"`
-	NextCursor *string `json:"nextCursor"`
+	Items      []User                    `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"nextCursor"`
 }
 
 // AcceptLanguage defines model for AcceptLanguage.

@@ -326,11 +326,12 @@ func TestLocationPaginationLimitOneAcrossTwoPagesThenNil(t *testing.T) {
 	if err := json.Unmarshal(page1.Body.Bytes(), &list1); err != nil {
 		t.Fatalf("decode page1: %v", err)
 	}
-	if len(list1.Items) != 1 || list1.NextCursor == nil {
-		t.Fatalf("page1 = %+v, want 1 item and a non-nil nextCursor", list1)
+	if len(list1.Items) != 1 || list1.NextCursor.IsNull() {
+		t.Fatalf("page1 = %+v, want 1 item and a non-null nextCursor", list1)
 	}
+	cursor1, _ := list1.NextCursor.Get()
 
-	page2 := f.do(t, http.MethodGet, "/v1/locations?limit=1&cursor="+*list1.NextCursor, cookies, nil)
+	page2 := f.do(t, http.MethodGet, "/v1/locations?limit=1&cursor="+cursor1, cookies, nil)
 	if page2.Code != http.StatusOK {
 		t.Fatalf("page2 status = %d, body = %s", page2.Code, page2.Body.String())
 	}
@@ -338,8 +339,8 @@ func TestLocationPaginationLimitOneAcrossTwoPagesThenNil(t *testing.T) {
 	if err := json.Unmarshal(page2.Body.Bytes(), &list2); err != nil {
 		t.Fatalf("decode page2: %v", err)
 	}
-	if len(list2.Items) != 1 || list2.NextCursor != nil {
-		t.Fatalf("page2 = %+v, want 1 item and a nil nextCursor (end of the 2-item list)", list2)
+	if len(list2.Items) != 1 || !list2.NextCursor.IsNull() {
+		t.Fatalf("page2 = %+v, want 1 item and a null nextCursor (end of the 2-item list)", list2)
 	}
 	if list1.Items[0].Id == list2.Items[0].Id {
 		t.Fatalf("page1 and page2 returned the same item %v", list1.Items[0].Id)
@@ -539,18 +540,20 @@ func TestCreateStaffWithBlankPhoneTwiceBothSucceed(t *testing.T) {
 		if err := json.Unmarshal(rec.Body.Bytes(), &user); err != nil {
 			t.Fatalf("decode: %v", err)
 		}
-		if user.Phone != nil {
-			t.Fatalf("created user Phone = %v, want nil (normalized from \"\")", *user.Phone)
+		if !user.Phone.IsNull() {
+			v, _ := user.Phone.Get()
+			t.Fatalf("created user Phone = %v, want null (normalized from \"\")", v)
 		}
 	}
 }
 
-// TestPatchStaffBlankPhoneClearsIt is MAJOR-2's PATCH case: a staff
-// member created with a real phone number, then PATCHed with
-// `phone: ""`, must show phone: null in the response AND have a true
-// SQL NULL phone in the database (ClearUserPhone, not a literal empty
-// string masked at the response layer).
-func TestPatchStaffBlankPhoneClearsIt(t *testing.T) {
+// TestPatchStaffNullPhoneClearsIt is D-35's PATCH case: a staff member
+// created with a real phone number, then PATCHed with `phone: null`,
+// must show phone: null in the response AND have a true SQL NULL phone
+// in the database (ClearUserPhone, not a literal empty string masked at
+// the response layer). This replaces the old `phone: ""` convention
+// (MAJOR-2, Phase 1) that D-35 removed.
+func TestPatchStaffNullPhoneClearsIt(t *testing.T) {
 	f := newShopTestFixture(t)
 	cookies := f.login(t, f.ownerUsername, f.ownerPassword, "web").Result().Cookies()
 
@@ -564,20 +567,21 @@ func TestPatchStaffBlankPhoneClearsIt(t *testing.T) {
 	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if created.Phone == nil {
+	if created.Phone.IsNull() {
 		t.Fatal("setup: created user has no phone")
 	}
 
-	patchRec := f.do(t, http.MethodPatch, "/v1/staff/"+created.Id.String(), cookies, map[string]any{"phone": ""})
+	patchRec := f.do(t, http.MethodPatch, "/v1/staff/"+created.Id.String(), cookies, map[string]any{"phone": nil})
 	if patchRec.Code != http.StatusOK {
-		t.Fatalf("PATCH phone=\"\" status = %d, want 200, body = %s", patchRec.Code, patchRec.Body.String())
+		t.Fatalf("PATCH phone=null status = %d, want 200, body = %s", patchRec.Code, patchRec.Body.String())
 	}
 	var patched gen.User
 	if err := json.Unmarshal(patchRec.Body.Bytes(), &patched); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if patched.Phone != nil {
-		t.Fatalf("patched user Phone = %v, want nil after clearing", *patched.Phone)
+	if !patched.Phone.IsNull() {
+		v, _ := patched.Phone.Get()
+		t.Fatalf("patched user Phone = %v, want null after clearing", v)
 	}
 
 	dbUser, err := f.q.GetUserByID(t.Context(), db.GetUserByIDParams{ShopID: f.shopID, ID: created.Id})
@@ -589,12 +593,39 @@ func TestPatchStaffBlankPhoneClearsIt(t *testing.T) {
 	}
 }
 
-// TestPatchStaffBlankPhoneTwiceDoesNotCollide is MAJOR-2's other
-// required test: two different staff members both cleared via
-// `PATCH {"phone":""}` must not collide on the partial unique index
+// TestPatchStaffBlankPhoneIsInvalid is D-35's other required case: now
+// that clearing the phone is `null`, an explicit `phone: ""` is no
+// longer a synonym for it — it's a bad value, 400 fields.phone: invalid.
+func TestPatchStaffBlankPhoneIsInvalid(t *testing.T) {
+	f := newShopTestFixture(t)
+	cookies := f.login(t, f.ownerUsername, f.ownerPassword, "web").Result().Cookies()
+
+	createRec := f.do(t, http.MethodPost, "/v1/staff", cookies, map[string]any{
+		"username": "hasphone2", "password": "a-fine-password-1", "fullName": "Has Phone", "role": "cashier", "phone": "+998901112244",
+	})
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, body = %s", createRec.Code, createRec.Body.String())
+	}
+	var created gen.User
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	rec := f.do(t, http.MethodPatch, "/v1/staff/"+created.Id.String(), cookies, map[string]any{"phone": ""})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("PATCH phone=\"\" status = %d, want 400, body = %s", rec.Code, rec.Body.String())
+	}
+	if fields := fieldsOf(t, decodeError(t, rec)); fields["phone"] != "invalid" {
+		t.Fatalf("fields = %+v, want phone=invalid", fields)
+	}
+}
+
+// TestPatchStaffNullPhoneTwiceDoesNotCollide is D-35's other required
+// test: two different staff members both cleared via
+// `PATCH {"phone":null}` must not collide on the partial unique index
 // (shop_id, phone) where phone is not null — because ClearUserPhone
-// writes a true NULL for each of them, not the same literal "" value.
-func TestPatchStaffBlankPhoneTwiceDoesNotCollide(t *testing.T) {
+// writes a true NULL for each of them.
+func TestPatchStaffNullPhoneTwiceDoesNotCollide(t *testing.T) {
 	f := newShopTestFixture(t)
 	cookies := f.login(t, f.ownerUsername, f.ownerPassword, "web").Result().Cookies()
 
@@ -615,9 +646,9 @@ func TestPatchStaffBlankPhoneTwiceDoesNotCollide(t *testing.T) {
 	}
 
 	for _, id := range ids {
-		rec := f.do(t, http.MethodPatch, "/v1/staff/"+id, cookies, map[string]any{"phone": ""})
+		rec := f.do(t, http.MethodPatch, "/v1/staff/"+id, cookies, map[string]any{"phone": nil})
 		if rec.Code != http.StatusOK {
-			t.Fatalf("PATCH phone=\"\" for %s status = %d, want 200 (no 409 collision), body = %s", id, rec.Code, rec.Body.String())
+			t.Fatalf("PATCH phone=null for %s status = %d, want 200 (no 409 collision), body = %s", id, rec.Code, rec.Body.String())
 		}
 	}
 }

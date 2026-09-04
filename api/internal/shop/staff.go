@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/oapi-codegen/nullable"
 
 	"github.com/Sulton-Ali/savdo/api/gen"
 	"github.com/Sulton-Ali/savdo/api/internal/apierr"
@@ -82,9 +83,16 @@ func (s *Service) CreateStaff(ctx context.Context, shopID uuid.UUID, in CreateSt
 
 // StaffPatchInput is UpdateStaff's field-level patch; a nil pointer
 // leaves that field unchanged.
+//
+// Phone is a double pointer because, per D-35, it must tell three states
+// apart rather than two: nil (the field was absent — leave unchanged), a
+// pointer to nil (the field was explicit JSON `null` — clear), and a
+// pointer to a value (set). handler_staff.go derives this directly from
+// StaffPatch.phone's nullable.Nullable[string]; a bare *string can only
+// ever represent two of the three.
 type StaffPatchInput struct {
 	FullName *string
-	Phone    *string
+	Phone    **string
 	Role     *db.UserRole
 	IsActive *bool
 	Locale   *string
@@ -97,14 +105,14 @@ type StaffPatchInput struct {
 // themselves. Deactivating a (non-owner, non-self) user revokes every
 // one of their sessions in the same transaction as the write.
 //
-// in.Phone == a non-nil pointer to "" is a "clear the phone" request
-// (handler_staff.go decides this; nil stays indistinguishable from an
-// omitted field either way — Q-20, contract-level). UpdateUser's `phone
-// = COALESCE($2, phone)` can never express "set to NULL" — there is no
-// parameter value that makes COALESCE return NULL from a non-null
-// existing value — so clearing goes through the dedicated ClearUserPhone
-// statement instead, in the same transaction as UpdateUser (which is
-// itself told to leave phone alone in that case).
+// in.Phone pointing at a nil *string is a "clear the phone" request —
+// handler_staff.go sets it that way for an explicit JSON `null`
+// (StaffPatchInput's doc comment). UpdateUser's `phone = COALESCE($2,
+// phone)` can never express "set to NULL" — there is no parameter value
+// that makes COALESCE return NULL from a non-null existing value — so
+// clearing goes through the dedicated ClearUserPhone statement instead,
+// in the same transaction as UpdateUser (which is itself told to leave
+// phone alone in that case).
 func (s *Service) UpdateStaff(ctx context.Context, shopID, actorID, id uuid.UUID, in StaffPatchInput) (db.User, error) {
 	target, err := s.q.GetUserByID(ctx, db.GetUserByIDParams{ShopID: shopID, ID: id})
 	if err != nil {
@@ -131,12 +139,19 @@ func (s *Service) UpdateStaff(ctx context.Context, shopID, actorID, id uuid.UUID
 		return db.User{}, apierr.Validation(fields)
 	}
 
-	clearingPhone := in.Phone != nil && *in.Phone == ""
+	clearingPhone := in.Phone != nil && *in.Phone == nil
+	// phoneForUpdateUser is nil (COALESCE leaves the column unchanged)
+	// unless a value was actually set; clearing goes through
+	// ClearUserPhone below, never through this COALESCE.
+	var phoneForUpdateUser *string
+	if in.Phone != nil && *in.Phone != nil {
+		phoneForUpdateUser = *in.Phone
+	}
 	deactivating := in.IsActive != nil && !*in.IsActive
 
 	if !clearingPhone && !deactivating {
 		updated, err := s.q.UpdateUser(ctx, db.UpdateUserParams{
-			FullName: in.FullName, Phone: in.Phone, Role: in.Role, Locale: in.Locale, IsActive: in.IsActive,
+			FullName: in.FullName, Phone: phoneForUpdateUser, Role: in.Role, Locale: in.Locale, IsActive: in.IsActive,
 			ShopID: shopID, ID: id,
 		})
 		if err != nil {
@@ -154,14 +169,6 @@ func (s *Service) UpdateStaff(ctx context.Context, shopID, actorID, id uuid.UUID
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	qtx := s.q.WithTx(tx)
-
-	phoneForUpdateUser := in.Phone
-	if clearingPhone {
-		// ClearUserPhone below does the real clearing; UpdateUser's own
-		// phone param is left nil ("unchanged") so its COALESCE never
-		// sees the empty string at all.
-		phoneForUpdateUser = nil
-	}
 
 	updated, err := qtx.UpdateUser(ctx, db.UpdateUserParams{
 		FullName: in.FullName, Phone: phoneForUpdateUser, Role: in.Role, Locale: in.Locale, IsActive: in.IsActive,
@@ -232,6 +239,28 @@ func (s *Service) SetStaffPassword(ctx context.Context, shopID, id uuid.UUID, pa
 	return nil
 }
 
+// nullableString converts a *string (nil = SQL NULL) to the tri-state
+// nullable.Nullable[string] a response field now requires (D-35's
+// nullable-type ripple: every `["T", "null"]` schema in the spec gets
+// this type, not just the PATCH fields D-35 introduced it for). A
+// response always specifies the field, so the result is either Set(v) or
+// an explicit SetNull() — never left "unspecified", which would
+// serialize as the zero value instead of `null`.
+func nullableString(v *string) nullable.Nullable[string] {
+	if v == nil {
+		return nullable.NewNullNullable[string]()
+	}
+	return nullable.NewNullableWithValue(*v)
+}
+
+// nullableTime is nullableString for *time.Time (User.lastLoginAt).
+func nullableTime(v *time.Time) nullable.Nullable[time.Time] {
+	if v == nil {
+		return nullable.NewNullNullable[time.Time]()
+	}
+	return nullable.NewNullableWithValue(*v)
+}
+
 // toGenUser maps a db.User onto the API's User schema. PasswordHash and
 // ShopID are deliberately never carried across — a password hash must
 // never reach a response (hard rule 9), and shop_id is the tenant
@@ -241,11 +270,11 @@ func toGenUser(u db.User) gen.User {
 		Id:          u.ID,
 		Username:    u.Username,
 		FullName:    u.FullName,
-		Phone:       u.Phone,
+		Phone:       nullableString(u.Phone),
 		Role:        gen.Role(u.Role),
 		Locale:      gen.Locale(u.Locale),
 		IsActive:    u.IsActive,
-		LastLoginAt: u.LastLoginAt,
+		LastLoginAt: nullableTime(u.LastLoginAt),
 		CreatedAt:   u.CreatedAt,
 	}
 }
