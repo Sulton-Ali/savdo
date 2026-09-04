@@ -49,20 +49,20 @@ $money_hits"
   fi
 fi
 
-# 4. UPDATE stock_levels only allowed under internal/stock or db/queries/stock*.sql.
+# 4. Writes to stock_levels only allowed under internal/stock or db/queries/stock*.sql.
 stock_files="$(find api -type f \( -name '*.go' -o -name '*.sql' \) 2>/dev/null || true)"
 if [ -z "$stock_files" ]; then
-  check_pass "no UPDATE stock_levels outside stock module (no Go/SQL files yet)"
+  check_pass "no stock_levels write outside stock module (no Go/SQL files yet)"
 else
-  stock_hits="$(printf '%s\n' "$stock_files" | xargs -r grep -lIE 'UPDATE[[:space:]]+stock_levels' || true)"
+  stock_hits="$(printf '%s\n' "$stock_files" | xargs -r grep -lIE '(UPDATE|INSERT[[:space:]]+INTO|DELETE[[:space:]]+FROM)[[:space:]]+stock_levels' || true)"
   if [ -z "$stock_hits" ]; then
-    check_pass "no UPDATE stock_levels outside stock module (none found)"
+    check_pass "no stock_levels write outside stock module (none found)"
   else
     bad_hits="$(printf '%s\n' "$stock_hits" | grep -vE '^api/internal/stock/|^api/db/queries/stock[^/]*\.sql$|^api/internal/db/stock\.sql\.go$' || true)"
     if [ -z "$bad_hits" ]; then
-      check_pass "UPDATE stock_levels confined to internal/stock and db/queries/stock*.sql"
+      check_pass "stock_levels writes confined to internal/stock and db/queries/stock*.sql"
     else
-      check_fail "UPDATE stock_levels found outside the stock module:
+      check_fail "stock_levels write found outside the stock module:
 $bad_hits"
     fi
   fi
