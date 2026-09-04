@@ -64,31 +64,6 @@ func (q *Queries) CreateLocation(ctx context.Context, arg CreateLocationParams) 
 	return i, err
 }
 
-const getDefaultLocationForUpdate = `-- name: GetDefaultLocationForUpdate :one
-SELECT id, shop_id, name, kind, is_default, is_active, created_at, updated_at FROM locations
-WHERE shop_id = $1 AND is_default
-FOR UPDATE
-`
-
-// Locks the shop's current default location row, so a concurrent default
-// takeover (ClearDefaultLocation + UpdateLocation) serializes on it.
-// Returns pgx.ErrNoRows if the shop has no default location yet.
-func (q *Queries) GetDefaultLocationForUpdate(ctx context.Context, shopID uuid.UUID) (Location, error) {
-	row := q.db.QueryRow(ctx, getDefaultLocationForUpdate, shopID)
-	var i Location
-	err := row.Scan(
-		&i.ID,
-		&i.ShopID,
-		&i.Name,
-		&i.Kind,
-		&i.IsDefault,
-		&i.IsActive,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
 const getLocation = `-- name: GetLocation :one
 SELECT id, shop_id, name, kind, is_default, is_active, created_at, updated_at FROM locations
 WHERE shop_id = $1 AND id = $2
