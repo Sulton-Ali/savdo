@@ -14,13 +14,22 @@ import (
 )
 
 // mapMoveError turns a Move error into the *apierr.Error docs/05-API.md's
-// stock endpoints promise: ErrInsufficient becomes 409 STOCK_INSUFFICIENT
-// with details.{variantId,locationId,available} (the exact shape
+// stock endpoints promise: a deadlock (SQLSTATE 40P01, isDeadlock) becomes
+// the same 409 CONFLICT details.reason: "deadlock" errDeadlock reports
+// after CreateStockTransfer's own retry exhausts (MINOR 7, T4 review) —
+// checked first, since a deadlocked statement can also be the one that was
+// about to detect ErrInsufficient, and "the transaction was killed to
+// break a lock cycle" is the more accurate, more actionable (retryable)
+// signal of the two. ErrInsufficient becomes 409 STOCK_INSUFFICIENT with
+// details.{variantId,locationId,available} (the exact shape
 // contracts/openapi.yaml documents on POST /stock/adjustments and
 // POST /stock/transfers). Anything else — Move's own apierr.NotFound
 // ("variant"/"location") or a wrapped internal error — is already the
 // right shape (or deliberately opaque) and passes through unchanged.
 func mapMoveError(err error) error {
+	if isDeadlock(err) {
+		return errDeadlock
+	}
 	var insufficient *ErrInsufficient
 	if errors.As(err, &insufficient) {
 		return &apierr.Error{
@@ -53,14 +62,46 @@ func isDeadlock(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == deadlockSQLState
 }
 
-// errTransferDeadlock is CONFLICT (409): CreateStockTransfer's own retry
-// (transfers.go) already tried runTransfer twice and both attempts
-// deadlocked against some other concurrent transfer — reported as a clear,
-// retryable-by-the-client conflict rather than an opaque 500.
-var errTransferDeadlock = &apierr.Error{
+// errDeadlock is CONFLICT (409) details.reason: "deadlock" — the shared
+// "safe to retry" shape docs/05-API.md's /stock/transfers,
+// /purchases/{id}/receive and /purchases/{id}/cancel 409 descriptions all
+// promise (MINOR 7, T4 review). mapMoveError returns it for any Move
+// error that is itself a deadlock; CreateStockTransfer's own retry
+// (transfers.go) additionally returns it once its own commit-time retry
+// is exhausted (a deadlock detected at COMMIT, after every one of
+// runTransfer's Move calls already succeeded, so mapMoveError never saw
+// it) — same error value, same client-visible shape, from the two
+// different points a deadlock can surface.
+var errDeadlock = &apierr.Error{
 	Status: http.StatusConflict, Code: gen.CONFLICT,
 	Details: map[string]any{"reason": "deadlock"},
 }
+
+// errPurchaseNotDraft is PURCHASE_NOT_DRAFT (409): UpdatePurchase was
+// called on a purchase that is no longer `draft` (contracts/openapi.yaml's
+// PATCH /purchases/{id} 409).
+var errPurchaseNotDraft = &apierr.Error{Status: http.StatusConflict, Code: gen.PURCHASENOTDRAFT}
+
+// errPurchaseAlreadyReceived is PURCHASE_ALREADY_RECEIVED (409):
+// ReceivePurchase was called on a purchase already `received`.
+var errPurchaseAlreadyReceived = &apierr.Error{Status: http.StatusConflict, Code: gen.PURCHASEALREADYRECEIVED}
+
+// errPurchaseAlreadyCancelled is PURCHASE_ALREADY_CANCELLED (409):
+// ReceivePurchase or CancelPurchase was called on a purchase already
+// `cancelled`.
+var errPurchaseAlreadyCancelled = &apierr.Error{Status: http.StatusConflict, Code: gen.PURCHASEALREADYCANCELLED}
+
+// purchaseRefType/purchaseCancelRefType are the ref_type Move writes on a
+// purchase's stock_movements rows: "purchase" for the original receive,
+// "purchase_cancel" for a cancelled-after-received purchase's reversing
+// movements (both kind purchase_in, ADR-006 — there is no separate enum
+// value for a cancellation; ref_type is what tells the two apart in
+// history, per the pre-emptive ruling on T4's cancel-of-received
+// ambiguity).
+const (
+	purchaseRefType       = "purchase"
+	purchaseCancelRefType = "purchase_cancel"
+)
 
 // qtyPattern is the wire shape a quantity field (docs/05-API.md §
 // Conventions: "Quantities: decimal strings") must have: an optional sign,

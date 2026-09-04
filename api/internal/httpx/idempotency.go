@@ -11,12 +11,42 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Sulton-Ali/savdo/api/gen"
 	"github.com/Sulton-Ali/savdo/api/internal/apierr"
 	"github.com/Sulton-Ali/savdo/api/internal/db"
 )
+
+// deadlockSQLState is Postgres' "deadlock_detected" SQLSTATE — duplicated
+// from internal/stock's own copy (internal/stock/errors.go) rather than
+// exported and called cross-package (T4 review residual 2): a three-line
+// SQLSTATE check is cheaper to keep twice, once per package that needs
+// it, than to grow stock's error-mapping internals a new exported symbol
+// for this one caller. internal/httpx already imports internal/stock (to
+// wire the router), so the reverse would not even cycle, but duplicating
+// is the smaller diff and keeps each package's own commit-error mapping
+// self-contained.
+const deadlockSQLState = "40P01"
+
+// isDeadlock reports whether err is a Postgres deadlock (SQLSTATE 40P01)
+// — mirrors stock.isDeadlock.
+func isDeadlock(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == deadlockSQLState
+}
+
+// errDeadlock is CONFLICT (409) details.reason: "deadlock" — the same
+// shape stock.errDeadlock reports (and docs/05-API.md's /purchases/{id}/
+// receive 409 description promises): a deadlock at Idempotent's own
+// COMMIT (as opposed to one inside fn, which stock's own mapMoveError
+// already classifies before it ever reaches here) must map the same way,
+// not surface as an opaque 500 (T4 review residual 2).
+var errDeadlock = &apierr.Error{
+	Status: http.StatusConflict, Code: gen.CONFLICT,
+	Details: map[string]any{"reason": "deadlock"},
+}
 
 // idempotencyLockClassID is the first argument to the two-argument
 // pg_advisory_xact_lock(classid, key) Idempotent uses (NIT 9) — a second,
@@ -48,6 +78,19 @@ const maxIdempotencyKeyLen = 128
 // fixed declaration order, not a map, so two decodes of logically the same
 // JSON always marshal back to the same bytes regardless of how the
 // client's original bytes were formatted or ordered.
+//
+// The resolved locale is deliberately NOT part of the fingerprint (T4
+// review residual 3): method, path, actorID and body say nothing about
+// Accept-Language, and Idempotent's own stored response is whatever body
+// fn(qtx) rendered the first time — for POST /purchases/{id}/receive that
+// includes each PurchaseItem's productName/variantLabel, resolved once,
+// at receive time, in whatever locale that first request asked for. A
+// replay with the same key returns that first rendering unchanged even if
+// the client's Accept-Language has since changed (e.g. the admin's own
+// language switch, D-39) — a language switch must never turn a safe
+// retry into a 409, and Idempotent has no way to re-render a stored,
+// already-serialized response body in a different locale after the fact
+// regardless.
 func RequestHash(method, path string, actorID uuid.UUID, body any) (string, error) {
 	canonical, err := json.Marshal(body)
 	if err != nil {
@@ -85,7 +128,11 @@ func ValidateIdempotencyKey(key string) error {
 //     idempotency_keys lookup and nothing stored: every call is a fresh
 //     write.
 //   - key already used with the same requestHash: fn does not run again;
-//     the response stored the first time is returned unchanged.
+//     the response stored the first time is returned unchanged — including
+//     any locale-resolved text it carries (e.g. a receive's
+//     PurchaseItem.productName): RequestHash's own doc comment on why the
+//     resolved locale is deliberately not part of the fingerprint applies
+//     here too, since this is the code path that returns that stored body.
 //   - key already used with a different requestHash (including, per
 //     RequestHash's own doc comment, the same body replayed by a
 //     different actor): fn does not run; Idempotent returns
@@ -140,6 +187,9 @@ func Idempotent(ctx context.Context, pool *pgxpool.Pool, shopID uuid.UUID, key, 
 			return 0, nil, ferr
 		}
 		if err := tx.Commit(ctx); err != nil {
+			if isDeadlock(err) {
+				return 0, nil, errDeadlock
+			}
 			return 0, nil, fmt.Errorf("httpx: idempotent: commit: %w", err)
 		}
 		committed = true
@@ -157,6 +207,9 @@ func Idempotent(ctx context.Context, pool *pgxpool.Pool, shopID uuid.UUID, key, 
 			return 0, nil, errIdempotencyKeyReused
 		}
 		if err := tx.Commit(ctx); err != nil {
+			if isDeadlock(err) {
+				return 0, nil, errDeadlock
+			}
 			return 0, nil, fmt.Errorf("httpx: idempotent: commit replay: %w", err)
 		}
 		committed = true
@@ -182,6 +235,9 @@ func Idempotent(ctx context.Context, pool *pgxpool.Pool, shopID uuid.UUID, key, 
 		return 0, nil, fmt.Errorf("httpx: idempotent: store response: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
+		if isDeadlock(err) {
+			return 0, nil, errDeadlock
+		}
 		return 0, nil, fmt.Errorf("httpx: idempotent: commit: %w", err)
 	}
 	committed = true

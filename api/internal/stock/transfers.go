@@ -131,7 +131,7 @@ func (h *Handler) CreateStockTransfer(ctx context.Context, req gen.CreateStockTr
 	}
 	if err != nil {
 		if isDeadlock(err) {
-			return nil, errTransferDeadlock
+			return nil, errDeadlock
 		}
 		return nil, err
 	}

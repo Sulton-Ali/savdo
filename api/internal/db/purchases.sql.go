@@ -7,6 +7,7 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -238,6 +239,95 @@ func (q *Queries) ListPurchaseItems(ctx context.Context, arg ListPurchaseItemsPa
 			&i.LineTotal,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPurchaseItemsWithLabels = `-- name: ListPurchaseItemsWithLabels :many
+SELECT
+    pi.id, pi.purchase_id, pi.variant_id, pi.qty, pi.unit_cost, pi.line_total, pi.created_at,
+    v.sku AS variant_sku,
+    v.attributes AS variant_attributes,
+    COALESCE(t.locale, '') AS locale_used,
+    COALESCE(t.name, '') AS product_name
+FROM purchase_items pi
+JOIN product_variants v ON v.id = pi.variant_id AND v.shop_id = pi.shop_id
+JOIN products p ON p.id = v.product_id AND p.shop_id = pi.shop_id
+LEFT JOIN LATERAL (
+    SELECT pt.locale, pt.name
+    FROM product_translations pt
+    WHERE pt.product_id = p.id
+    ORDER BY
+        CASE
+            WHEN pt.locale = $1 THEN 0
+            WHEN pt.locale = 'uz' THEN 1
+            ELSE 2
+        END
+    LIMIT 1
+) t ON true
+WHERE pi.shop_id = $2 AND pi.purchase_id = $3
+ORDER BY pi.created_at, pi.id
+`
+
+type ListPurchaseItemsWithLabelsParams struct {
+	Locale     string    `json:"locale"`
+	ShopID     uuid.UUID `json:"shop_id"`
+	PurchaseID uuid.UUID `json:"purchase_id"`
+}
+
+type ListPurchaseItemsWithLabelsRow struct {
+	ID                uuid.UUID       `json:"id"`
+	PurchaseID        uuid.UUID       `json:"purchase_id"`
+	VariantID         uuid.UUID       `json:"variant_id"`
+	Qty               pgtype.Numeric  `json:"qty"`
+	UnitCost          pgtype.Numeric  `json:"unit_cost"`
+	LineTotal         pgtype.Numeric  `json:"line_total"`
+	CreatedAt         time.Time       `json:"created_at"`
+	VariantSku        *string         `json:"variant_sku"`
+	VariantAttributes json.RawMessage `json:"variant_attributes"`
+	LocaleUsed        string          `json:"locale_used"`
+	ProductName       string          `json:"product_name"`
+}
+
+// Joins each purchase_items row to its variant and product for the
+// response-only productName/variantLabel/sku fields
+// (contracts/openapi.yaml's PurchaseItem, T4): variantLabel itself is
+// built in Go from variant_sku/variant_attributes plus
+// attribute_definitions' sort order (mirrors
+// admin/src/catalog/variants.ts's own variantLabel), not computed in SQL.
+// productName uses the same locale-fallback (requested -> 'uz' -> any,
+// ADR-012) as ListProductsForStaff. v.shop_id/p.shop_id are joined
+// explicitly, not just pi.shop_id, so a row can never resolve through
+// another shop's variant/product even though every id here was already
+// validated at CreatePurchase time (hard rule 1, defense in depth).
+func (q *Queries) ListPurchaseItemsWithLabels(ctx context.Context, arg ListPurchaseItemsWithLabelsParams) ([]ListPurchaseItemsWithLabelsRow, error) {
+	rows, err := q.db.Query(ctx, listPurchaseItemsWithLabels, arg.Locale, arg.ShopID, arg.PurchaseID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPurchaseItemsWithLabelsRow
+	for rows.Next() {
+		var i ListPurchaseItemsWithLabelsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PurchaseID,
+			&i.VariantID,
+			&i.Qty,
+			&i.UnitCost,
+			&i.LineTotal,
+			&i.CreatedAt,
+			&i.VariantSku,
+			&i.VariantAttributes,
+			&i.LocaleUsed,
+			&i.ProductName,
 		); err != nil {
 			return nil, err
 		}

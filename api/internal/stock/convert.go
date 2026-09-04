@@ -1,7 +1,9 @@
 package stock
 
 import (
+	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -121,4 +123,108 @@ func nullableUUID(v *uuid.UUID) nullable.Nullable[uuid.UUID] {
 		return nullable.NewNullNullable[uuid.UUID]()
 	}
 	return nullable.NewNullableWithValue(*v)
+}
+
+// nullableTime converts a *time.Time (nil = SQL NULL) to the tri-state
+// nullable.Nullable the generated schemas use for an optional timestamp
+// field (Purchase.receivedAt) — mirrors catalog.nullableTime.
+func nullableTime(v *time.Time) nullable.Nullable[time.Time] {
+	if v == nil {
+		return nullable.NewNullNullable[time.Time]()
+	}
+	return nullable.NewNullableWithValue(*v)
+}
+
+// optionalString reads a nullable.Nullable[string] patch field into the
+// three states a request can mean: nil (not specified — leave unchanged),
+// a pointer to nil (explicit `null` — clear), or a pointer to a value
+// (set). Mirrors catalog.optionalString/crm.optionalString.
+func optionalString(n nullable.Nullable[string]) **string {
+	if !n.IsSpecified() {
+		return nil
+	}
+	if n.IsNull() {
+		var nilPtr *string
+		return &nilPtr
+	}
+	v := n.MustGet()
+	return &[]*string{&v}[0]
+}
+
+// variantLabel builds PurchaseItem.variantLabel: a variant's attribute
+// values in attribute-definition order (e.g. "L / Blue"), falling back to
+// its SKU, then its id — the same rule
+// admin/src/catalog/variants.ts's variantLabel applies client-side,
+// reimplemented here since a purchase's response is built server-side.
+// defs must already be ordered by sort_order (db.ListAttributeDefinitions'
+// own ORDER BY), the same order the admin's own attributeDefinitions prop
+// is in.
+func variantLabel(sku *string, variantID uuid.UUID, attrsRaw json.RawMessage, defs []db.ListAttributeDefinitionsRow) (string, error) {
+	var attrs map[string]string
+	if err := json.Unmarshal(attrsRaw, &attrs); err != nil {
+		return "", fmt.Errorf("stock: unmarshal variant attributes: %w", err)
+	}
+	parts := make([]string, 0, len(defs))
+	for _, def := range defs {
+		if v, ok := attrs[def.Code]; ok && v != "" {
+			parts = append(parts, v)
+		}
+	}
+	if len(parts) > 0 {
+		return joinSlash(parts), nil
+	}
+	if sku != nil && *sku != "" {
+		return *sku, nil
+	}
+	return variantID.String(), nil
+}
+
+// joinSlash joins parts with " / " (variantLabel's separator) — a tiny
+// helper so variantLabel itself reads as the rule it implements rather
+// than a strings.Join call buried in it.
+func joinSlash(parts []string) string {
+	out := parts[0]
+	for _, p := range parts[1:] {
+		out += " / " + p
+	}
+	return out
+}
+
+// toGenPurchaseItem converts one ListPurchaseItemsWithLabels row, plus its
+// already-built label, to the wire PurchaseItem shape.
+func toGenPurchaseItem(r db.ListPurchaseItemsWithLabelsRow, label string) (gen.PurchaseItem, error) {
+	qty, err := numericQtyString(r.Qty)
+	if err != nil {
+		return gen.PurchaseItem{}, err
+	}
+	unitCost, err := money.FromNumeric(r.UnitCost)
+	if err != nil {
+		return gen.PurchaseItem{}, fmt.Errorf("stock: purchase item unit cost: %w", err)
+	}
+	return gen.PurchaseItem{
+		Id: r.ID, VariantId: r.VariantID, Qty: qty, UnitCost: money.String(unitCost),
+		ProductName: r.ProductName, VariantLabel: label, Sku: nullableString(r.VariantSku),
+	}, nil
+}
+
+// toGenPurchase converts a purchases row plus its already-converted items
+// to the wire Purchase shape. totalCost is the sum of the items'
+// line-total, always recomputed here rather than trusted from the
+// purchases.total_cost column (hard rule 8): CreatePurchase/
+// UpdatePurchaseHeader never set that column at all — it is written only
+// once, at receive, by SetPurchaseReceived — so a draft (mutable via
+// PATCH's item replacement) would otherwise report a stale 0 until
+// received; summing the current items is correct for both a draft and a
+// received purchase (whose items, once received, never change again).
+func toGenPurchase(p db.Purchase, items []gen.PurchaseItem, itemTotals []decimal.Decimal) gen.Purchase {
+	total := decimal.Zero
+	for _, t := range itemTotals {
+		total = total.Add(t)
+	}
+	return gen.Purchase{
+		Id: p.ID, Number: p.Number, SupplierId: p.SupplierID, LocationId: p.LocationID,
+		Status: gen.PurchaseStatus(p.Status), SupplierInvoiceNo: nullableString(p.SupplierInvoiceNo),
+		ReceivedAt: nullableTime(p.ReceivedAt), Note: nullableString(p.Note),
+		TotalCost: money.String(total), Items: items, CreatedAt: p.CreatedAt,
+	}
 }

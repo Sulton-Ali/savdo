@@ -34,7 +34,7 @@ func TestResolveLocale(t *testing.T) {
 func TestAcceptLanguageMiddleware_stashesHeaderOnContext(t *testing.T) {
 	var captured string
 	next := func(ctx context.Context, _ http.ResponseWriter, _ *http.Request, _ any) (any, error) {
-		captured = acceptLanguageFromContext(ctx)
+		captured = AcceptLanguageFromContext(ctx)
 		return nil, nil
 	}
 	mw := AcceptLanguageMiddleware(next, "ListProducts")
