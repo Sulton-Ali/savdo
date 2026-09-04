@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
   App,
+  Breadcrumb,
   Button,
   Card,
   DatePicker,
@@ -11,12 +12,14 @@ import {
   InputNumber,
   Select,
   Skeleton,
+  Space,
   Switch,
   Tabs,
   TreeSelect,
 } from "antd";
 import type { Dayjs } from "dayjs";
 import dayjs from "dayjs";
+import { ArrowLeft } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { useAuth } from "../../auth/AuthContext";
@@ -249,9 +252,36 @@ export function ProductFormPage({ productId }: { productId?: string }) {
     editMutation.mutate(patch);
   }
 
+  // "Products › <product name>" (create: "Products › New product"), plus a
+  // back arrow to the list — both navigate to `productsRoute` (D-39). While
+  // an existing product is still loading, the crumb falls back to the
+  // generic edit title rather than waiting on `product.name`.
+  const breadcrumbLabel = isEdit
+    ? (product?.name ?? t("catalog.products.editTitle"))
+    : t("catalog.products.createTitle");
+  const header = (
+    <Space>
+      <Button
+        type="text"
+        aria-label={t("common.back")}
+        icon={<ArrowLeft size={16} />}
+        onClick={() => navigate({ to: "/products" })}
+      />
+      <Breadcrumb
+        items={[
+          {
+            title: t("catalog.products.title"),
+            onClick: () => navigate({ to: "/products" }),
+          },
+          { title: breadcrumbLabel },
+        ]}
+      />
+    </Space>
+  );
+
   if (isEdit && productPending) {
     return (
-      <Card title={t("catalog.products.editTitle")}>
+      <Card title={header}>
         <Skeleton active />
       </Card>
     );
@@ -261,7 +291,7 @@ export function ProductFormPage({ productId }: { productId?: string }) {
 
   return (
     <Card
-      title={isEdit ? t("catalog.products.editTitle") : t("catalog.products.createTitle")}
+      title={header}
       extra={
         <Button type="primary" loading={saving} onClick={() => form.submit()}>
           {t("common.save")}
