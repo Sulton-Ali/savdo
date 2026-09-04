@@ -167,7 +167,7 @@ SELECT
     price_override, is_active, deleted_at, created_at, updated_at
 FROM product_variants
 WHERE shop_id = $1 AND product_id = $2 AND deleted_at IS NULL
-ORDER BY created_at
+ORDER BY created_at, id
 `
 
 type ListVariantsForCashierParams struct {
@@ -189,7 +189,8 @@ type ListVariantsForCashierRow struct {
 	UpdatedAt     time.Time       `json:"updated_at"`
 }
 
-// No cost_override (§ 04-DATA-MODEL.md rule 8, ADR-010).
+// No cost_override (§ 04-DATA-MODEL.md rule 8, ADR-010). Same `, id`
+// tiebreaker as ListVariantsForStaff, same reason.
 func (q *Queries) ListVariantsForCashier(ctx context.Context, arg ListVariantsForCashierParams) ([]ListVariantsForCashierRow, error) {
 	rows, err := q.db.Query(ctx, listVariantsForCashier, arg.ShopID, arg.ProductID)
 	if err != nil {
@@ -225,7 +226,7 @@ func (q *Queries) ListVariantsForCashier(ctx context.Context, arg ListVariantsFo
 const listVariantsForStaff = `-- name: ListVariantsForStaff :many
 SELECT id, shop_id, product_id, sku, barcode, attributes, price_override, cost_override, is_active, deleted_at, created_at, updated_at FROM product_variants
 WHERE shop_id = $1 AND product_id = $2 AND deleted_at IS NULL
-ORDER BY created_at
+ORDER BY created_at, id
 `
 
 type ListVariantsForStaffParams struct {
@@ -233,6 +234,13 @@ type ListVariantsForStaffParams struct {
 	ProductID uuid.UUID `json:"product_id"`
 }
 
+// `, id` breaks ties deterministically: every variant of one product is
+// inserted inside the same transaction (createProductAttempt,
+// api/internal/catalog/products.go), and Postgres' now() returns that
+// transaction's start time for every call within it, so created_at alone
+// can be identical across all of a product's variants — ORDER BY
+// created_at with no tiebreaker then leaves their relative order
+// unspecified from one call to the next.
 func (q *Queries) ListVariantsForStaff(ctx context.Context, arg ListVariantsForStaffParams) ([]ProductVariant, error) {
 	rows, err := q.db.Query(ctx, listVariantsForStaff, arg.ShopID, arg.ProductID)
 	if err != nil {
