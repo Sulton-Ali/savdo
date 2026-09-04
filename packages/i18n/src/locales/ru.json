@@ -42,7 +42,10 @@
     "locations": "Филиалы",
     "suppliers": "Поставщики",
     "purchases": "Закупки",
-    "settings": "Настройки"
+    "settings": "Настройки",
+    "stockLevels": "Остатки",
+    "stockMovements": "Движения товара",
+    "stockLow": "Низкий остаток"
   },
   "auth": {
     "login": {
@@ -125,7 +128,88 @@
       "timezone": "Часовой пояс",
       "defaultLocale": "Язык по умолчанию",
       "allowNegativeStock": "Разрешить отрицательный остаток",
-      "updateCostOnPurchase": "Обновлять себестоимость при закупке"
+      "updateCostOnPurchase": "Обновлять себестоимость при закупке",
+      "lowStockThreshold": "Порог низкого остатка"
+    }
+  },
+  "stock": {
+    "levels": {
+      "title": "Остатки",
+      "productPlaceholder": "Поиск товаров",
+      "locationPlaceholder": "Все филиалы",
+      "columns": {
+        "product": "Товар",
+        "variant": "Вариант",
+        "sku": "Артикул",
+        "total": "Всего"
+      }
+    },
+    "movements": {
+      "title": "Движения товара",
+      "locationPlaceholder": "Все филиалы",
+      "kindPlaceholder": "Все типы",
+      "columns": {
+        "kind": "Тип",
+        "qty": "Кол-во",
+        "unitCost": "Себестоимость за ед.",
+        "reference": "Ссылка",
+        "reason": "Причина",
+        "who": "Кто",
+        "when": "Когда"
+      }
+    },
+    "low": {
+      "title": "Низкий остаток",
+      "columns": {
+        "product": "Товар",
+        "variant": "Вариант",
+        "sku": "Артикул",
+        "qty": "Кол-во",
+        "threshold": "Порог"
+      }
+    },
+    "actions": {
+      "adjust": "Корректировка остатка",
+      "transfer": "Перемещение остатка"
+    },
+    "fields": {
+      "variant": "Вариант",
+      "location": "Филиал",
+      "fromLocation": "Откуда",
+      "toLocation": "Куда",
+      "adjustmentQty": "Количество",
+      "adjustmentQtyHint": "Положительное значение добавляет остаток (например, найдено), отрицательное — убирает (например, повреждено или утеряно).",
+      "transferQty": "Количество",
+      "reason": "Причина",
+      "note": "Примечание"
+    },
+    "errors": {
+      "variantRequired": "Выберите вариант",
+      "locationRequired": "Выберите филиал",
+      "qtyRequired": "Введите количество",
+      "reasonRequired": "Выберите причину",
+      "sameLocation": "Выберите другой филиал",
+      "insufficient": "Доступно только {{available}}"
+    },
+    "adjustmentReasons": {
+      "count_correction": "Коррекция по пересчёту",
+      "damaged": "Повреждено",
+      "lost": "Утеряно",
+      "found": "Найдено",
+      "other": "Другое"
+    },
+    "movementKinds": {
+      "purchase_in": "Закупка",
+      "sale_out": "Продажа",
+      "sale_void_in": "Отмена продажи",
+      "return_in": "Возврат",
+      "adjustment": "Корректировка",
+      "transfer_out": "Перемещение (исход.)",
+      "transfer_in": "Перемещение (вход.)"
+    },
+    "picker": {
+      "product": "Поиск товара",
+      "variant": "Выберите вариант"
     }
   },
   "suppliers": {
@@ -253,8 +337,10 @@
         "basePrice": "Базовая цена",
         "costPrice": "Себестоимость",
         "promoPrice": "Акционная цена",
-        "promoRange": "Период акции"
-      }
+        "promoRange": "Период акции",
+        "lowStockThreshold": "Порог низкого остатка"
+      },
+      "lowStockThresholdHint": "Оставьте пустым, чтобы использовать значение магазина по умолчанию."
     },
     "categories": {
       "title": "Категории",
