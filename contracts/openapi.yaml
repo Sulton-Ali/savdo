@@ -27,6 +27,17 @@ tags:
     description: Login, logout, the current user and session management.
   - name: shop
     description: Shop settings, locations and staff (Phase 1).
+  - name: catalog
+    description: >
+      Units, attribute definitions, categories, products and variants
+      (Phase 2). Reads are any authenticated role; the response shape
+      varies by role for products/variants (§ Conventions,
+      `ProductStaff`/`ProductCashier`/`ProductPublic`) — cost fields never
+      reach a cashier (ADR-010). Writes require `catalog.write` (manager+).
+  - name: media
+    description: >
+      Image upload and product image management (Phase 2, D-34).
+      `catalog.write` (manager+).
 
 paths:
   /healthz:
@@ -394,6 +405,656 @@ paths:
       responses:
         "204":
           description: Password set.
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /units:
+    get:
+      operationId: listUnits
+      tags: [catalog]
+      summary: List the shop's units of measure.
+      description: >
+        Seeded per shop, read-only in Phase 2 (docs/04-DATA-MODEL.md § 2).
+        Not cursor-paginated — the set is small and fixed for now.
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnitList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+
+  /attribute-definitions:
+    get:
+      operationId: listAttributeDefinitions
+      tags: [catalog]
+      summary: List the shop's attribute definitions (e.g. size, colour).
+      description: >
+        Not cursor-paginated — seeded with a handful of entries (D-32) and
+        expected to stay small.
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AttributeDefinitionList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+    post:
+      operationId: createAttributeDefinition
+      tags: [catalog]
+      summary: Create an attribute definition.
+      description: Requires `catalog.write` (manager+).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AttributeDefinitionCreate"
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AttributeDefinition"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /attribute-definitions/{id}:
+    patch:
+      operationId: updateAttributeDefinition
+      tags: [catalog]
+      summary: Update an attribute definition.
+      description: >
+        Requires `catalog.write` (manager+). `code` is not patchable —
+        variants already reference it by key (docs/04-DATA-MODEL.md § 2).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AttributeDefinitionPatch"
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AttributeDefinition"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /categories:
+    get:
+      operationId: listCategories
+      tags: [catalog]
+      summary: List the shop's categories as a flat list.
+      description: >
+        Flat, not cursor-paginated — the client builds the tree from
+        `parentId`. Depth is capped at 3 (docs/04-DATA-MODEL.md § 2).
+      parameters:
+        - name: includeInactive
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CategoryList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+    post:
+      operationId: createCategory
+      tags: [catalog]
+      summary: Create a category.
+      description: >
+        Requires `catalog.write` (manager+). `400 fields.parentId: invalid`
+        when the parent chain would exceed depth 3.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CategoryCreate"
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Category"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /categories/{id}:
+    get:
+      operationId: getCategory
+      tags: [catalog]
+      summary: Get a category.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Category"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: updateCategory
+      tags: [catalog]
+      summary: Update a category.
+      description: >
+        Requires `catalog.write` (manager+). `400 fields.parentId: invalid`
+        when re-parenting would exceed depth 3 or create a cycle.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CategoryPatch"
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Category"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+    delete:
+      operationId: deleteCategory
+      tags: [catalog]
+      summary: Soft-delete a category.
+      description: >
+        Requires `catalog.write` (manager+). `409 CONFLICT
+        details.field: products` when products still reference this
+        category (assumption: D-32/D-34 area, no cascading delete).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Deleted.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /products:
+    get:
+      operationId: listProducts
+      tags: [catalog]
+      summary: List products.
+      description: >
+        Cursor-paginated. Response shape depends on role
+        (§ Conventions): `ProductStaff` for owner/manager,
+        `ProductCashier` for cashier — never `costPrice` or
+        `translations` (ADR-010).
+      parameters:
+        - name: q
+          in: query
+          description: Free-text search over product name (Postgres ILIKE/trigram).
+          required: false
+          schema:
+            type: string
+        - name: categoryId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: includeInactive
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductList"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+    post:
+      operationId: createProduct
+      tags: [catalog]
+      summary: Create a product.
+      description: Requires `catalog.write` (manager+).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductCreate"
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductStaff"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /products/{id}:
+    get:
+      operationId: getProduct
+      tags: [catalog]
+      summary: Get a product, including its variants and images.
+      description: >
+        Response shape depends on role, like `GET /products`
+        (`ProductStaff`/`ProductCashier`).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductStaff"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: updateProduct
+      tags: [catalog]
+      summary: Update a product.
+      description: Requires `catalog.write` (manager+).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductPatch"
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductStaff"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+    delete:
+      operationId: deleteProduct
+      tags: [catalog]
+      summary: Soft-delete a product.
+      description: Requires `catalog.write` (manager+).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Deleted.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /products/{id}/variants:
+    get:
+      operationId: listVariants
+      tags: [catalog]
+      summary: List a product's variants.
+      description: >
+        Not cursor-paginated — a product has at most a handful of
+        variants. Response shape depends on role
+        (`VariantStaff`/`VariantCashier`).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VariantList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      operationId: createVariant
+      tags: [catalog]
+      summary: Add a variant to a product.
+      description: Requires `catalog.write` (manager+).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VariantCreate"
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VariantStaff"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /variants/{id}:
+    patch:
+      operationId: updateVariant
+      tags: [catalog]
+      summary: Update a variant.
+      description: Requires `catalog.write` (manager+).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VariantPatch"
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VariantStaff"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+    delete:
+      operationId: deleteVariant
+      tags: [catalog]
+      summary: Soft-delete a variant.
+      description: >
+        Requires `catalog.write` (manager+). `400 fields.variantId:
+        invalid` when this is the product's only variant — every product
+        must keep at least one (docs/04-DATA-MODEL.md § 2).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Deleted.
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /media:
+    post:
+      operationId: uploadMedia
+      tags: [media]
+      summary: Upload an image.
+      description: >
+        Requires `catalog.write` (manager+). Generates thumb/card/full
+        sizes as WebP (ADR-008). `400 fields.file: invalid` for an
+        unsupported format, `400 fields.file: too_long` over the size
+        limit.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/MediaUpload"
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MediaFile"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /products/{id}/images:
+    post:
+      operationId: addProductImage
+      tags: [media]
+      summary: Attach an uploaded image to a product.
+      description: >
+        Requires `catalog.write` (manager+). `400 fields.mediaId:
+        invalid` once the product already has 8 images (D-34).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductImageCreate"
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductImage"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /products/{id}/images/{imageId}:
+    delete:
+      operationId: removeProductImage
+      tags: [media]
+      summary: Remove an image from a product.
+      description: Requires `catalog.write` (manager+). Hard delete (join row).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: imageId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Removed.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /products/{id}/images/order:
+    patch:
+      operationId: reorderProductImages
+      tags: [media]
+      summary: Reorder a product's images and/or change its cover image.
+      description: Requires `catalog.write` (manager+).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductImageOrder"
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductImageList"
         "400":
           $ref: "#/components/responses/ValidationFailed"
         "401":
@@ -829,6 +1490,797 @@ components:
           type: string
           minLength: 8
           maxLength: 128
+
+    TranslationEntry:
+      type: object
+      description: One locale's name/description for a translatable entity.
+      required:
+        - name
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+
+    Translations:
+      type: object
+      description: >
+        Per-locale name/description (ADR-012), keyed by `Locale`. On
+        create, an entry for the shop's own default locale is required —
+        expressible only as a service-level rule, since the JSON Schema
+        can't know a given shop's `defaultLocale` value. Response fields
+        outside this object (`name`/`description`/`locale`/
+        `translationFallback`) are the entity resolved for the caller's
+        `Accept-Language`, fallback order `requested → uz → any`.
+      properties:
+        uz:
+          $ref: "#/components/schemas/TranslationEntry"
+        ru:
+          $ref: "#/components/schemas/TranslationEntry"
+        en:
+          $ref: "#/components/schemas/TranslationEntry"
+
+    Unit:
+      type: object
+      description: A unit of measure (docs/04-DATA-MODEL.md § 2). Seeded, read-only in Phase 2.
+      required:
+        - id
+        - code
+        - precision
+        - name
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+          description: e.g. `pcs`, `kg`, `m`.
+        precision:
+          type: integer
+          description: Decimal places a quantity in this unit is stored/displayed with (0 for `pcs`, 3 for `kg`).
+        name:
+          type: string
+          description: Resolved for the caller's `Accept-Language`.
+
+    UnitList:
+      type: object
+      description: Flat envelope for `GET /units` (not cursor-paginated).
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Unit"
+
+    AttributeDefinition:
+      type: object
+      description: A per-shop variant attribute, e.g. size or colour (D-32).
+      required:
+        - id
+        - code
+        - sortOrder
+        - name
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+          description: Stable key `product_variants.attributes` values are keyed by, e.g. `size`.
+        sortOrder:
+          type: integer
+        name:
+          type: string
+          description: Resolved for the caller's `Accept-Language`.
+        translations:
+          $ref: "#/components/schemas/Translations"
+
+    AttributeDefinitionCreate:
+      type: object
+      required:
+        - code
+        - translations
+      properties:
+        code:
+          type: string
+        sortOrder:
+          type: integer
+        translations:
+          $ref: "#/components/schemas/Translations"
+
+    AttributeDefinitionPatch:
+      type: object
+      description: Partial update — only provided fields change. `code` is not patchable.
+      properties:
+        sortOrder:
+          type: integer
+        translations:
+          $ref: "#/components/schemas/Translations"
+
+    AttributeDefinitionList:
+      type: object
+      description: Flat envelope for `GET /attribute-definitions` (not cursor-paginated).
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AttributeDefinition"
+
+    Category:
+      type: object
+      required:
+        - id
+        - parentId
+        - slug
+        - sortOrder
+        - isActive
+        - imageId
+        - name
+        - description
+        - locale
+        - translationFallback
+      properties:
+        id:
+          type: string
+          format: uuid
+        parentId:
+          type: ["string", "null"]
+          format: uuid
+        slug:
+          type: string
+        sortOrder:
+          type: integer
+        isActive:
+          type: boolean
+        imageId:
+          type: ["string", "null"]
+          format: uuid
+        name:
+          type: string
+          description: Resolved for the caller's `Accept-Language`.
+        description:
+          type: ["string", "null"]
+        locale:
+          $ref: "#/components/schemas/Locale"
+        translationFallback:
+          type: boolean
+        translations:
+          $ref: "#/components/schemas/Translations"
+
+    CategoryCreate:
+      type: object
+      required:
+        - translations
+      properties:
+        parentId:
+          type: string
+          format: uuid
+        slug:
+          type: string
+        sortOrder:
+          type: integer
+        isActive:
+          type: boolean
+        imageId:
+          type: string
+          format: uuid
+        translations:
+          $ref: "#/components/schemas/Translations"
+
+    CategoryPatch:
+      type: object
+      description: Partial update — only provided fields change.
+      properties:
+        parentId:
+          type: ["string", "null"]
+          format: uuid
+          description: Explicit `null` moves the category to the top level.
+        slug:
+          type: string
+        sortOrder:
+          type: integer
+        isActive:
+          type: boolean
+        imageId:
+          type: ["string", "null"]
+          format: uuid
+          description: Explicit `null` removes the category's image.
+        translations:
+          $ref: "#/components/schemas/Translations"
+
+    CategoryList:
+      type: object
+      description: Flat envelope for `GET /categories` (not cursor-paginated; the client builds the tree from `parentId`).
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Category"
+
+    AttributeValues:
+      type: object
+      description: >
+        A variant's attribute values, keyed by `attribute_definitions.code`
+        (e.g. `{"size": "L", "color": "blue"}`, D-32).
+      additionalProperties:
+        type: string
+
+    Availability:
+      type: string
+      description: Public/bot-facing stock signal — never a quantity (ADR-010, hard rule 4/5).
+      enum: [in_stock, low, out_of_stock]
+
+    VariantStaff:
+      type: object
+      required:
+        - id
+        - sku
+        - barcode
+        - attributes
+        - priceOverride
+        - costOverride
+        - isActive
+      properties:
+        id:
+          type: string
+          format: uuid
+        sku:
+          type: ["string", "null"]
+        barcode:
+          type: ["string", "null"]
+        attributes:
+          $ref: "#/components/schemas/AttributeValues"
+        priceOverride:
+          type: ["string", "null"]
+          format: decimal
+          pattern: '^-?\d+(\.\d+)?$'
+        costOverride:
+          type: ["string", "null"]
+          format: decimal
+          pattern: '^-?\d+(\.\d+)?$'
+        isActive:
+          type: boolean
+
+    VariantCashier:
+      type: object
+      description: Like `VariantStaff` but without `costOverride` (ADR-010) — absent, not null.
+      required:
+        - id
+        - sku
+        - barcode
+        - attributes
+        - priceOverride
+        - isActive
+      properties:
+        id:
+          type: string
+          format: uuid
+        sku:
+          type: ["string", "null"]
+        barcode:
+          type: ["string", "null"]
+        attributes:
+          $ref: "#/components/schemas/AttributeValues"
+        priceOverride:
+          type: ["string", "null"]
+          format: decimal
+          pattern: '^-?\d+(\.\d+)?$'
+        isActive:
+          type: boolean
+
+    VariantPublic:
+      type: object
+      description: >
+        Defined now for Phase 6's public catalogue (D-32/D-34); no path
+        references it yet. No cost, no `isActive` (only active variants
+        are ever returned publicly); `availability` replaces any quantity
+        (hard rule 4/5).
+      required:
+        - id
+        - sku
+        - barcode
+        - attributes
+        - priceOverride
+        - availability
+      properties:
+        id:
+          type: string
+          format: uuid
+        sku:
+          type: ["string", "null"]
+        barcode:
+          type: ["string", "null"]
+        attributes:
+          $ref: "#/components/schemas/AttributeValues"
+        priceOverride:
+          type: ["string", "null"]
+          format: decimal
+          pattern: '^-?\d+(\.\d+)?$'
+        availability:
+          $ref: "#/components/schemas/Availability"
+
+    VariantCreate:
+      type: object
+      required:
+        - attributes
+      properties:
+        sku:
+          type: string
+        barcode:
+          type: string
+        attributes:
+          $ref: "#/components/schemas/AttributeValues"
+        priceOverride:
+          $ref: "#/components/schemas/Decimal"
+        costOverride:
+          $ref: "#/components/schemas/Decimal"
+        isActive:
+          type: boolean
+
+    VariantPatch:
+      type: object
+      description: Partial update — only provided fields change.
+      properties:
+        sku:
+          type: ["string", "null"]
+        barcode:
+          type: ["string", "null"]
+        attributes:
+          $ref: "#/components/schemas/AttributeValues"
+        priceOverride:
+          type: ["string", "null"]
+          format: decimal
+          pattern: '^-?\d+(\.\d+)?$'
+        costOverride:
+          type: ["string", "null"]
+          format: decimal
+          pattern: '^-?\d+(\.\d+)?$'
+        isActive:
+          type: boolean
+
+    VariantList:
+      type: object
+      description: Flat envelope for `GET /products/{id}/variants` (not cursor-paginated).
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/VariantStaff"
+
+    ProductStaff:
+      type: object
+      description: Owner/manager product shape — includes `costPrice` and `translations` (ADR-010).
+      required:
+        - id
+        - categoryId
+        - slug
+        - sku
+        - unitId
+        - basePrice
+        - costPrice
+        - promoPrice
+        - promoFrom
+        - promoTo
+        - isActive
+        - isFeatured
+        - name
+        - description
+        - locale
+        - translationFallback
+      properties:
+        id:
+          type: string
+          format: uuid
+        categoryId:
+          type: ["string", "null"]
+          format: uuid
+        slug:
+          type: string
+        sku:
+          type: ["string", "null"]
+        unitId:
+          type: string
+          format: uuid
+        basePrice:
+          $ref: "#/components/schemas/Decimal"
+        costPrice:
+          $ref: "#/components/schemas/Decimal"
+        promoPrice:
+          type: ["string", "null"]
+          format: decimal
+          pattern: '^-?\d+(\.\d+)?$'
+        promoFrom:
+          type: ["string", "null"]
+          format: date-time
+        promoTo:
+          type: ["string", "null"]
+          format: date-time
+        isActive:
+          type: boolean
+        isFeatured:
+          type: boolean
+        name:
+          type: string
+          description: Resolved for the caller's `Accept-Language`.
+        description:
+          type: ["string", "null"]
+        locale:
+          $ref: "#/components/schemas/Locale"
+        translationFallback:
+          type: boolean
+        translations:
+          $ref: "#/components/schemas/Translations"
+        variants:
+          type: array
+          items:
+            $ref: "#/components/schemas/VariantStaff"
+        images:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProductImage"
+
+    ProductCashier:
+      type: object
+      description: >
+        Like `ProductStaff` but without `costPrice` or `translations`
+        (ADR-010) — absent, not null.
+      required:
+        - id
+        - categoryId
+        - slug
+        - sku
+        - unitId
+        - basePrice
+        - promoPrice
+        - promoFrom
+        - promoTo
+        - isActive
+        - isFeatured
+        - name
+        - description
+        - locale
+        - translationFallback
+      properties:
+        id:
+          type: string
+          format: uuid
+        categoryId:
+          type: ["string", "null"]
+          format: uuid
+        slug:
+          type: string
+        sku:
+          type: ["string", "null"]
+        unitId:
+          type: string
+          format: uuid
+        basePrice:
+          $ref: "#/components/schemas/Decimal"
+        promoPrice:
+          type: ["string", "null"]
+          format: decimal
+          pattern: '^-?\d+(\.\d+)?$'
+        promoFrom:
+          type: ["string", "null"]
+          format: date-time
+        promoTo:
+          type: ["string", "null"]
+          format: date-time
+        isActive:
+          type: boolean
+        isFeatured:
+          type: boolean
+        name:
+          type: string
+          description: Resolved for the caller's `Accept-Language`.
+        description:
+          type: ["string", "null"]
+        locale:
+          $ref: "#/components/schemas/Locale"
+        translationFallback:
+          type: boolean
+        variants:
+          type: array
+          items:
+            $ref: "#/components/schemas/VariantCashier"
+        images:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProductImage"
+
+    ProductPublic:
+      type: object
+      description: >
+        Defined now for Phase 6's public catalogue (D-32/D-34); no path
+        references it yet. Only active products/variants are ever
+        returned this way; variants carry `availability`, never cost or
+        quantity (hard rule 4/5).
+      required:
+        - id
+        - categoryId
+        - slug
+        - sku
+        - unitId
+        - basePrice
+        - promoPrice
+        - promoFrom
+        - promoTo
+        - isActive
+        - isFeatured
+        - name
+        - description
+        - locale
+        - translationFallback
+      properties:
+        id:
+          type: string
+          format: uuid
+        categoryId:
+          type: ["string", "null"]
+          format: uuid
+        slug:
+          type: string
+        sku:
+          type: ["string", "null"]
+        unitId:
+          type: string
+          format: uuid
+        basePrice:
+          $ref: "#/components/schemas/Decimal"
+        promoPrice:
+          type: ["string", "null"]
+          format: decimal
+          pattern: '^-?\d+(\.\d+)?$'
+        promoFrom:
+          type: ["string", "null"]
+          format: date-time
+        promoTo:
+          type: ["string", "null"]
+          format: date-time
+        isActive:
+          type: boolean
+        isFeatured:
+          type: boolean
+        name:
+          type: string
+          description: Resolved for the caller's `Accept-Language`.
+        description:
+          type: ["string", "null"]
+        locale:
+          $ref: "#/components/schemas/Locale"
+        translationFallback:
+          type: boolean
+        variants:
+          type: array
+          items:
+            $ref: "#/components/schemas/VariantPublic"
+        images:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProductImage"
+
+    ProductCreate:
+      type: object
+      required:
+        - unitId
+        - basePrice
+        - translations
+      properties:
+        categoryId:
+          type: string
+          format: uuid
+        slug:
+          type: string
+        sku:
+          type: string
+        unitId:
+          type: string
+          format: uuid
+        basePrice:
+          $ref: "#/components/schemas/Decimal"
+        costPrice:
+          $ref: "#/components/schemas/Decimal"
+        promoPrice:
+          $ref: "#/components/schemas/Decimal"
+        promoFrom:
+          type: string
+          format: date-time
+        promoTo:
+          type: string
+          format: date-time
+        isActive:
+          type: boolean
+        isFeatured:
+          type: boolean
+        translations:
+          $ref: "#/components/schemas/Translations"
+        variants:
+          type: array
+          items:
+            $ref: "#/components/schemas/VariantCreate"
+
+    ProductPatch:
+      type: object
+      description: >
+        Partial update — only provided fields change. `sku`,
+        `promoPrice`, `promoFrom`, `promoTo`, `categoryId` and
+        `costPrice` are nullable (D-35): explicit `null` clears the
+        field. Variants are managed through `/products/{id}/variants`
+        and `/variants/{id}`, not here.
+      properties:
+        categoryId:
+          type: ["string", "null"]
+          format: uuid
+        slug:
+          type: string
+        sku:
+          type: ["string", "null"]
+        unitId:
+          type: string
+          format: uuid
+        basePrice:
+          $ref: "#/components/schemas/Decimal"
+        costPrice:
+          type: ["string", "null"]
+          format: decimal
+          pattern: '^-?\d+(\.\d+)?$'
+        promoPrice:
+          type: ["string", "null"]
+          format: decimal
+          pattern: '^-?\d+(\.\d+)?$'
+        promoFrom:
+          type: ["string", "null"]
+          format: date-time
+        promoTo:
+          type: ["string", "null"]
+          format: date-time
+        isActive:
+          type: boolean
+        isFeatured:
+          type: boolean
+        translations:
+          $ref: "#/components/schemas/Translations"
+
+    ProductList:
+      type: object
+      description: Cursor-paginated envelope for `GET /products`.
+      required:
+        - items
+        - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProductStaff"
+        nextCursor:
+          type: ["string", "null"]
+
+    MediaUpload:
+      type: object
+      description: Request body for `POST /media` (`multipart/form-data`).
+      required:
+        - file
+      properties:
+        file:
+          type: string
+          format: binary
+
+    MediaUrls:
+      type: object
+      required:
+        - thumb
+        - card
+        - full
+      properties:
+        thumb:
+          type: string
+          format: uri
+        card:
+          type: string
+          format: uri
+        full:
+          type: string
+          format: uri
+
+    MediaFile:
+      type: object
+      description: Response for `POST /media` (ADR-008 — thumb 200/card 600/full 1600, WebP).
+      required:
+        - id
+        - mime
+        - width
+        - height
+        - sizeBytes
+        - urls
+      properties:
+        id:
+          type: string
+          format: uuid
+        mime:
+          type: string
+        width:
+          type: integer
+        height:
+          type: integer
+        sizeBytes:
+          type: integer
+        urls:
+          $ref: "#/components/schemas/MediaUrls"
+
+    ProductImage:
+      type: object
+      required:
+        - id
+        - mediaId
+        - variantId
+        - isCover
+        - sortOrder
+        - urls
+      properties:
+        id:
+          type: string
+          format: uuid
+        mediaId:
+          type: string
+          format: uuid
+        variantId:
+          type: ["string", "null"]
+          format: uuid
+        isCover:
+          type: boolean
+        sortOrder:
+          type: integer
+        urls:
+          $ref: "#/components/schemas/MediaUrls"
+
+    ProductImageCreate:
+      type: object
+      required:
+        - mediaId
+      properties:
+        mediaId:
+          type: string
+          format: uuid
+        variantId:
+          type: string
+          format: uuid
+          description: Ties this image to one variant, e.g. a colour (D-34).
+        isCover:
+          type: boolean
+
+    ProductImageOrder:
+      type: object
+      description: Request body for `PATCH /products/{id}/images/order`.
+      required:
+        - imageIds
+      properties:
+        imageIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Every image id belonging to the product, in the new display order.
+        coverImageId:
+          type: string
+          format: uuid
+
+    ProductImageList:
+      type: object
+      description: Envelope for `PATCH /products/{id}/images/order`'s response.
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProductImage"
 
   parameters:
     Limit:
