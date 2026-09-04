@@ -178,11 +178,13 @@ gzip/zstd, `/api/*` → `api:8080`, `/media/*` → volume, `/admin/*` → static
 
 **Media on Caddy:** The `/media` location must include `@nosniff` header (`X-Content-Type-Options:
 nosniff`) to prevent browser MIME sniffing on derivative image URLs (O-16). Media derivatives
-are always WebP and served with content-type `image/webp`. **Storage sizing:** each upload
-file is spooled to disk, then derivative encoding happens in a semaphore-gated slot; default
-`MEDIA_CONCURRENCY` is 2, so reserve ~250 MB per slot under sustained load (500 MB with
-defaults). `api` has `http.Server.WriteTimeout 15 s`; a slow client downloading a large
-derivative could block a write slot and eventually starve uploads if they saturate the queue.
+are always WebP and served with content-type `image/webp`. **Storage sizing (estimate):** each
+upload file is spooled to disk, then derivative encoding happens in a semaphore-gated slot.
+`maxPixels` caps a decode at 24 megapixels, so the worst-case RGBA pixel buffer for one slot is
+≈96 MB (`media/derive.go`), plus ≈10 MB for the spooled file — roughly 110 MB per slot. With the
+default `MEDIA_CONCURRENCY=2`, that is roughly 220 MB worst case across both slots. `api` has
+`http.Server.WriteTimeout 15 s`; a slow client downloading a large derivative could block a
+write slot and eventually starve uploads if they saturate the queue.
 
 Secrets: `infra/.env` on the VPS only, never in git; CI holds `SSH_HOST`, `SSH_USER`,
 `SSH_KEY`, and the bot token/LLM key are set on the server.
