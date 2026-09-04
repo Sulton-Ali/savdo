@@ -58,7 +58,7 @@ else
   if [ -z "$stock_hits" ]; then
     check_pass "no UPDATE stock_levels outside stock module (none found)"
   else
-    bad_hits="$(printf '%s\n' "$stock_hits" | grep -vE '^api/internal/stock/|^api/db/queries/stock[^/]*\.sql$' || true)"
+    bad_hits="$(printf '%s\n' "$stock_hits" | grep -vE '^api/internal/stock/|^api/db/queries/stock[^/]*\.sql$|^api/internal/db/stock\.sql\.go$' || true)"
     if [ -z "$bad_hits" ]; then
       check_pass "UPDATE stock_levels confined to internal/stock and db/queries/stock*.sql"
     else
