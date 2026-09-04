@@ -120,6 +120,7 @@ export function VariantsTable({
     onSuccess: async () => {
       await invalidate();
       setEditing(null);
+      notification.success({ message: t("catalog.variants.saved") });
     },
     onError: (error) => notifyApiError(notification, error, t),
   });

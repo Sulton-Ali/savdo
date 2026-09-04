@@ -55,6 +55,9 @@ export function VariantMatrixGenerator({
 
   const [selectedCodes, setSelectedCodes] = useState<string[]>([]);
   const [valuesByCode, setValuesByCode] = useState<Record<string, string[]>>({});
+  // Set (and left set) per attribute code when `setValues` drops a blank or
+  // over-length entry, so the user sees why their tag didn't stick.
+  const [droppedValueCodes, setDroppedValueCodes] = useState<Record<string, boolean>>({});
 
   const combinations = useMemo(() => cartesianAttributeCombinations(valuesByCode), [valuesByCode]);
   const toCreate = useMemo(
@@ -107,14 +110,18 @@ export function VariantMatrixGenerator({
         delete next[code];
         return next;
       });
+      setDroppedValueCodes((current) => {
+        const next = { ...current };
+        delete next[code];
+        return next;
+      });
     }
   }
 
   function setValues(code: string, values: string[]) {
-    setValuesByCode((current) => ({
-      ...current,
-      [code]: values.filter((v) => v.trim().length > 0 && v.length <= MAX_VALUE_LENGTH),
-    }));
+    const valid = values.filter((v) => v.trim().length > 0 && v.length <= MAX_VALUE_LENGTH);
+    setValuesByCode((current) => ({ ...current, [code]: valid }));
+    setDroppedValueCodes((current) => ({ ...current, [code]: valid.length !== values.length }));
   }
 
   return (
@@ -132,16 +139,23 @@ export function VariantMatrixGenerator({
                 {def.name}
               </Button>
               {checked && (
-                <Select
-                  mode="tags"
-                  style={{ width: "100%", marginTop: 8 }}
-                  placeholder={t("catalog.variants.matrix.valuesPlaceholder")}
-                  value={valuesByCode[def.code] ?? []}
-                  onChange={(values) => setValues(def.code, values)}
-                  open={false}
-                  suffixIcon={null}
-                  aria-label={def.name}
-                />
+                <>
+                  <Select
+                    mode="tags"
+                    style={{ width: "100%", marginTop: 8 }}
+                    placeholder={t("catalog.variants.matrix.valuesPlaceholder")}
+                    value={valuesByCode[def.code] ?? []}
+                    onChange={(values) => setValues(def.code, values)}
+                    open={false}
+                    suffixIcon={null}
+                    aria-label={def.name}
+                  />
+                  {droppedValueCodes[def.code] && (
+                    <div style={{ color: "#cf1322", fontSize: 12, marginTop: 4 }}>
+                      {t("catalog.variants.matrix.invalidValue")}
+                    </div>
+                  )}
+                </>
               )}
             </div>
           );

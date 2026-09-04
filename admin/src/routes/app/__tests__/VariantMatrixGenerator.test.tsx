@@ -114,7 +114,8 @@ describe("VariantMatrixGenerator", () => {
     expect(screen.getByText("S / blue")).toBeTruthy();
     expect(screen.getByText("M / blue")).toBeTruthy();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Create 1 variants" }));
+    // Singular plural form (i18next `generate_one`) — only one new combination.
+    fireEvent.click(await screen.findByRole("button", { name: "Create 1 variant" }));
 
     await waitFor(() => {
       expect(mockedApi.POST).toHaveBeenCalledTimes(1);
@@ -136,5 +137,28 @@ describe("VariantMatrixGenerator", () => {
     })) as HTMLButtonElement;
     expect(generateButton.disabled).toBe(true);
     expect(mockedApi.POST).not.toHaveBeenCalled();
+  });
+
+  it("uses the plural form (generate_other) for more than one combination to create", async () => {
+    renderGenerator([]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Size" }));
+    addTagValue(screen.getByTestId("matrix-attribute-size"), "S");
+    addTagValue(screen.getByTestId("matrix-attribute-size"), "M");
+
+    expect(await screen.findByRole("button", { name: "Create 2 variants" })).toBeTruthy();
+  });
+
+  it("shows a validation message and drops a value over 64 characters", async () => {
+    renderGenerator([]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Size" }));
+    addTagValue(screen.getByTestId("matrix-attribute-size"), "x".repeat(65));
+
+    expect(
+      await screen.findByText("Values must be 1-64 characters — the rest were ignored."),
+    ).toBeTruthy();
+    // The over-length value never became a combination.
+    expect(screen.queryByText("Combinations to create")).toBeNull();
   });
 });
