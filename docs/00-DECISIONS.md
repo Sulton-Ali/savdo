@@ -70,6 +70,7 @@ Routine technical calls taken during bootstrap so work can start. Each is an ADR
 | O-11 | Single-shop MVP resolves the tenant at startup from `SHOP_SLUG` (default `savdo-demo`); the API fails fast if the shop is missing ("run savdo seed"). Multi-tenant later replaces this with host/slug resolution (ADR-004). | No shop field in the login form; every request is scoped by the session's shop_id |
 | O-12 | Validation vocabulary: `details.fields` values are exactly `required`, `invalid`, `too_short`, `too_long`; conflicts return 409 with `details.field` = `username`, `phone` or `name`. | Admin maps them to `errors.field.*` i18n keys; every new endpoint uses the same words |
 | O-13 | At most one testcontainers-heavy gate runs at a time on the dev machine; mergers are sequenced by the orchestrator. | Parallel gates caused timeouts and a container-start deadline on 2026-09-04 |
+| O-14 | Categories are soft-deleted (`deleted_at`), like products; a category with remaining products cannot be deleted (409 `CONFLICT` `details.field: products`). | Stable slugs for the landing and sales history; the T2 reviewer flagged the column as undocumented — doc fixed first |
 
 ## Open questions
 
