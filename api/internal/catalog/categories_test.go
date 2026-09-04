@@ -2,6 +2,7 @@ package catalog_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -280,5 +281,100 @@ func TestUpdateCategory_imageIdMustExistInShop(t *testing.T) {
 	fields := apiErr.Details["fields"].(map[string]string)
 	if fields["imageId"] != "invalid" {
 		t.Fatalf("fields = %+v, want imageId=invalid", fields)
+	}
+}
+
+func TestCreateCategory_softDeletedParentIsRejected(t *testing.T) {
+	h, q, _ := newTestHandler(t)
+	ctx := context.Background()
+	shopRow := seedShop(ctx, t, q, "shop-a")
+
+	parent := mustCreateCategory(t, h, shopRow.ID, "Parent", nil)
+	if _, err := h.DeleteCategory(owner(shopRow.ID), gen.DeleteCategoryRequestObject{Id: parent.Id}); err != nil {
+		t.Fatalf("DeleteCategory: %v", err)
+	}
+
+	_, err := h.CreateCategory(owner(shopRow.ID), gen.CreateCategoryRequestObject{
+		Body: &gen.CreateCategoryJSONRequestBody{ParentId: &parent.Id, Translations: uzTranslations("Child")},
+	})
+	apiErr, ok := err.(*apierr.Error)
+	if !ok || apiErr.Code != gen.VALIDATIONFAILED {
+		t.Fatalf("err = %#v, want 400 VALIDATION_FAILED", err)
+	}
+	fields := apiErr.Details["fields"].(map[string]string)
+	if fields["parentId"] != "invalid" {
+		t.Fatalf("fields = %+v, want parentId=invalid", fields)
+	}
+}
+
+func TestUpdateCategory_cannotReparentUnderOwnDescendant(t *testing.T) {
+	h, q, _ := newTestHandler(t)
+	ctx := context.Background()
+	shopRow := seedShop(ctx, t, q, "shop-a")
+
+	root := mustCreateCategory(t, h, shopRow.ID, "Root", nil)
+	child := mustCreateCategory(t, h, shopRow.ID, "Child", &root.Id)
+	grandchild := mustCreateCategory(t, h, shopRow.ID, "Grandchild", &child.Id)
+
+	// root cannot become a child of its own grandchild.
+	_, err := h.UpdateCategory(owner(shopRow.ID), gen.UpdateCategoryRequestObject{
+		Id:   root.Id,
+		Body: &gen.UpdateCategoryJSONRequestBody{ParentId: nullable.NewNullableWithValue(grandchild.Id)},
+	})
+	apiErr, ok := err.(*apierr.Error)
+	if !ok || apiErr.Code != gen.VALIDATIONFAILED {
+		t.Fatalf("err = %#v, want 400 VALIDATION_FAILED", err)
+	}
+	fields := apiErr.Details["fields"].(map[string]string)
+	if fields["parentId"] != "invalid" {
+		t.Fatalf("fields = %+v, want parentId=invalid", fields)
+	}
+}
+
+func TestUpdateCategory_reparentRejectsWhenSubtreeWouldExceedDepth(t *testing.T) {
+	h, q, _ := newTestHandler(t)
+	ctx := context.Background()
+	shopRow := seedShop(ctx, t, q, "shop-a")
+
+	// A 2-level subtree: movable -> leaf (movable has height 2).
+	movable := mustCreateCategory(t, h, shopRow.ID, "Movable", nil)
+	_ = mustCreateCategory(t, h, shopRow.ID, "Leaf", &movable.Id)
+
+	// A destination at depth 2 (root -> destination): placing movable's
+	// height-2 subtree under it would put "Leaf" at depth 2+2=4 > 3, even
+	// though movable itself would only be at depth 3.
+	destRoot := mustCreateCategory(t, h, shopRow.ID, "DestRoot", nil)
+	dest := mustCreateCategory(t, h, shopRow.ID, "Dest", &destRoot.Id)
+
+	_, err := h.UpdateCategory(owner(shopRow.ID), gen.UpdateCategoryRequestObject{
+		Id:   movable.Id,
+		Body: &gen.UpdateCategoryJSONRequestBody{ParentId: nullable.NewNullableWithValue(dest.Id)},
+	})
+	apiErr, ok := err.(*apierr.Error)
+	if !ok || apiErr.Code != gen.VALIDATIONFAILED {
+		t.Fatalf("err = %#v, want 400 VALIDATION_FAILED", err)
+	}
+	fields := apiErr.Details["fields"].(map[string]string)
+	if fields["parentId"] != "invalid" {
+		t.Fatalf("fields = %+v, want parentId=invalid", fields)
+	}
+}
+
+func TestCreateCategory_translationNameTooLong(t *testing.T) {
+	h, q, _ := newTestHandler(t)
+	ctx := context.Background()
+	shopRow := seedShop(ctx, t, q, "shop-a")
+
+	tooLong := strings.Repeat("a", 201)
+	_, err := h.CreateCategory(owner(shopRow.ID), gen.CreateCategoryRequestObject{
+		Body: &gen.CreateCategoryJSONRequestBody{Translations: uzTranslations(tooLong)},
+	})
+	apiErr, ok := err.(*apierr.Error)
+	if !ok || apiErr.Code != gen.VALIDATIONFAILED {
+		t.Fatalf("err = %#v, want 400 VALIDATION_FAILED", err)
+	}
+	fields := apiErr.Details["fields"].(map[string]string)
+	if fields["translations"] != "too_long" {
+		t.Fatalf("fields = %+v, want translations=too_long", fields)
 	}
 }

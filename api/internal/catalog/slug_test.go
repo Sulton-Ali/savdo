@@ -7,9 +7,13 @@ func TestSlugify(t *testing.T) {
 		{"Cotton Shirt", "cotton-shirt"},
 		{"  Extra   Spaces  ", "extra-spaces"},
 		{"Футболка", "futbolka"},
-		{"O'zbek", "o-zbek"},
+		{"O'zbek", "ozbek"},
 		{"!!!", ""},
 		{"Size: L/XL", "size-l-xl"},
+		{"Koʻylak", "koylak"},      // modifier letter turned comma (U+02BB)
+		{"Gʻishtli", "gishtli"},    // modifier letter turned comma (U+02BB)
+		{"Baʼzi", "bazi"},          // modifier letter apostrophe (U+02BC)
+		{"Qo'ng'iroq", "qongiroq"}, // ASCII apostrophe, two glottal stops
 	}
 	for _, tt := range tests {
 		if got := slugify(tt.in); got != tt.want {

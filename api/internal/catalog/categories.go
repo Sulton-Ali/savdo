@@ -123,6 +123,23 @@ func (h *Handler) GetCategory(ctx context.Context, req gen.GetCategoryRequestObj
 	return gen.GetCategory200JSONResponse(toGenCategory(row.ID, row.ParentID, row.Slug, row.SortOrder, row.IsActive, row.ImageID, row.Name, row.LocaleUsed, locale, row.Description, translations)), nil
 }
 
+// categoryExistsInShop reports whether categoryID is a live (non-deleted)
+// category of shopID. Used by products.go to validate ProductCreate/
+// ProductPatch's categoryId: the products_category_id_fkey constraint
+// alone has no shop_id component and does not filter deleted_at, so a
+// category id from another shop — or a soft-deleted one — would otherwise
+// be silently accepted.
+func (s *Service) categoryExistsInShop(ctx context.Context, shopID, categoryID uuid.UUID) (bool, error) {
+	_, err := s.q.GetCategory(ctx, db.GetCategoryParams{Locale: s.defaultLocale, ShopID: shopID, ID: categoryID})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
 // categoryDepthOK reports whether parentID (in shopID) exists and placing
 // a category under it keeps depth <= maxCategoryDepth.
 func (s *Service) categoryDepthOK(ctx context.Context, shopID, parentID uuid.UUID) (bool, error) {
@@ -136,6 +153,30 @@ func (s *Service) categoryDepthOK(ctx context.Context, shopID, parentID uuid.UUI
 		return false, nil
 	}
 	return depth+1 <= maxCategoryDepth, nil
+}
+
+// categoryReparentOK reports whether placing selfID (an existing category
+// with its own subtree) under parentID (both in shopID) keeps every
+// descendant of selfID within maxCategoryDepth: the deepest descendant
+// would land at depth(parentID) + height(selfID), which must not exceed
+// maxCategoryDepth. height(selfID) is 1 for a leaf, so this subsumes
+// categoryDepthOK's plain depth+1 check for that case.
+func (s *Service) categoryReparentOK(ctx context.Context, shopID, selfID, parentID uuid.UUID) (bool, error) {
+	depth, err := s.q.GetCategoryDepth(ctx, db.GetCategoryDepthParams{CategoryID: parentID, ShopID: shopID})
+	if err != nil {
+		return false, err
+	}
+	if depth == 0 {
+		return false, nil
+	}
+	height, err := s.q.GetCategorySubtreeHeight(ctx, db.GetCategorySubtreeHeightParams{CategoryID: selfID, ShopID: shopID})
+	if err != nil {
+		return false, err
+	}
+	if height == 0 {
+		return false, nil
+	}
+	return depth+height <= maxCategoryDepth, nil
 }
 
 // isDescendantOrSelf reports whether candidate is ancestorID itself or a
@@ -180,8 +221,8 @@ func (h *Handler) CreateCategory(ctx context.Context, req gen.CreateCategoryRequ
 	fields := map[string]string{}
 
 	entries := translationsToMap(body.Translations)
-	if !validateTranslationNames(entries) {
-		fields["translations"] = "invalid"
+	if reason := translationsFieldReason(entries); reason != "" {
+		fields["translations"] = reason
 	} else if !hasNonEmptyName(entries, h.svc.defaultLocale) {
 		fields["translations"] = "required"
 	}
@@ -319,7 +360,7 @@ func (h *Handler) UpdateCategory(ctx context.Context, req gen.UpdateCategoryRequ
 		if *pp == nil {
 			clearParent = true // explicit null: move to the top level
 		} else {
-			ok, err := h.svc.categoryDepthOK(ctx, authCtx.ShopID, **pp)
+			ok, err := h.svc.categoryReparentOK(ctx, authCtx.ShopID, req.Id, **pp)
 			if err != nil {
 				return nil, fmt.Errorf("catalog: check category depth: %w", err)
 			}
@@ -362,8 +403,8 @@ func (h *Handler) UpdateCategory(ctx context.Context, req gen.UpdateCategoryRequ
 	var patchEntries map[string]translationEntry
 	if body.Translations != nil {
 		patchEntries = translationsToMap(*body.Translations)
-		if !validateTranslationNames(patchEntries) {
-			fields["translations"] = "invalid"
+		if reason := translationsFieldReason(patchEntries); reason != "" {
+			fields["translations"] = reason
 		}
 	}
 

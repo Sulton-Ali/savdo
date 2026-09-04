@@ -24,15 +24,27 @@ var cyrillicToLatin = map[rune]string{
 // trailing or doubled hyphen.
 var slugRE = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
+// glottalStops are Uzbek Latin's oʻ/gʻ glottal-stop marks — modifier
+// letter turned comma (ʻ, U+02BB), modifier letter apostrophe (ʼ,
+// U+02BC), and the plain ASCII apostrophe some input methods substitute
+// for either — treated as letters to drop (not word separators), so
+// "Koʻylak" -> "koylak" and "Gʻishtli" -> "gishtli", not "ko-ylak"/
+// "g-ishtli".
+var glottalStops = map[rune]bool{'ʻ': true, 'ʼ': true, '\'': true}
+
 // slugify converts name into a lowercase ASCII slug: known Cyrillic
-// letters transliterated (cyrillicToLatin), Uzbek Latin's oʻ/gʻ glottal
-// stops and any other punctuation/space treated as a separator, runs of
-// separators collapsed to one hyphen, and leading/trailing hyphens
-// trimmed. Used to derive a category/product slug from its default-locale
-// translation name when the caller does not supply one.
+// letters transliterated (cyrillicToLatin), Uzbek Latin's glottal-stop
+// marks (glottalStops) dropped, and any other punctuation/space treated
+// as a separator; runs of separators collapse to one hyphen, and
+// leading/trailing hyphens are trimmed. Used to derive a category/product
+// slug from its default-locale translation name when the caller does not
+// supply one.
 func slugify(name string) string {
 	var b strings.Builder
 	for _, r := range strings.ToLower(name) {
+		if glottalStops[r] {
+			continue
+		}
 		if repl, ok := cyrillicToLatin[r]; ok {
 			b.WriteString(repl)
 			continue
