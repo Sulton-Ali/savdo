@@ -849,40 +849,76 @@ func TestGetPurchase_productNameHonoursAcceptLanguage(t *testing.T) {
 	})
 }
 
-// TestCreatePurchase_duplicateVariantIdRejected is MINOR 3's test (T4
-// review): two items of the same PurchaseCreate naming the same variantId
-// is a 400 VALIDATION_FAILED on `items`, not two separate purchase_items
-// rows.
-func TestCreatePurchase_duplicateVariantIdRejected(t *testing.T) {
+// repeatPurchaseItem builds n items all naming the same variantID — used
+// by TestCreatePurchase_itemsFieldValidation's "too many items" row, where
+// the count itself is what must be rejected before any per-item field
+// (including the very duplication this same variantID would otherwise
+// also trigger) is ever examined.
+func repeatPurchaseItem(variantID uuid.UUID, n int) []gen.PurchaseItemCreate {
+	items := make([]gen.PurchaseItemCreate, n)
+	for i := range items {
+		items[i] = gen.PurchaseItemCreate{VariantId: variantID, Qty: "1.000", UnitCost: "1.00"}
+	}
+	return items
+}
+
+// TestCreatePurchase_itemsFieldValidation is MINOR 3's and MINOR 8's tests
+// (T4 review, the latter added as a review-residual table row rather than
+// its own function): two items of the same PurchaseCreate naming the same
+// variantId is 400 VALIDATION_FAILED fields.items=invalid; more than
+// maxPurchaseItems (200) items is 400 fields.items=too_long, checked
+// before any per-item validation (so 201 copies of the same variantId —
+// which would also be a duplicate — still reports too_long, not invalid).
+func TestCreatePurchase_itemsFieldValidation(t *testing.T) {
 	pool, q := newTestQueries(t)
 	ctx := context.Background()
 	h := stock.NewHandler(stock.NewService(pool, q))
 
-	shop := seedShop(ctx, t, q, "purchase-dup-variant")
+	shop := seedShop(ctx, t, q, "purchase-items-field-validation")
 	manager := seedUser(ctx, t, q, shop.ID, "manager1", db.UserRoleManager)
-	supplier := seedSupplier(ctx, t, q, shop.ID, "Dup Variant Supplier")
+	supplier := seedSupplier(ctx, t, q, shop.ID, "Items Field Validation Supplier")
 	unit := seedUnit(ctx, t, q, shop.ID, "pcs")
-	product := seedProduct(ctx, t, q, shop.ID, unit.ID, "dup-variant-product")
+	product := seedProduct(ctx, t, q, shop.ID, unit.ID, "items-field-validation-product")
 	variant := seedVariant(ctx, t, q, shop.ID, product.ID, "{}")
 	loc := seedLocation(ctx, t, q, shop.ID, "Main")
 	managerCtx := ctxAs(shop.ID, manager)
 
-	_, err := h.CreatePurchase(managerCtx, gen.CreatePurchaseRequestObject{Body: &gen.PurchaseCreate{
-		SupplierId: supplier.ID, LocationId: loc.ID,
-		Items: []gen.PurchaseItemCreate{
-			{VariantId: variant.ID, Qty: "1.000", UnitCost: "1.00"},
-			{VariantId: variant.ID, Qty: "2.000", UnitCost: "2.00"},
+	tests := []struct {
+		name       string
+		items      []gen.PurchaseItemCreate
+		wantReason string
+	}{
+		{
+			name: "duplicate variantId",
+			items: []gen.PurchaseItemCreate{
+				{VariantId: variant.ID, Qty: "1.000", UnitCost: "1.00"},
+				{VariantId: variant.ID, Qty: "2.000", UnitCost: "2.00"},
+			},
+			wantReason: "invalid",
 		},
-	}})
-	if err == nil {
-		t.Fatal("want 400 VALIDATION_FAILED for a duplicate variantId, got no error")
+		{
+			name:       "more than 200 items",
+			items:      repeatPurchaseItem(variant.ID, 201),
+			wantReason: "too_long",
+		},
 	}
-	var apiErr *apierr.Error
-	if !errors.As(err, &apiErr) || apiErr.Status != 400 {
-		t.Fatalf("error = %v, want 400 VALIDATION_FAILED", err)
-	}
-	if apiErr.Details["fields"].(map[string]string)["items"] != "invalid" {
-		t.Fatalf("details = %v, want fields.items=invalid", apiErr.Details)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := h.CreatePurchase(managerCtx, gen.CreatePurchaseRequestObject{Body: &gen.PurchaseCreate{
+				SupplierId: supplier.ID, LocationId: loc.ID, Items: tt.items,
+			}})
+			if err == nil {
+				t.Fatalf("want 400 VALIDATION_FAILED, got no error")
+			}
+			var apiErr *apierr.Error
+			if !errors.As(err, &apiErr) || apiErr.Status != 400 {
+				t.Fatalf("error = %v, want 400 VALIDATION_FAILED", err)
+			}
+			if got := apiErr.Details["fields"].(map[string]string)["items"]; got != tt.wantReason {
+				t.Fatalf("details.fields.items = %q, want %q", got, tt.wantReason)
+			}
+		})
 	}
 }
 
@@ -928,12 +964,14 @@ func TestCreatePurchase_lineTotalOutOfRangeMapsTo400(t *testing.T) {
 // three line totals, and the stored purchases.total_cost column equals
 // the response totalCost (Sonnet MINOR 2 / Opus MINOR 5).
 //
-// (b) cancelling that received purchase after only the second variant's
-// stock left (a sale, not a purchase-cancel) is 409 STOCK_INSUFFICIENT,
-// writes zero purchase_cancel movements (the whole transaction rolls
-// back, not just the failing line), leaves the first variant's level
-// unchanged, leaves the purchase status received, and stock.Rebuild
-// still matches the (unchanged) levels.
+// (b) cancelling that received purchase after only one variant's stock
+// left (a sale, not a purchase-cancel) — deliberately the variant whose
+// id sorts LAST, so at least one reversing Move has already succeeded
+// before the failing one, making the all-or-nothing assertion meaningful
+// — is 409 STOCK_INSUFFICIENT, writes zero purchase_cancel movements (the
+// whole transaction rolls back, not just the failing line), leaves the
+// first-sorting variant's level unchanged, leaves the purchase status
+// received, and stock.Rebuild still matches the (unchanged) levels.
 func TestReceiveAndCancelPurchase_multiItem(t *testing.T) {
 	pool, q := newTestQueries(t)
 	ctx := context.Background()
@@ -950,6 +988,19 @@ func TestReceiveAndCancelPurchase_multiItem(t *testing.T) {
 	v3 := seedVariant(ctx, t, q, shop.ID, product.ID, `{"k":"3"}`)
 	loc := seedLocation(ctx, t, q, shop.ID, "Main")
 	managerCtx := ctxAs(shop.ID, manager)
+
+	// seedVariant's ids are random (uuid.New(), v4) — sort them so part (b)
+	// below can deliberately sell out whichever one sorts LAST. Cancel's
+	// own Move calls run in ascending variant_id order (sortedPurchaseItems),
+	// so selling out the last-sorting variant guarantees the first two
+	// reversing Moves succeed before the third one fails — without this,
+	// roughly one run in three would have picked a variant that happens to
+	// sort first, making the "the whole transaction rolled back a
+	// successful reversal" assertion below vacuous (nothing would yet have
+	// succeeded when the failure hit).
+	sortedByID := []db.ProductVariant{v1, v2, v3}
+	sort.Slice(sortedByID, func(i, j int) bool { return sortedByID[i].ID.String() < sortedByID[j].ID.String() })
+	firstSorted, sellOutVariant := sortedByID[0], sortedByID[2]
 
 	// Inserted out of order (v3, v1, v2) — CreatePurchase itself does not
 	// sort; ReceivePurchaseTx's own sortedPurchaseItems is what must.
@@ -1021,16 +1072,18 @@ func TestReceiveAndCancelPurchase_multiItem(t *testing.T) {
 		t.Fatalf("stored purchases.total_cost = %v, want 150.00 (equal to the response totalCost)", storedTotal)
 	}
 
-	// (b) Only v2's stock leaves, via a sale — not a purchase cancel.
+	// (b) Only the last-sorting variant's stock leaves, via a sale — not a
+	// purchase cancel.
 	if _, err := svc.MoveInTx(ctx, stock.MoveParams{
-		ShopID: shop.ID, VariantID: v2.ID, LocationID: loc.ID,
+		ShopID: shop.ID, VariantID: sellOutVariant.ID, LocationID: loc.ID,
 		Kind: db.StockMovementKindSaleOut, Qty: d(t, "-5.000"),
 	}); err != nil {
-		t.Fatalf("sale out v2: %v", err)
+		t.Fatalf("sale out sellOutVariant: %v", err)
 	}
 
-	beforeV1, _ := readLevel(ctx, t, pool, shop.ID, v1.ID, loc.ID)
-	beforeV3, _ := readLevel(ctx, t, pool, shop.ID, v3.ID, loc.ID)
+	otherVariant := sortedByID[1]
+	beforeFirst, _ := readLevel(ctx, t, pool, shop.ID, firstSorted.ID, loc.ID)
+	beforeOther, _ := readLevel(ctx, t, pool, shop.ID, otherVariant.ID, loc.ID)
 
 	_, err = h.CancelPurchase(managerCtx, gen.CancelPurchaseRequestObject{Id: created.Id})
 	if err == nil {
@@ -1047,12 +1100,12 @@ func TestReceiveAndCancelPurchase_multiItem(t *testing.T) {
 		t.Fatalf("count purchase_cancel movements: %v", err)
 	}
 	if cancelCount != 0 {
-		t.Fatalf("purchase_cancel movements after a failed cancel = %d, want 0 (the whole transaction must roll back)", cancelCount)
+		t.Fatalf("purchase_cancel movements after a failed cancel = %d, want 0 (the whole transaction must roll back, including the first-sorting variant's already-successful reversal)", cancelCount)
 	}
 
-	afterV1, exists := readLevel(ctx, t, pool, shop.ID, v1.ID, loc.ID)
-	if !exists || !afterV1.Equal(beforeV1) {
-		t.Fatalf("v1 level after the failed cancel = (%s, exists=%v), want unchanged at %s", afterV1, exists, beforeV1)
+	afterFirst, exists := readLevel(ctx, t, pool, shop.ID, firstSorted.ID, loc.ID)
+	if !exists || !afterFirst.Equal(beforeFirst) {
+		t.Fatalf("first-sorting variant's level after the failed cancel = (%s, exists=%v), want unchanged at %s (its reversal ran and succeeded, then rolled back with everything else)", afterFirst, exists, beforeFirst)
 	}
 
 	stillReceived, err := q.GetPurchase(ctx, db.GetPurchaseParams{ShopID: shop.ID, ID: created.Id})
@@ -1063,7 +1116,7 @@ func TestReceiveAndCancelPurchase_multiItem(t *testing.T) {
 		t.Fatalf("Status after failed cancel = %q, want received (unchanged)", stillReceived.Status)
 	}
 
-	beforeV2, _ := readLevel(ctx, t, pool, shop.ID, v2.ID, loc.ID)
+	beforeSellOut, _ := readLevel(ctx, t, pool, shop.ID, sellOutVariant.ID, loc.ID)
 	result, err := stock.Rebuild(ctx, pool, shop.Slug)
 	if err != nil {
 		t.Fatalf("Rebuild: %v", err)
@@ -1071,12 +1124,12 @@ func TestReceiveAndCancelPurchase_multiItem(t *testing.T) {
 	if result.Movements != 4 {
 		t.Fatalf("Rebuild Movements = %d, want 4 (3 receives + 1 sale; nothing from the failed cancel)", result.Movements)
 	}
-	afterRebuildV1, _ := readLevel(ctx, t, pool, shop.ID, v1.ID, loc.ID)
-	afterRebuildV2, _ := readLevel(ctx, t, pool, shop.ID, v2.ID, loc.ID)
-	afterRebuildV3, _ := readLevel(ctx, t, pool, shop.ID, v3.ID, loc.ID)
-	if !afterRebuildV1.Equal(beforeV1) || !afterRebuildV2.Equal(beforeV2) || !afterRebuildV3.Equal(beforeV3) {
+	afterRebuildFirst, _ := readLevel(ctx, t, pool, shop.ID, firstSorted.ID, loc.ID)
+	afterRebuildOther, _ := readLevel(ctx, t, pool, shop.ID, otherVariant.ID, loc.ID)
+	afterRebuildSellOut, _ := readLevel(ctx, t, pool, shop.ID, sellOutVariant.ID, loc.ID)
+	if !afterRebuildFirst.Equal(beforeFirst) || !afterRebuildOther.Equal(beforeOther) || !afterRebuildSellOut.Equal(beforeSellOut) {
 		t.Fatalf("levels after rebuild = (%s, %s, %s), want unchanged (%s, %s, %s)",
-			afterRebuildV1, afterRebuildV2, afterRebuildV3, beforeV1, beforeV2, beforeV3)
+			afterRebuildFirst, afterRebuildOther, afterRebuildSellOut, beforeFirst, beforeOther, beforeSellOut)
 	}
 }
 
