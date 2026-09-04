@@ -140,7 +140,7 @@ entries are added by `/phase-done` when a review catches one.
 - **Snapshot state in UI shells.** T8 invalidated a query but the layout read a route-context snapshot, so the sidebar kept the old shop name. Shells subscribe to live queries; saves invalidate the router.
 - **Parallel heavy gates on one machine.** Two testcontainers suites plus jsdom tests in parallel produced timeouts that looked like failures (O-13). See operating constraint 7: one testcontainers-heavy gate (`make verify`, `go test ./...`) runs at a time; if a merger sees timeouts, retry once after 120 s of quiet.
 - **Load-induced gate failures.** Testcontainers container-start deadlines and timeouts cascade when multiple heavy gates run at once. The orchestrator sequences any task needing exclusive use of the dev stack, and mergers never retry a timeout in parallel — wait and retry once after the machine quiets. A 120 s cooldown between gate runs avoids the deadline.
-- **Admin vitest pool saturation.** Admin unit tests use `vitest` with `pool: 'forks'` and `maxWorkers: 2` to prevent browser APIs (jsdom, localStorage) from leaking across test workers in isolation mode. Increasing `maxWorkers` will break seed and other tests that write to the test database or local storage. The setting is non-negotiable.
+- **Admin vitest pool saturation.** Admin vitest runs with `pool: 'forks'` and `maxWorkers: 2` because unbounded workers crashed under load on the dev machine (T6b).
 
 ## Tooling
 
