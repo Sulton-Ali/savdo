@@ -21,11 +21,12 @@ import (
 // enforce at runtime — see auth/handler.go's maxLoginUsernameLength
 // comment) or that need a business-vocabulary reason
 // (required/invalid/too_short/too_long) rather than a raw message.
+// Password bounds are auth.MinPasswordLength/auth.MaxPasswordLength —
+// the single source of truth auth.Hash itself enforces — not redeclared
+// here.
 const (
 	minUsernameLength = 3
 	maxUsernameLength = 64
-	minPasswordLength = 8
-	maxPasswordLength = 128
 )
 
 var (
@@ -93,9 +94,9 @@ func validatePassword(raw string) string {
 	switch n := utf8.RuneCountInString(raw); {
 	case n == 0:
 		return "required"
-	case n < minPasswordLength:
+	case n < auth.MinPasswordLength:
 		return "too_short"
-	case n > maxPasswordLength:
+	case n > auth.MaxPasswordLength:
 		return "too_long"
 	default:
 		return ""
@@ -126,6 +127,22 @@ func validatePhone(phone *string) string {
 		return "invalid"
 	}
 	return ""
+}
+
+// normalizePhone converts an empty string to nil so `phone: ""` on
+// **create** is stored as SQL NULL, not a literal empty string. This
+// matters because `phone` is nullable and unique only when non-null
+// (docs/04-DATA-MODEL.md § 1: `unique (shop_id, phone) where not null`)
+// — if two staff members were both created with a literal empty-string
+// phone, the second CreateUser would fail with a spurious 409 CONFLICT,
+// since an empty string, unlike NULL, is not "no phone" as far as a
+// unique index is concerned. CreateUser is a plain INSERT, so passing
+// nil here reliably binds SQL NULL.
+func normalizePhone(phone *string) *string {
+	if phone == nil || *phone == "" {
+		return nil
+	}
+	return phone
 }
 
 // CreateStaff creates a manager or cashier. Requires staff.manage (owner
@@ -188,7 +205,7 @@ func (h *Handler) CreateStaff(ctx context.Context, req gen.CreateStaffRequestObj
 		Username: username,
 		Password: body.Password,
 		FullName: fullName,
-		Phone:    body.Phone,
+		Phone:    normalizePhone(body.Phone),
 		Role:     role,
 		Locale:   locale,
 	})
@@ -251,6 +268,22 @@ func (h *Handler) UpdateStaff(ctx context.Context, req gen.UpdateStaffRequestObj
 		return nil, apierr.Validation(fields)
 	}
 
+	// body.Phone is passed through unchanged, deliberately not
+	// normalized the way CreateStaff's is: nil must keep meaning "leave
+	// unchanged" (UpdateUser's `phone = COALESCE($2, phone)` — a nil
+	// param always resolves to the existing value; there is no parameter
+	// that can make COALESCE produce NULL from a non-null existing
+	// value, so an explicit "set to NULL" needs a query change this
+	// package doesn't own, out of scope here), while a non-nil empty
+	// string ("phone": "") is the one signal we CAN act on: it reaches
+	// UpdateStaff as a real "clear" request, stored as a literal empty
+	// string (not SQL NULL) and mapped back to a nil `phone` in the
+	// response by toGenUser (staff.go) — clearing at the API's contract
+	// boundary even though the column isn't truly NULL. A JSON `null` is
+	// indistinguishable from an omitted field once oapi-codegen decodes
+	// StaffPatch.phone into a plain *string (Q-20, contract-level, out
+	// of scope), so `null` and absent both mean "leave unchanged" here;
+	// only `""` means "clear".
 	updated, err := h.svc.UpdateStaff(ctx, authCtx.ShopID, authCtx.UserID, req.Id, StaffPatchInput{
 		FullName: fullName, Phone: body.Phone, Role: role, IsActive: body.IsActive, Locale: locale,
 	})

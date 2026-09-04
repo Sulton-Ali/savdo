@@ -165,7 +165,11 @@ func (s *Service) UpdateStaff(ctx context.Context, shopID, actorID, id uuid.UUID
 
 // SetStaffPassword hashes password and sets it on shopID's user id,
 // revoking every one of that user's sessions in the same transaction —
-// including when the owner resets their own password (D-28).
+// including when the owner resets their own password (D-28). Resetting
+// an inactive user's password is allowed (it is not gated on IsActive);
+// it grants that user nothing until an owner reactivates them, since
+// Login's own IsActive check (auth.Service.Login) still refuses a
+// deactivated user regardless of how current their password hash is.
 func (s *Service) SetStaffPassword(ctx context.Context, shopID, id uuid.UUID, password string) error {
 	if _, err := s.q.GetUserByID(ctx, db.GetUserByIDParams{ShopID: shopID, ID: id}); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -202,12 +206,25 @@ func (s *Service) SetStaffPassword(ctx context.Context, shopID, id uuid.UUID, pa
 // ShopID are deliberately never carried across — a password hash must
 // never reach a response (hard rule 9), and shop_id is the tenant
 // boundary, not response payload.
+//
+// Phone maps a stored literal empty string to nil (never a bare ""), the
+// counterpart to UpdateStaff's phone handling (handler_staff.go): since
+// UpdateUser's `phone = COALESCE($2, phone)` can never write a true SQL
+// NULL over an existing non-null value, the one way this package has
+// (without a query change out of its scope) to honor a `PATCH
+// {"phone":""}` "clear" request is to store the literal empty string and
+// present it as absent here — every response, not just the one right
+// after the PATCH, so the API never shows a client a literal "" phone.
 func toGenUser(u db.User) gen.User {
+	phone := u.Phone
+	if phone != nil && *phone == "" {
+		phone = nil
+	}
 	return gen.User{
 		Id:          u.ID,
 		Username:    u.Username,
 		FullName:    u.FullName,
-		Phone:       u.Phone,
+		Phone:       phone,
 		Role:        gen.Role(u.Role),
 		Locale:      gen.Locale(u.Locale),
 		IsActive:    u.IsActive,
