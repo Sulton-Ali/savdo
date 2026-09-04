@@ -297,17 +297,13 @@ func (h *Handler) CreateVariant(ctx context.Context, req gen.CreateVariantReques
 }
 
 // UpdateVariant updates a variant. Requires catalog.write (manager+).
-//
-// KNOWN GAP (see this task's final report): gen.VariantPatch carries an
-// `attributes` field, but db.UpdateVariantParams
-// (api/internal/db/variants.sql.go) has no attributes column in its SET
-// list at all — its own doc comment says changing attributes is meant to
-// be "a delete+recreate at the service layer, not an in-place edit",
-// which would mint a new variant id for what the client still addresses
-// as the same resource. Rather than silently churning ids (which would be
-// a correctness hazard once Phase 3+ references variant ids from stock/
-// sales), a patch that names `attributes` is rejected as 400 invalid
-// until the contract/query mismatch is resolved by the owner.
+// `attributes`, when present, is validated exactly like CreateVariant
+// (keys must be this shop's attribute definition codes, values non-empty
+// and <= maxAttributeValueLength, canonicalized via encoding/json's
+// sorted-map-key marshalling) and rewritten in place via
+// db.UpdateVariantAttributes — the variant keeps its id, so any Phase 3+
+// stock/sales reference to it survives; a duplicate combination is 409
+// CONFLICT details.field: attributes, same as CreateVariant.
 func (h *Handler) UpdateVariant(ctx context.Context, req gen.UpdateVariantRequestObject) (gen.UpdateVariantResponseObject, error) {
 	if _, ok := auth.FromContext(ctx); !ok {
 		return nil, apierr.Unauthenticated()
@@ -328,8 +324,17 @@ func (h *Handler) UpdateVariant(ctx context.Context, req gen.UpdateVariantReques
 	body := req.Body
 	fields := map[string]string{}
 
+	var canonicalAttrs json.RawMessage
 	if body.Attributes != nil {
-		fields["attributes"] = "invalid"
+		canonical, ok, err := h.svc.validateAttributes(ctx, authCtx.ShopID, *body.Attributes)
+		if err != nil {
+			return nil, fmt.Errorf("catalog: validate attributes: %w", err)
+		}
+		if !ok {
+			fields["attributes"] = "invalid"
+		} else {
+			canonicalAttrs = canonical
+		}
 	}
 
 	skuP := optionalString(body.Sku)
@@ -389,7 +394,14 @@ func (h *Handler) UpdateVariant(ctx context.Context, req gen.UpdateVariantReques
 		}
 	}
 
-	updated, err := h.svc.q.UpdateVariant(ctx, params)
+	tx, err := h.svc.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("catalog: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	qtx := h.svc.q.WithTx(tx)
+
+	updated, err := qtx.UpdateVariant(ctx, params)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, apierr.NotFound("variant")
@@ -398,6 +410,25 @@ func (h *Handler) UpdateVariant(ctx context.Context, req gen.UpdateVariantReques
 			return nil, apierr.Conflict(field)
 		}
 		return nil, fmt.Errorf("catalog: update variant: %w", err)
+	}
+
+	if canonicalAttrs != nil {
+		updated, err = qtx.UpdateVariantAttributes(ctx, db.UpdateVariantAttributesParams{
+			ShopID: authCtx.ShopID, ID: current.ID, Attributes: canonicalAttrs,
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil, apierr.NotFound("variant")
+			}
+			if field, ok := conflictField(err); ok {
+				return nil, apierr.Conflict(field)
+			}
+			return nil, fmt.Errorf("catalog: update variant attributes: %w", err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("catalog: commit update variant: %w", err)
 	}
 
 	resp, err := genVariantFromStaffRow(updated, true)
