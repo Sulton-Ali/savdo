@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/Sulton-Ali/savdo/api/gen"
@@ -45,12 +46,32 @@ func TestHasNonEmptyName(t *testing.T) {
 	}
 }
 
-func TestValidateTranslationNames(t *testing.T) {
-	if !validateTranslationNames(map[string]translationEntry{"uz": {Name: "Koylak"}}) {
-		t.Error("expected valid")
+func TestTranslationsFieldReason(t *testing.T) {
+	if reason := translationsFieldReason(map[string]translationEntry{"uz": {Name: "Koylak"}}); reason != "" {
+		t.Errorf("reason = %q, want valid (empty)", reason)
 	}
-	if validateTranslationNames(map[string]translationEntry{"uz": {Name: "  "}}) {
-		t.Error("expected invalid: blank name")
+	if reason := translationsFieldReason(map[string]translationEntry{"uz": {Name: "  "}}); reason != "invalid" {
+		t.Errorf("reason = %q, want invalid (blank name)", reason)
+	}
+
+	longName := strings.Repeat("a", maxTranslationNameLength+1)
+	if reason := translationsFieldReason(map[string]translationEntry{"uz": {Name: longName}}); reason != "too_long" {
+		t.Errorf("reason = %q, want too_long (name over %d runes)", reason, maxTranslationNameLength)
+	}
+
+	okName := strings.Repeat("a", maxTranslationNameLength)
+	if reason := translationsFieldReason(map[string]translationEntry{"uz": {Name: okName}}); reason != "" {
+		t.Errorf("reason = %q, want valid at exactly the name limit", reason)
+	}
+
+	longDesc := strings.Repeat("a", maxTranslationDescriptionLength+1)
+	if reason := translationsFieldReason(map[string]translationEntry{"uz": {Name: "Koylak", Description: &longDesc}}); reason != "too_long" {
+		t.Errorf("reason = %q, want too_long (description over %d runes)", reason, maxTranslationDescriptionLength)
+	}
+
+	okDesc := strings.Repeat("a", maxTranslationDescriptionLength)
+	if reason := translationsFieldReason(map[string]translationEntry{"uz": {Name: "Koylak", Description: &okDesc}}); reason != "" {
+		t.Errorf("reason = %q, want valid at exactly the description limit", reason)
 	}
 }
 

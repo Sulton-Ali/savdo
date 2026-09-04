@@ -27,6 +27,36 @@ import (
 // ignored".
 const minSearchLength = 2
 
+// maxSearchLength bounds `?q=` so a pathological caller cannot build an
+// arbitrarily long ILIKE pattern; longer input is simply truncated, not
+// rejected — a long search query is still a search query, just a less
+// precise one past this point.
+const maxSearchLength = 100
+
+// capRunes truncates s to at most n runes (not bytes, so a multi-byte uz/
+// ru character is never split mid-encoding).
+func capRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n])
+}
+
+// escapeLikePattern escapes s for safe interpolation into a Postgres
+// ILIKE pattern (`'%' || $1 || '%'`) under the engine's default backslash
+// escape character: a literal backslash is escaped first (so the escapes
+// this function inserts are never themselves re-escaped), then `%` and
+// `_`, Postgres' own LIKE wildcards, so a caller searching for a product
+// literally named e.g. "50% off" or "a_b" cannot have those characters
+// match anything except themselves.
+func escapeLikePattern(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `%`, `\%`)
+	s = strings.ReplaceAll(s, `_`, `\_`)
+	return s
+}
+
 // productSlugRetries mirrors categorySlugRetries for CreateProduct's
 // auto-generated slug.
 const productSlugRetries = 3
@@ -128,9 +158,14 @@ func toGenProductBase(pc productCommon, requested string) (gen.Product, error) {
 // buildFullProduct assembles the complete response for a single-item
 // endpoint (Get/Create/Update): base fields, the resolved description (via
 // ListProductTranslations — the only query that selects it), costPrice
-// when costPrice is non-nil and Valid, the full translations map when
-// includeTranslations, and variants/images when includeVariantsImages.
-func (s *Service) buildFullProduct(ctx context.Context, shopID uuid.UUID, pc productCommon, costPrice *pgtype.Numeric, requested string, includeTranslations, includeVariantsImages bool) (gen.Product, error) {
+// when includeCost (and costPrice is non-nil and Valid), the full
+// translations map when includeTranslations, and variants/images when
+// includeVariantsImages. includeCost is an explicit, caller-supplied flag
+// — never inferred from costPrice being non-nil, which would conflate "no
+// permission" with "the value happens to be unset" and could hide
+// costOverride from a privileged caller whose product simply has no
+// cost_price on file yet.
+func (s *Service) buildFullProduct(ctx context.Context, shopID uuid.UUID, pc productCommon, costPrice *pgtype.Numeric, includeCost bool, requested string, includeTranslations, includeVariantsImages bool) (gen.Product, error) {
 	g, err := toGenProductBase(pc, requested)
 	if err != nil {
 		return gen.Product{}, err
@@ -147,7 +182,7 @@ func (s *Service) buildFullProduct(ctx context.Context, shopID uuid.UUID, pc pro
 		g.Translations = buildTranslations(entries)
 	}
 
-	if costPrice != nil && costPrice.Valid {
+	if includeCost && costPrice != nil && costPrice.Valid {
 		d, err := money.FromNumeric(*costPrice)
 		if err != nil {
 			return gen.Product{}, fmt.Errorf("catalog: product cost price: %w", err)
@@ -157,7 +192,7 @@ func (s *Service) buildFullProduct(ctx context.Context, shopID uuid.UUID, pc pro
 	}
 
 	if includeVariantsImages {
-		variants, err := s.variantsFor(ctx, shopID, pc.ID, costPrice != nil)
+		variants, err := s.variantsFor(ctx, shopID, pc.ID, includeCost)
 		if err != nil {
 			return gen.Product{}, fmt.Errorf("catalog: list variants: %w", err)
 		}
@@ -191,24 +226,31 @@ func (s *Service) productTranslationEntries(ctx context.Context, productID uuid.
 }
 
 // ListProducts lists products. Any authenticated role; `q` (trimmed, >= 2
-// chars) searches by name; includeInactive is staff-only (catalog.write);
-// costPrice/translations are present only for owner/manager.
-// description is always null on list items (see buildFullProduct's doc
-// comment) — populating it per row would need one extra
-// ListProductTranslations query per item.
+// chars, capped at maxSearchLength and LIKE-escaped) searches by name;
+// includeInactive is honoured only for a catalog.write caller, checked
+// directly here rather than reusing permsFromContext's includeTranslations
+// flag — the two happen to be the same permission today, but tying
+// "which fields show" to "which rows show" through one shared bool would
+// silently break if that ever changed. costPrice/translations are present
+// only for owner/manager. description is always null on list items (see
+// buildFullProduct's doc comment) — populating it per row would need one
+// extra ListProductTranslations query per item.
 func (h *Handler) ListProducts(ctx context.Context, req gen.ListProductsRequestObject) (gen.ListProductsResponseObject, error) {
 	authCtx, ok := auth.FromContext(ctx)
 	if !ok {
 		return nil, apierr.Unauthenticated()
 	}
 	p := permsFromContext(ctx)
-	includeInactive := req.Params.IncludeInactive != nil && *req.Params.IncludeInactive && p.includeTranslations
+	includeInactive := req.Params.IncludeInactive != nil && *req.Params.IncludeInactive &&
+		auth.Require(ctx, auth.PermCatalogWrite) == nil
 
 	var q *string
 	if req.Params.Q != nil {
 		trimmed := strings.TrimSpace(*req.Params.Q)
 		if utf8.RuneCountInString(trimmed) >= minSearchLength {
-			q = &trimmed
+			capped := capRunes(trimmed, maxSearchLength)
+			escaped := escapeLikePattern(capped)
+			q = &escaped
 		}
 	}
 
@@ -288,7 +330,7 @@ func (h *Handler) GetProduct(ctx context.Context, req gen.GetProductRequestObjec
 			}
 			return nil, fmt.Errorf("catalog: get product for staff: %w", err)
 		}
-		g, err := h.svc.buildFullProduct(ctx, authCtx.ShopID, commonFromStaffRow(row), &row.CostPrice, locale, p.includeTranslations, true)
+		g, err := h.svc.buildFullProduct(ctx, authCtx.ShopID, commonFromStaffRow(row), &row.CostPrice, true, locale, p.includeTranslations, true)
 		if err != nil {
 			return nil, fmt.Errorf("catalog: %w", err)
 		}
@@ -302,7 +344,13 @@ func (h *Handler) GetProduct(ctx context.Context, req gen.GetProductRequestObjec
 		}
 		return nil, fmt.Errorf("catalog: get product for cashier: %w", err)
 	}
-	g, err := h.svc.buildFullProduct(ctx, authCtx.ShopID, commonFromCashierRow(row), nil, locale, false, true)
+	if !row.IsActive {
+		// Consistent with ListProducts, which a cashier can never pass
+		// includeInactive for: an inactive product does not exist from a
+		// cashier's point of view, list or single-item alike.
+		return nil, apierr.NotFound("product")
+	}
+	g, err := h.svc.buildFullProduct(ctx, authCtx.ShopID, commonFromCashierRow(row), nil, false, locale, false, true)
 	if err != nil {
 		return nil, fmt.Errorf("catalog: %w", err)
 	}
@@ -374,8 +422,8 @@ func (h *Handler) CreateProduct(ctx context.Context, req gen.CreateProductReques
 	fields := map[string]string{}
 
 	entries := translationsToMap(body.Translations)
-	if !validateTranslationNames(entries) {
-		fields["translations"] = "invalid"
+	if reason := translationsFieldReason(entries); reason != "" {
+		fields["translations"] = reason
 	} else if !hasNonEmptyName(entries, h.svc.defaultLocale) {
 		fields["translations"] = "required"
 	}
@@ -406,6 +454,26 @@ func (h *Handler) CreateProduct(ctx context.Context, req gen.CreateProductReques
 	}
 	if body.PromoFrom != nil && body.PromoTo != nil && body.PromoFrom.After(*body.PromoTo) {
 		fields["promoTo"] = "invalid"
+	}
+
+	// products_category_id_fkey / products_unit_id_fkey have no shop_id
+	// component (and, for category, no deleted_at filter either), so the
+	// FK alone would silently accept another shop's id or a soft-deleted
+	// category — checked proactively here rather than relied on as a
+	// caught-error backstop.
+	if body.CategoryId != nil {
+		ok, err := h.svc.categoryExistsInShop(ctx, authCtx.ShopID, *body.CategoryId)
+		if err != nil {
+			return nil, fmt.Errorf("catalog: check category: %w", err)
+		}
+		if !ok {
+			fields["categoryId"] = "invalid"
+		}
+	}
+	if ok, err := h.svc.unitExistsInShop(ctx, authCtx.ShopID, body.UnitId); err != nil {
+		return nil, fmt.Errorf("catalog: check unit: %w", err)
+	} else if !ok {
+		fields["unitId"] = "invalid"
 	}
 
 	var candidates []string
@@ -453,8 +521,8 @@ func (h *Handler) CreateProduct(ctx context.Context, req gen.CreateProductReques
 			}
 			return nil, apierr.Conflict(field)
 		}
-		if fkField, ok := invalidFKField(writeErr); ok {
-			return nil, apierr.Validation(map[string]string{fkField: "invalid"})
+		if apiErr, ok := mapWriteError(writeErr); ok {
+			return nil, apiErr
 		}
 		return nil, fmt.Errorf("catalog: create product: %w", writeErr)
 	}
@@ -469,12 +537,11 @@ func (h *Handler) CreateProduct(ctx context.Context, req gen.CreateProductReques
 		BasePrice: created.BasePrice, PromoPrice: created.PromoPrice, PromoFrom: created.PromoFrom, PromoTo: created.PromoTo,
 		IsActive: created.IsActive, IsFeatured: created.IsFeatured, Name: name, LocaleUsed: localeUsed,
 	}
-	var costPtr *pgtype.Numeric
-	if created.CostPrice.Valid {
-		c := created.CostPrice
-		costPtr = &c
-	}
-	g, err := h.svc.buildFullProduct(ctx, authCtx.ShopID, pc, costPtr, locale, true, true)
+	// CreateProduct always requires catalog.write, which the role matrix
+	// grants only alongside cost.read — includeCost is unconditionally
+	// true here, independent of whether cost_price happens to be set
+	// (buildFullProduct itself still omits CostPrice when it is NULL).
+	g, err := h.svc.buildFullProduct(ctx, authCtx.ShopID, pc, &created.CostPrice, true, locale, true, true)
 	if err != nil {
 		return nil, fmt.Errorf("catalog: %w", err)
 	}
@@ -542,6 +609,15 @@ func (h *Handler) UpdateProduct(ctx context.Context, req gen.UpdateProductReques
 		return nil, err
 	}
 	authCtx, _ := auth.FromContext(ctx)
+
+	current, err := h.svc.q.GetProductForStaff(ctx, db.GetProductForStaffParams{Locale: h.svc.defaultLocale, ShopID: authCtx.ShopID, ID: req.Id})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, apierr.NotFound("product")
+		}
+		return nil, fmt.Errorf("catalog: get product: %w", err)
+	}
+
 	body := req.Body
 
 	fields := map[string]string{}
@@ -563,7 +639,29 @@ func (h *Handler) UpdateProduct(ctx context.Context, req gen.UpdateProductReques
 		if *cp == nil {
 			clearCategory = true
 		} else {
-			categoryID = *cp
+			// products_category_id_fkey has no shop_id component and
+			// does not filter deleted_at, so it alone would silently
+			// accept another shop's category id or a soft-deleted one.
+			ok, err := h.svc.categoryExistsInShop(ctx, authCtx.ShopID, **cp)
+			if err != nil {
+				return nil, fmt.Errorf("catalog: check category: %w", err)
+			}
+			if !ok {
+				fields["categoryId"] = "invalid"
+			} else {
+				categoryID = *cp
+			}
+		}
+	}
+
+	if body.UnitId != nil {
+		// products_unit_id_fkey has no shop_id component either.
+		ok, err := h.svc.unitExistsInShop(ctx, authCtx.ShopID, *body.UnitId)
+		if err != nil {
+			return nil, fmt.Errorf("catalog: check unit: %w", err)
+		}
+		if !ok {
+			fields["unitId"] = "invalid"
 		}
 	}
 
@@ -622,8 +720,25 @@ func (h *Handler) UpdateProduct(ctx context.Context, req gen.UpdateProductReques
 			promoTo = *pt
 		}
 	}
-	if promoFrom != nil && promoTo != nil && promoFrom.After(*promoTo) {
-		fields["promoTo"] = "invalid"
+	// Cross-check against the stored value when only one side of the pair
+	// is patched: a patch naming only promoTo must still respect an
+	// already-stored promoFrom (and vice versa), not compare against
+	// nothing just because this request did not repeat it.
+	if !clearPromo {
+		effectiveFrom, effectiveTo := promoFrom, promoTo
+		if effectiveFrom == nil {
+			effectiveFrom = current.PromoFrom
+		}
+		if effectiveTo == nil {
+			effectiveTo = current.PromoTo
+		}
+		if effectiveFrom != nil && effectiveTo != nil && effectiveFrom.After(*effectiveTo) {
+			if promoFrom != nil && promoTo == nil {
+				fields["promoFrom"] = "invalid"
+			} else {
+				fields["promoTo"] = "invalid"
+			}
+		}
 	}
 
 	if body.Slug != nil && !validSlug(*body.Slug) {
@@ -633,8 +748,8 @@ func (h *Handler) UpdateProduct(ctx context.Context, req gen.UpdateProductReques
 	var patchEntries map[string]translationEntry
 	if body.Translations != nil {
 		patchEntries = translationsToMap(*body.Translations)
-		if !validateTranslationNames(patchEntries) {
-			fields["translations"] = "invalid"
+		if reason := translationsFieldReason(patchEntries); reason != "" {
+			fields["translations"] = reason
 		}
 	}
 
@@ -664,11 +779,8 @@ func (h *Handler) UpdateProduct(ctx context.Context, req gen.UpdateProductReques
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, apierr.NotFound("product")
 		}
-		if field, ok := conflictField(err); ok {
-			return nil, apierr.Conflict(field)
-		}
-		if fkField, ok := invalidFKField(err); ok {
-			return nil, apierr.Validation(map[string]string{fkField: "invalid"})
+		if apiErr, ok := mapWriteError(err); ok {
+			return nil, apiErr
 		}
 		return nil, fmt.Errorf("catalog: update product: %w", err)
 	}
@@ -688,7 +800,7 @@ func (h *Handler) UpdateProduct(ctx context.Context, req gen.UpdateProductReques
 	if err != nil {
 		return nil, fmt.Errorf("catalog: get product after update: %w", err)
 	}
-	g, err := h.svc.buildFullProduct(ctx, authCtx.ShopID, commonFromStaffRow(fresh), &fresh.CostPrice, locale, true, true)
+	g, err := h.svc.buildFullProduct(ctx, authCtx.ShopID, commonFromStaffRow(fresh), &fresh.CostPrice, true, locale, true, true)
 	if err != nil {
 		return nil, fmt.Errorf("catalog: %w", err)
 	}

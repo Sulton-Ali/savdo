@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/google/uuid"
+
 	"github.com/Sulton-Ali/savdo/api/gen"
 	"github.com/Sulton-Ali/savdo/api/internal/apierr"
 	"github.com/Sulton-Ali/savdo/api/internal/auth"
@@ -36,4 +38,23 @@ func (h *Handler) ListUnits(ctx context.Context, _ gen.ListUnitsRequestObject) (
 		}
 	}
 	return gen.ListUnits200JSONResponse(gen.UnitList{Items: items}), nil
+}
+
+// unitExistsInShop reports whether unitID belongs to shopID. Used by
+// products.go to validate ProductCreate/ProductPatch's unitId: the
+// products_unit_id_fkey constraint alone has no shop_id component, so a
+// unit id from a different shop would otherwise be silently accepted.
+// There is no per-id GetUnit query, so this filters ListUnits' (small,
+// per-shop) result instead of hand-writing SQL.
+func (s *Service) unitExistsInShop(ctx context.Context, shopID, unitID uuid.UUID) (bool, error) {
+	rows, err := s.q.ListUnits(ctx, db.ListUnitsParams{Locale: s.defaultLocale, ShopID: shopID})
+	if err != nil {
+		return false, err
+	}
+	for _, r := range rows {
+		if r.ID == unitID {
+			return true, nil
+		}
+	}
+	return false, nil
 }

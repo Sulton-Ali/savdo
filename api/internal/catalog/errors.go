@@ -4,6 +4,9 @@ import (
 	"errors"
 
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/Sulton-Ali/savdo/api/internal/apierr"
+	"github.com/Sulton-Ali/savdo/api/internal/money"
 )
 
 // conflictField maps a unique-violation (pgx error code 23505) to the
@@ -65,4 +68,25 @@ func invalidFKField(err error) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+// mapWriteError maps a write's error against every constraint/range this
+// package knows how to translate, returning a ready *apierr.Error and
+// true when recognized: a unique violation (409 CONFLICT, conflictField),
+// a foreign-key violation (400 invalid, invalidFKField), or a numeric
+// value out of NUMERIC(14,2)'s range (400 invalid, money.IsOutOfRange —
+// a backstop only, since money.ParseAmount already bounds every amount
+// before it ever reaches a write). Callers fall back to wrapping the
+// error as a 500 when ok is false.
+func mapWriteError(err error) (*apierr.Error, bool) {
+	if field, ok := conflictField(err); ok {
+		return apierr.Conflict(field), true
+	}
+	if field, ok := invalidFKField(err); ok {
+		return apierr.Validation(map[string]string{field: "invalid"}), true
+	}
+	if money.IsOutOfRange(err) {
+		return apierr.Validation(map[string]string{"amount": "invalid"}), true
+	}
+	return nil, false
 }

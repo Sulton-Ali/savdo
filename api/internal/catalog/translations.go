@@ -2,8 +2,17 @@ package catalog
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Sulton-Ali/savdo/api/gen"
+)
+
+// maxTranslationNameLength and maxTranslationDescriptionLength bound one
+// locale entry's Name and Description, counted in runes (not bytes) so a
+// multi-byte uz/ru character counts once.
+const (
+	maxTranslationNameLength        = 200
+	maxTranslationDescriptionLength = 2000
 )
 
 // translationEntry is one locale's name/description, independent of
@@ -62,14 +71,25 @@ func hasNonEmptyName(entries map[string]translationEntry, locale string) bool {
 	return ok && strings.TrimSpace(e.Name) != ""
 }
 
-// validateTranslationNames reports whether every provided entry has a
-// non-blank Name (an entry with only a Description and a blank Name is
-// meaningless — there is nothing to display for that locale).
-func validateTranslationNames(entries map[string]translationEntry) bool {
+// translationsFieldReason validates every provided entry: a non-blank
+// Name (an entry with only a Description and a blank Name is meaningless
+// — there is nothing to display for that locale), a Name within
+// maxTranslationNameLength runes, and a Description (if any) within
+// maxTranslationDescriptionLength runes. Returns the O-12 reason to
+// report as `fields.translations` — "invalid" for a blank name,
+// "too_long" for either limit — or "" when every entry is valid.
+func translationsFieldReason(entries map[string]translationEntry) string {
 	for _, e := range entries {
-		if strings.TrimSpace(e.Name) == "" {
-			return false
+		name := strings.TrimSpace(e.Name)
+		if name == "" {
+			return "invalid"
+		}
+		if utf8.RuneCountInString(name) > maxTranslationNameLength {
+			return "too_long"
+		}
+		if e.Description != nil && utf8.RuneCountInString(*e.Description) > maxTranslationDescriptionLength {
+			return "too_long"
 		}
 	}
-	return true
+	return ""
 }
