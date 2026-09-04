@@ -6,11 +6,13 @@ package db
 
 import (
 	"database/sql/driver"
+	"encoding/json"
 	"fmt"
 	"net/netip"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type LocationKind string
@@ -140,6 +142,41 @@ func (ns NullUserRole) Value() (driver.Value, error) {
 	return string(ns.UserRole), nil
 }
 
+type AttributeDefinition struct {
+	ID        uuid.UUID `json:"id"`
+	ShopID    uuid.UUID `json:"shop_id"`
+	Code      string    `json:"code"`
+	SortOrder int32     `json:"sort_order"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type AttributeDefinitionTranslation struct {
+	AttributeDefinitionID uuid.UUID `json:"attribute_definition_id"`
+	Locale                string    `json:"locale"`
+	Name                  string    `json:"name"`
+}
+
+type Category struct {
+	ID        uuid.UUID  `json:"id"`
+	ShopID    uuid.UUID  `json:"shop_id"`
+	ParentID  *uuid.UUID `json:"parent_id"`
+	Slug      string     `json:"slug"`
+	SortOrder int32      `json:"sort_order"`
+	IsActive  bool       `json:"is_active"`
+	ImageID   *uuid.UUID `json:"image_id"`
+	DeletedAt *time.Time `json:"deleted_at"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
+}
+
+type CategoryTranslation struct {
+	CategoryID  uuid.UUID `json:"category_id"`
+	Locale      string    `json:"locale"`
+	Name        string    `json:"name"`
+	Description *string   `json:"description"`
+}
+
 type Location struct {
 	ID        uuid.UUID    `json:"id"`
 	ShopID    uuid.UUID    `json:"shop_id"`
@@ -149,6 +186,74 @@ type Location struct {
 	IsActive  bool         `json:"is_active"`
 	CreatedAt time.Time    `json:"created_at"`
 	UpdatedAt time.Time    `json:"updated_at"`
+}
+
+type MediaFile struct {
+	ID         uuid.UUID  `json:"id"`
+	ShopID     uuid.UUID  `json:"shop_id"`
+	StorageKey string     `json:"storage_key"`
+	Mime       string     `json:"mime"`
+	SizeBytes  int64      `json:"size_bytes"`
+	Width      *int32     `json:"width"`
+	Height     *int32     `json:"height"`
+	Sha256     []byte     `json:"sha256"`
+	UploadedBy *uuid.UUID `json:"uploaded_by"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
+}
+
+type Product struct {
+	ID          uuid.UUID      `json:"id"`
+	ShopID      uuid.UUID      `json:"shop_id"`
+	CategoryID  *uuid.UUID     `json:"category_id"`
+	UnitID      uuid.UUID      `json:"unit_id"`
+	Slug        string         `json:"slug"`
+	Sku         *string        `json:"sku"`
+	BasePrice   pgtype.Numeric `json:"base_price"`
+	CostPrice   pgtype.Numeric `json:"cost_price"`
+	PromoPrice  pgtype.Numeric `json:"promo_price"`
+	PromoFrom   *time.Time     `json:"promo_from"`
+	PromoTo     *time.Time     `json:"promo_to"`
+	IsActive    bool           `json:"is_active"`
+	IsFeatured  bool           `json:"is_featured"`
+	HasVariants bool           `json:"has_variants"`
+	DeletedAt   *time.Time     `json:"deleted_at"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+}
+
+type ProductImage struct {
+	ID        uuid.UUID  `json:"id"`
+	ShopID    uuid.UUID  `json:"shop_id"`
+	ProductID uuid.UUID  `json:"product_id"`
+	VariantID *uuid.UUID `json:"variant_id"`
+	MediaID   uuid.UUID  `json:"media_id"`
+	SortOrder int32      `json:"sort_order"`
+	IsCover   bool       `json:"is_cover"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
+}
+
+type ProductTranslation struct {
+	ProductID   uuid.UUID `json:"product_id"`
+	Locale      string    `json:"locale"`
+	Name        string    `json:"name"`
+	Description *string   `json:"description"`
+}
+
+type ProductVariant struct {
+	ID            uuid.UUID       `json:"id"`
+	ShopID        uuid.UUID       `json:"shop_id"`
+	ProductID     uuid.UUID       `json:"product_id"`
+	Sku           *string         `json:"sku"`
+	Barcode       *string         `json:"barcode"`
+	Attributes    json.RawMessage `json:"attributes"`
+	PriceOverride pgtype.Numeric  `json:"price_override"`
+	CostOverride  pgtype.Numeric  `json:"cost_override"`
+	IsActive      bool            `json:"is_active"`
+	DeletedAt     *time.Time      `json:"deleted_at"`
+	CreatedAt     time.Time       `json:"created_at"`
+	UpdatedAt     time.Time       `json:"updated_at"`
 }
 
 type Session struct {
@@ -178,6 +283,21 @@ type Shop struct {
 	AiDailyTokenBudget   *int32    `json:"ai_daily_token_budget"`
 	CreatedAt            time.Time `json:"created_at"`
 	UpdatedAt            time.Time `json:"updated_at"`
+}
+
+type Unit struct {
+	ID        uuid.UUID `json:"id"`
+	ShopID    uuid.UUID `json:"shop_id"`
+	Code      string    `json:"code"`
+	Precision int16     `json:"precision"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type UnitTranslation struct {
+	UnitID uuid.UUID `json:"unit_id"`
+	Locale string    `json:"locale"`
+	Name   string    `json:"name"`
 }
 
 type User struct {
