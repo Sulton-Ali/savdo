@@ -17,26 +17,27 @@ const createProduct = `-- name: CreateProduct :one
 INSERT INTO products (
     id, shop_id, category_id, unit_id, slug, sku,
     base_price, cost_price, promo_price, promo_from, promo_to,
-    is_active, is_featured
+    is_active, is_featured, low_stock_threshold
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-RETURNING id, shop_id, category_id, unit_id, slug, sku, base_price, cost_price, promo_price, promo_from, promo_to, is_active, is_featured, has_variants, deleted_at, created_at, updated_at
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+RETURNING id, shop_id, category_id, unit_id, slug, sku, base_price, cost_price, promo_price, promo_from, promo_to, is_active, is_featured, has_variants, deleted_at, created_at, updated_at, low_stock_threshold
 `
 
 type CreateProductParams struct {
-	ID         uuid.UUID      `json:"id"`
-	ShopID     uuid.UUID      `json:"shop_id"`
-	CategoryID *uuid.UUID     `json:"category_id"`
-	UnitID     uuid.UUID      `json:"unit_id"`
-	Slug       string         `json:"slug"`
-	Sku        *string        `json:"sku"`
-	BasePrice  pgtype.Numeric `json:"base_price"`
-	CostPrice  pgtype.Numeric `json:"cost_price"`
-	PromoPrice pgtype.Numeric `json:"promo_price"`
-	PromoFrom  *time.Time     `json:"promo_from"`
-	PromoTo    *time.Time     `json:"promo_to"`
-	IsActive   bool           `json:"is_active"`
-	IsFeatured bool           `json:"is_featured"`
+	ID                uuid.UUID      `json:"id"`
+	ShopID            uuid.UUID      `json:"shop_id"`
+	CategoryID        *uuid.UUID     `json:"category_id"`
+	UnitID            uuid.UUID      `json:"unit_id"`
+	Slug              string         `json:"slug"`
+	Sku               *string        `json:"sku"`
+	BasePrice         pgtype.Numeric `json:"base_price"`
+	CostPrice         pgtype.Numeric `json:"cost_price"`
+	PromoPrice        pgtype.Numeric `json:"promo_price"`
+	PromoFrom         *time.Time     `json:"promo_from"`
+	PromoTo           *time.Time     `json:"promo_to"`
+	IsActive          bool           `json:"is_active"`
+	IsFeatured        bool           `json:"is_featured"`
+	LowStockThreshold *int32         `json:"low_stock_threshold"`
 }
 
 func (q *Queries) CreateProduct(ctx context.Context, arg CreateProductParams) (Product, error) {
@@ -54,6 +55,7 @@ func (q *Queries) CreateProduct(ctx context.Context, arg CreateProductParams) (P
 		arg.PromoTo,
 		arg.IsActive,
 		arg.IsFeatured,
+		arg.LowStockThreshold,
 	)
 	var i Product
 	err := row.Scan(
@@ -74,6 +76,7 @@ func (q *Queries) CreateProduct(ctx context.Context, arg CreateProductParams) (P
 		&i.DeletedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LowStockThreshold,
 	)
 	return i, err
 }
@@ -83,7 +86,7 @@ SELECT
     p.id, p.shop_id, p.category_id, p.unit_id, p.slug, p.sku,
     p.base_price, p.promo_price, p.promo_from, p.promo_to,
     p.is_active, p.is_featured, p.has_variants, p.deleted_at,
-    p.created_at, p.updated_at,
+    p.low_stock_threshold, p.created_at, p.updated_at,
     COALESCE(t.locale, '') AS locale_used,
     COALESCE(t.name, '') AS name
 FROM products p
@@ -109,24 +112,25 @@ type GetProductForCashierParams struct {
 }
 
 type GetProductForCashierRow struct {
-	ID          uuid.UUID      `json:"id"`
-	ShopID      uuid.UUID      `json:"shop_id"`
-	CategoryID  *uuid.UUID     `json:"category_id"`
-	UnitID      uuid.UUID      `json:"unit_id"`
-	Slug        string         `json:"slug"`
-	Sku         *string        `json:"sku"`
-	BasePrice   pgtype.Numeric `json:"base_price"`
-	PromoPrice  pgtype.Numeric `json:"promo_price"`
-	PromoFrom   *time.Time     `json:"promo_from"`
-	PromoTo     *time.Time     `json:"promo_to"`
-	IsActive    bool           `json:"is_active"`
-	IsFeatured  bool           `json:"is_featured"`
-	HasVariants bool           `json:"has_variants"`
-	DeletedAt   *time.Time     `json:"deleted_at"`
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
-	LocaleUsed  string         `json:"locale_used"`
-	Name        string         `json:"name"`
+	ID                uuid.UUID      `json:"id"`
+	ShopID            uuid.UUID      `json:"shop_id"`
+	CategoryID        *uuid.UUID     `json:"category_id"`
+	UnitID            uuid.UUID      `json:"unit_id"`
+	Slug              string         `json:"slug"`
+	Sku               *string        `json:"sku"`
+	BasePrice         pgtype.Numeric `json:"base_price"`
+	PromoPrice        pgtype.Numeric `json:"promo_price"`
+	PromoFrom         *time.Time     `json:"promo_from"`
+	PromoTo           *time.Time     `json:"promo_to"`
+	IsActive          bool           `json:"is_active"`
+	IsFeatured        bool           `json:"is_featured"`
+	HasVariants       bool           `json:"has_variants"`
+	DeletedAt         *time.Time     `json:"deleted_at"`
+	LowStockThreshold *int32         `json:"low_stock_threshold"`
+	CreatedAt         time.Time      `json:"created_at"`
+	UpdatedAt         time.Time      `json:"updated_at"`
+	LocaleUsed        string         `json:"locale_used"`
+	Name              string         `json:"name"`
 }
 
 // Same locale-fallback + COALESCE pattern as ListProductsForCashier; no
@@ -149,6 +153,7 @@ func (q *Queries) GetProductForCashier(ctx context.Context, arg GetProductForCas
 		&i.IsFeatured,
 		&i.HasVariants,
 		&i.DeletedAt,
+		&i.LowStockThreshold,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.LocaleUsed,
@@ -159,7 +164,7 @@ func (q *Queries) GetProductForCashier(ctx context.Context, arg GetProductForCas
 
 const getProductForStaff = `-- name: GetProductForStaff :one
 SELECT
-    p.id, p.shop_id, p.category_id, p.unit_id, p.slug, p.sku, p.base_price, p.cost_price, p.promo_price, p.promo_from, p.promo_to, p.is_active, p.is_featured, p.has_variants, p.deleted_at, p.created_at, p.updated_at,
+    p.id, p.shop_id, p.category_id, p.unit_id, p.slug, p.sku, p.base_price, p.cost_price, p.promo_price, p.promo_from, p.promo_to, p.is_active, p.is_featured, p.has_variants, p.deleted_at, p.created_at, p.updated_at, p.low_stock_threshold,
     COALESCE(t.locale, '') AS locale_used,
     COALESCE(t.name, '') AS name
 FROM products p
@@ -185,25 +190,26 @@ type GetProductForStaffParams struct {
 }
 
 type GetProductForStaffRow struct {
-	ID          uuid.UUID      `json:"id"`
-	ShopID      uuid.UUID      `json:"shop_id"`
-	CategoryID  *uuid.UUID     `json:"category_id"`
-	UnitID      uuid.UUID      `json:"unit_id"`
-	Slug        string         `json:"slug"`
-	Sku         *string        `json:"sku"`
-	BasePrice   pgtype.Numeric `json:"base_price"`
-	CostPrice   pgtype.Numeric `json:"cost_price"`
-	PromoPrice  pgtype.Numeric `json:"promo_price"`
-	PromoFrom   *time.Time     `json:"promo_from"`
-	PromoTo     *time.Time     `json:"promo_to"`
-	IsActive    bool           `json:"is_active"`
-	IsFeatured  bool           `json:"is_featured"`
-	HasVariants bool           `json:"has_variants"`
-	DeletedAt   *time.Time     `json:"deleted_at"`
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
-	LocaleUsed  string         `json:"locale_used"`
-	Name        string         `json:"name"`
+	ID                uuid.UUID      `json:"id"`
+	ShopID            uuid.UUID      `json:"shop_id"`
+	CategoryID        *uuid.UUID     `json:"category_id"`
+	UnitID            uuid.UUID      `json:"unit_id"`
+	Slug              string         `json:"slug"`
+	Sku               *string        `json:"sku"`
+	BasePrice         pgtype.Numeric `json:"base_price"`
+	CostPrice         pgtype.Numeric `json:"cost_price"`
+	PromoPrice        pgtype.Numeric `json:"promo_price"`
+	PromoFrom         *time.Time     `json:"promo_from"`
+	PromoTo           *time.Time     `json:"promo_to"`
+	IsActive          bool           `json:"is_active"`
+	IsFeatured        bool           `json:"is_featured"`
+	HasVariants       bool           `json:"has_variants"`
+	DeletedAt         *time.Time     `json:"deleted_at"`
+	CreatedAt         time.Time      `json:"created_at"`
+	UpdatedAt         time.Time      `json:"updated_at"`
+	LowStockThreshold *int32         `json:"low_stock_threshold"`
+	LocaleUsed        string         `json:"locale_used"`
+	Name              string         `json:"name"`
 }
 
 // Same locale-fallback + COALESCE pattern as ListProductsForStaff.
@@ -228,6 +234,7 @@ func (q *Queries) GetProductForStaff(ctx context.Context, arg GetProductForStaff
 		&i.DeletedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LowStockThreshold,
 		&i.LocaleUsed,
 		&i.Name,
 	)
@@ -350,7 +357,7 @@ SELECT
     p.id, p.shop_id, p.category_id, p.unit_id, p.slug, p.sku,
     p.base_price, p.promo_price, p.promo_from, p.promo_to,
     p.is_active, p.is_featured, p.has_variants, p.deleted_at,
-    p.created_at, p.updated_at,
+    p.low_stock_threshold, p.created_at, p.updated_at,
     COALESCE(t.locale, '') AS locale_used,
     COALESCE(t.name, '') AS name
 FROM products p
@@ -398,24 +405,25 @@ type ListProductsForCashierParams struct {
 }
 
 type ListProductsForCashierRow struct {
-	ID          uuid.UUID      `json:"id"`
-	ShopID      uuid.UUID      `json:"shop_id"`
-	CategoryID  *uuid.UUID     `json:"category_id"`
-	UnitID      uuid.UUID      `json:"unit_id"`
-	Slug        string         `json:"slug"`
-	Sku         *string        `json:"sku"`
-	BasePrice   pgtype.Numeric `json:"base_price"`
-	PromoPrice  pgtype.Numeric `json:"promo_price"`
-	PromoFrom   *time.Time     `json:"promo_from"`
-	PromoTo     *time.Time     `json:"promo_to"`
-	IsActive    bool           `json:"is_active"`
-	IsFeatured  bool           `json:"is_featured"`
-	HasVariants bool           `json:"has_variants"`
-	DeletedAt   *time.Time     `json:"deleted_at"`
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
-	LocaleUsed  string         `json:"locale_used"`
-	Name        string         `json:"name"`
+	ID                uuid.UUID      `json:"id"`
+	ShopID            uuid.UUID      `json:"shop_id"`
+	CategoryID        *uuid.UUID     `json:"category_id"`
+	UnitID            uuid.UUID      `json:"unit_id"`
+	Slug              string         `json:"slug"`
+	Sku               *string        `json:"sku"`
+	BasePrice         pgtype.Numeric `json:"base_price"`
+	PromoPrice        pgtype.Numeric `json:"promo_price"`
+	PromoFrom         *time.Time     `json:"promo_from"`
+	PromoTo           *time.Time     `json:"promo_to"`
+	IsActive          bool           `json:"is_active"`
+	IsFeatured        bool           `json:"is_featured"`
+	HasVariants       bool           `json:"has_variants"`
+	DeletedAt         *time.Time     `json:"deleted_at"`
+	LowStockThreshold *int32         `json:"low_stock_threshold"`
+	CreatedAt         time.Time      `json:"created_at"`
+	UpdatedAt         time.Time      `json:"updated_at"`
+	LocaleUsed        string         `json:"locale_used"`
+	Name              string         `json:"name"`
 }
 
 func (q *Queries) ListProductsForCashier(ctx context.Context, arg ListProductsForCashierParams) ([]ListProductsForCashierRow, error) {
@@ -451,6 +459,7 @@ func (q *Queries) ListProductsForCashier(ctx context.Context, arg ListProductsFo
 			&i.IsFeatured,
 			&i.HasVariants,
 			&i.DeletedAt,
+			&i.LowStockThreshold,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.LocaleUsed,
@@ -469,7 +478,7 @@ func (q *Queries) ListProductsForCashier(ctx context.Context, arg ListProductsFo
 const listProductsForStaff = `-- name: ListProductsForStaff :many
 
 SELECT
-    p.id, p.shop_id, p.category_id, p.unit_id, p.slug, p.sku, p.base_price, p.cost_price, p.promo_price, p.promo_from, p.promo_to, p.is_active, p.is_featured, p.has_variants, p.deleted_at, p.created_at, p.updated_at,
+    p.id, p.shop_id, p.category_id, p.unit_id, p.slug, p.sku, p.base_price, p.cost_price, p.promo_price, p.promo_from, p.promo_to, p.is_active, p.is_featured, p.has_variants, p.deleted_at, p.created_at, p.updated_at, p.low_stock_threshold,
     -- COALESCE to '': a product with zero translations must still list, not
     -- fail to scan (LEFT JOIN LATERAL leaves these NULL and sqlc does not
     -- infer that as nullable).
@@ -520,25 +529,26 @@ type ListProductsForStaffParams struct {
 }
 
 type ListProductsForStaffRow struct {
-	ID          uuid.UUID      `json:"id"`
-	ShopID      uuid.UUID      `json:"shop_id"`
-	CategoryID  *uuid.UUID     `json:"category_id"`
-	UnitID      uuid.UUID      `json:"unit_id"`
-	Slug        string         `json:"slug"`
-	Sku         *string        `json:"sku"`
-	BasePrice   pgtype.Numeric `json:"base_price"`
-	CostPrice   pgtype.Numeric `json:"cost_price"`
-	PromoPrice  pgtype.Numeric `json:"promo_price"`
-	PromoFrom   *time.Time     `json:"promo_from"`
-	PromoTo     *time.Time     `json:"promo_to"`
-	IsActive    bool           `json:"is_active"`
-	IsFeatured  bool           `json:"is_featured"`
-	HasVariants bool           `json:"has_variants"`
-	DeletedAt   *time.Time     `json:"deleted_at"`
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
-	LocaleUsed  string         `json:"locale_used"`
-	Name        string         `json:"name"`
+	ID                uuid.UUID      `json:"id"`
+	ShopID            uuid.UUID      `json:"shop_id"`
+	CategoryID        *uuid.UUID     `json:"category_id"`
+	UnitID            uuid.UUID      `json:"unit_id"`
+	Slug              string         `json:"slug"`
+	Sku               *string        `json:"sku"`
+	BasePrice         pgtype.Numeric `json:"base_price"`
+	CostPrice         pgtype.Numeric `json:"cost_price"`
+	PromoPrice        pgtype.Numeric `json:"promo_price"`
+	PromoFrom         *time.Time     `json:"promo_from"`
+	PromoTo           *time.Time     `json:"promo_to"`
+	IsActive          bool           `json:"is_active"`
+	IsFeatured        bool           `json:"is_featured"`
+	HasVariants       bool           `json:"has_variants"`
+	DeletedAt         *time.Time     `json:"deleted_at"`
+	CreatedAt         time.Time      `json:"created_at"`
+	UpdatedAt         time.Time      `json:"updated_at"`
+	LowStockThreshold *int32         `json:"low_stock_threshold"`
+	LocaleUsed        string         `json:"locale_used"`
+	Name              string         `json:"name"`
 }
 
 // Three list/get families, one per role, with different column sets rather
@@ -590,6 +600,7 @@ func (q *Queries) ListProductsForStaff(ctx context.Context, arg ListProductsForS
 			&i.DeletedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.LowStockThreshold,
 			&i.LocaleUsed,
 			&i.Name,
 		); err != nil {
@@ -763,36 +774,40 @@ SET
     promo_to = CASE WHEN $10::bool THEN NULL ELSE COALESCE($13, promo_to) END,
     is_active = COALESCE($14, is_active),
     is_featured = COALESCE($15, is_featured),
+    low_stock_threshold = CASE WHEN $16::bool THEN NULL ELSE COALESCE($17, low_stock_threshold) END,
     updated_at = now()
-WHERE shop_id = $16 AND id = $17 AND deleted_at IS NULL
-RETURNING id, shop_id, category_id, unit_id, slug, sku, base_price, cost_price, promo_price, promo_from, promo_to, is_active, is_featured, has_variants, deleted_at, created_at, updated_at
+WHERE shop_id = $18 AND id = $19 AND deleted_at IS NULL
+RETURNING id, shop_id, category_id, unit_id, slug, sku, base_price, cost_price, promo_price, promo_from, promo_to, is_active, is_featured, has_variants, deleted_at, created_at, updated_at, low_stock_threshold
 `
 
 type UpdateProductParams struct {
-	ClearCategory bool           `json:"clear_category"`
-	CategoryID    *uuid.UUID     `json:"category_id"`
-	UnitID        *uuid.UUID     `json:"unit_id"`
-	Slug          *string        `json:"slug"`
-	ClearSku      bool           `json:"clear_sku"`
-	Sku           *string        `json:"sku"`
-	BasePrice     pgtype.Numeric `json:"base_price"`
-	ClearCost     bool           `json:"clear_cost"`
-	CostPrice     pgtype.Numeric `json:"cost_price"`
-	ClearPromo    bool           `json:"clear_promo"`
-	PromoPrice    pgtype.Numeric `json:"promo_price"`
-	PromoFrom     *time.Time     `json:"promo_from"`
-	PromoTo       *time.Time     `json:"promo_to"`
-	IsActive      *bool          `json:"is_active"`
-	IsFeatured    *bool          `json:"is_featured"`
-	ShopID        uuid.UUID      `json:"shop_id"`
-	ID            uuid.UUID      `json:"id"`
+	ClearCategory          bool           `json:"clear_category"`
+	CategoryID             *uuid.UUID     `json:"category_id"`
+	UnitID                 *uuid.UUID     `json:"unit_id"`
+	Slug                   *string        `json:"slug"`
+	ClearSku               bool           `json:"clear_sku"`
+	Sku                    *string        `json:"sku"`
+	BasePrice              pgtype.Numeric `json:"base_price"`
+	ClearCost              bool           `json:"clear_cost"`
+	CostPrice              pgtype.Numeric `json:"cost_price"`
+	ClearPromo             bool           `json:"clear_promo"`
+	PromoPrice             pgtype.Numeric `json:"promo_price"`
+	PromoFrom              *time.Time     `json:"promo_from"`
+	PromoTo                *time.Time     `json:"promo_to"`
+	IsActive               *bool          `json:"is_active"`
+	IsFeatured             *bool          `json:"is_featured"`
+	ClearLowStockThreshold bool           `json:"clear_low_stock_threshold"`
+	LowStockThreshold      *int32         `json:"low_stock_threshold"`
+	ShopID                 uuid.UUID      `json:"shop_id"`
+	ID                     uuid.UUID      `json:"id"`
 }
 
 // Patch with explicit clear flags for nullable fields: COALESCE cannot
-// express "set to NULL", so clear_category/clear_sku/clear_cost clear their
-// column outright, and clear_promo clears promo_price/promo_from/promo_to
-// together (they are one concept). has_variants is not editable here — see
-// SetProductHasVariants, a single-purpose statement like ClearUserPhone.
+// express "set to NULL", so clear_category/clear_sku/clear_cost/
+// clear_low_stock_threshold clear their column outright, and clear_promo
+// clears promo_price/promo_from/promo_to together (they are one concept).
+// has_variants is not editable here — see SetProductHasVariants, a
+// single-purpose statement like ClearUserPhone.
 func (q *Queries) UpdateProduct(ctx context.Context, arg UpdateProductParams) (Product, error) {
 	row := q.db.QueryRow(ctx, updateProduct,
 		arg.ClearCategory,
@@ -810,6 +825,8 @@ func (q *Queries) UpdateProduct(ctx context.Context, arg UpdateProductParams) (P
 		arg.PromoTo,
 		arg.IsActive,
 		arg.IsFeatured,
+		arg.ClearLowStockThreshold,
+		arg.LowStockThreshold,
 		arg.ShopID,
 		arg.ID,
 	)
@@ -832,6 +849,7 @@ func (q *Queries) UpdateProduct(ctx context.Context, arg UpdateProductParams) (P
 		&i.DeletedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LowStockThreshold,
 	)
 	return i, err
 }

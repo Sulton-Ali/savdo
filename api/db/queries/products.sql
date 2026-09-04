@@ -55,7 +55,7 @@ SELECT
     p.id, p.shop_id, p.category_id, p.unit_id, p.slug, p.sku,
     p.base_price, p.promo_price, p.promo_from, p.promo_to,
     p.is_active, p.is_featured, p.has_variants, p.deleted_at,
-    p.created_at, p.updated_at,
+    p.low_stock_threshold, p.created_at, p.updated_at,
     COALESCE(t.locale, '') AS locale_used,
     COALESCE(t.name, '') AS name
 FROM products p
@@ -158,7 +158,7 @@ SELECT
     p.id, p.shop_id, p.category_id, p.unit_id, p.slug, p.sku,
     p.base_price, p.promo_price, p.promo_from, p.promo_to,
     p.is_active, p.is_featured, p.has_variants, p.deleted_at,
-    p.created_at, p.updated_at,
+    p.low_stock_threshold, p.created_at, p.updated_at,
     COALESCE(t.locale, '') AS locale_used,
     COALESCE(t.name, '') AS name
 FROM products p
@@ -204,17 +204,18 @@ WHERE p.shop_id = sqlc.arg('shop_id') AND p.id = sqlc.arg('id') AND p.deleted_at
 INSERT INTO products (
     id, shop_id, category_id, unit_id, slug, sku,
     base_price, cost_price, promo_price, promo_from, promo_to,
-    is_active, is_featured
+    is_active, is_featured, low_stock_threshold
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 RETURNING *;
 
 -- name: UpdateProduct :one
 -- Patch with explicit clear flags for nullable fields: COALESCE cannot
--- express "set to NULL", so clear_category/clear_sku/clear_cost clear their
--- column outright, and clear_promo clears promo_price/promo_from/promo_to
--- together (they are one concept). has_variants is not editable here — see
--- SetProductHasVariants, a single-purpose statement like ClearUserPhone.
+-- express "set to NULL", so clear_category/clear_sku/clear_cost/
+-- clear_low_stock_threshold clear their column outright, and clear_promo
+-- clears promo_price/promo_from/promo_to together (they are one concept).
+-- has_variants is not editable here — see SetProductHasVariants, a
+-- single-purpose statement like ClearUserPhone.
 UPDATE products
 SET
     category_id = CASE WHEN sqlc.arg('clear_category')::bool THEN NULL ELSE COALESCE(sqlc.narg('category_id'), category_id) END,
@@ -228,6 +229,7 @@ SET
     promo_to = CASE WHEN sqlc.arg('clear_promo')::bool THEN NULL ELSE COALESCE(sqlc.narg('promo_to'), promo_to) END,
     is_active = COALESCE(sqlc.narg('is_active'), is_active),
     is_featured = COALESCE(sqlc.narg('is_featured'), is_featured),
+    low_stock_threshold = CASE WHEN sqlc.arg('clear_low_stock_threshold')::bool THEN NULL ELSE COALESCE(sqlc.narg('low_stock_threshold'), low_stock_threshold) END,
     updated_at = now()
 WHERE shop_id = sqlc.arg('shop_id') AND id = sqlc.arg('id') AND deleted_at IS NULL
 RETURNING *;
