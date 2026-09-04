@@ -78,6 +78,7 @@ public schemas exist in the spec even though the landing is not built yet.
 - [ ] Stock levels and movement history endpoints, low-stock endpoint
 - [ ] `PATCH /products/{id}/images/{imageId}` (variant retag / cover) and admin retag flow (Q-21, D-43)
 - [ ] Admin: suppliers, purchase form, receive flow, stock levels grid per location, movement history, adjustment and transfer forms
+- [ ] Seed: suppliers and received purchases giving the demo catalogue opening stock, one transfer to the storeroom (D-49)
 - [ ] Tests: concurrent sales on the last unit (only one succeeds), rebuild equals levels, trigger blocks UPDATE/DELETE on movements
 - [ ] Two-model review (Sonnet + Opus) recorded in merge bodies
 

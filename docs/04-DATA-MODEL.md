@@ -82,7 +82,7 @@ transfer_out|transfer_in`), `qty numeric(12,3)` (signed: positive in, negative o
 `stock.Service.Move` inside the movement's transaction with `FOR UPDATE`. Rebuildable:
 `savdo stock rebuild`.
 
-**Rules (D-41, D-42, D-44):** a level never goes below zero — any movement that would do so fails with `STOCK_INSUFFICIENT` inside `stock.Service.Move` (D-41). Receiving a purchase sets each received variant's `cost_override` to the line's `unit_cost` (D-42). Low stock: `shops.low_stock_threshold` default with optional `products.low_stock_threshold` override; a variant is low when its total quantity across locations is at or below the effective threshold (D-44).
+**Rules (D-41, D-42, D-44):** a level never goes below zero unless `shops.allow_negative_stock` is on — otherwise any movement that would do so fails with `STOCK_INSUFFICIENT` inside `stock.Service.Move` (D-41, D-48). When `shops.update_cost_on_purchase` is on, receiving a purchase sets each received variant's `cost_override` to the line's `unit_cost` (D-42, D-48). Low stock: `shops.low_stock_threshold` default with optional `products.low_stock_threshold` override; a variant is low when its total quantity across locations is at or below the effective threshold (D-44).
 
 **purchases** — `supplier_id`, `location_id`, `number text`, `status purchase_status`
 (`draft|received|cancelled`), `received_at`, `note`, `total_cost numeric(14,2)`,
@@ -93,6 +93,8 @@ transfer_out|transfer_in`), `qty numeric(12,3)` (signed: positive in, negative o
 Receiving a purchase (`draft → received`) writes one `purchase_in` movement per item in
 the same transaction. A received purchase is immutable; cancel writes reversing
 movements.
+
+**idempotency_keys** — `key text`, `request_hash text`, `response_status int`, `response_body jsonb`, `created_at`. PK `(shop_id, key)`. Backs the `Idempotency-Key` header (`05-API.md` § Conventions) for purchase receive and stock adjustments in Phase 3 and sales in Phase 4; a replay with the same key and hash returns the stored response, a different hash returns `409 IDEMPOTENCY_KEY_REUSED`. Rows older than 24 h may be pruned.
 
 ## 4. Sales (`sales`) — correctness-critical
 
