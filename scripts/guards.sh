@@ -54,7 +54,7 @@ stock_files="$(find api -type f \( -name '*.go' -o -name '*.sql' \) 2>/dev/null 
 if [ -z "$stock_files" ]; then
   check_pass "no stock_levels write outside stock module (no Go/SQL files yet)"
 else
-  stock_hits="$(printf '%s\n' "$stock_files" | xargs -r grep -lIE '(UPDATE|INSERT[[:space:]]+INTO|DELETE[[:space:]]+FROM)[[:space:]]+stock_levels' || true)"
+  stock_hits="$(printf '%s\n' "$stock_files" | xargs -r grep -lIE '(UPDATE|INSERT[[:space:]]+INTO|DELETE[[:space:]]+FROM|TRUNCATE([[:space:]]+TABLE)?)[[:space:]]+stock_levels' || true)"
   if [ -z "$stock_hits" ]; then
     check_pass "no stock_levels write outside stock module (none found)"
   else
