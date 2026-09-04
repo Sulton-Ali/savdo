@@ -41,6 +41,32 @@ func (q *Queries) ApplyLevelDelta(ctx context.Context, arg ApplyLevelDeltaParams
 	return qty, err
 }
 
+const countLevelsForShop = `-- name: CountLevelsForShop :one
+SELECT count(*) FROM stock_levels WHERE shop_id = $1
+`
+
+// `savdo stock rebuild`'s summary line: how many stock_levels rows the
+// shop has after the rebuild.
+func (q *Queries) CountLevelsForShop(ctx context.Context, shopID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countLevelsForShop, shopID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countMovementsForShop = `-- name: CountMovementsForShop :one
+SELECT count(*) FROM stock_movements WHERE shop_id = $1
+`
+
+// `savdo stock rebuild`'s summary line: how many stock_movements rows the
+// rebuild's sum was computed from.
+func (q *Queries) CountMovementsForShop(ctx context.Context, shopID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countMovementsForShop, shopID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const getLevelForUpdate = `-- name: GetLevelForUpdate :one
 SELECT shop_id, variant_id, location_id, qty, updated_at FROM stock_levels
 WHERE shop_id = $1 AND variant_id = $2 AND location_id = $3
@@ -332,6 +358,109 @@ func (q *Queries) ListMovements(ctx context.Context, arg ListMovementsParams) ([
 			&i.Reason,
 			&i.CreatedBy,
 			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMovementsWithCreatedByName = `-- name: ListMovementsWithCreatedByName :many
+SELECT m.id, m.shop_id, m.variant_id, m.location_id, m.kind, m.qty, m.unit_cost,
+    m.ref_type, m.ref_id, m.adjustment_reason, m.reason, m.created_by, m.created_at,
+    u.full_name AS created_by_name
+FROM stock_movements m
+LEFT JOIN users u ON u.id = m.created_by AND u.shop_id = m.shop_id
+WHERE m.shop_id = $1
+    AND ($2::uuid IS NULL OR m.variant_id = $2)
+    AND ($3::uuid IS NULL OR m.location_id = $3)
+    AND ($4::stock_movement_kind IS NULL OR m.kind = $4)
+    AND ($5::timestamptz IS NULL OR m.created_at >= $5)
+    AND ($6::timestamptz IS NULL OR m.created_at <= $6)
+    AND (
+        $7::timestamptz IS NULL
+        OR (m.created_at, m.id) < ($7::timestamptz, $8::uuid)
+    )
+ORDER BY m.created_at DESC, m.id DESC
+LIMIT $9
+`
+
+type ListMovementsWithCreatedByNameParams struct {
+	ShopID          uuid.UUID          `json:"shop_id"`
+	VariantID       *uuid.UUID         `json:"variant_id"`
+	LocationID      *uuid.UUID         `json:"location_id"`
+	Kind            *StockMovementKind `json:"kind"`
+	From            *time.Time         `json:"from"`
+	To              *time.Time         `json:"to"`
+	CursorCreatedAt *time.Time         `json:"cursor_created_at"`
+	CursorID        *uuid.UUID         `json:"cursor_id"`
+	Limit           int32              `json:"limit"`
+}
+
+type ListMovementsWithCreatedByNameRow struct {
+	ID               uuid.UUID         `json:"id"`
+	ShopID           uuid.UUID         `json:"shop_id"`
+	VariantID        uuid.UUID         `json:"variant_id"`
+	LocationID       uuid.UUID         `json:"location_id"`
+	Kind             StockMovementKind `json:"kind"`
+	Qty              pgtype.Numeric    `json:"qty"`
+	UnitCost         pgtype.Numeric    `json:"unit_cost"`
+	RefType          *string           `json:"ref_type"`
+	RefID            *uuid.UUID        `json:"ref_id"`
+	AdjustmentReason *AdjustmentReason `json:"adjustment_reason"`
+	Reason           *string           `json:"reason"`
+	CreatedBy        *uuid.UUID        `json:"created_by"`
+	CreatedAt        time.Time         `json:"created_at"`
+	CreatedByName    *string           `json:"created_by_name"`
+}
+
+// GET /stock/movements' own read: same filters and (created_at, id) cursor
+// as ListMovements, plus the creating user's display name (contract's
+// additive `createdByName`, T3) so the admin never has to look the user up
+// itself. LEFT JOIN, not JOIN: created_by is nullable (a seed or a future
+// system-written movement may carry no actor), and a user row could in
+// principle be gone later — either case must still return the movement,
+// with created_by_name simply NULL. u.shop_id = m.shop_id is belt-and-
+// braces tenant scoping on the join (hard rule 1), even though created_by
+// already only ever holds an id from the movement's own shop.
+func (q *Queries) ListMovementsWithCreatedByName(ctx context.Context, arg ListMovementsWithCreatedByNameParams) ([]ListMovementsWithCreatedByNameRow, error) {
+	rows, err := q.db.Query(ctx, listMovementsWithCreatedByName,
+		arg.ShopID,
+		arg.VariantID,
+		arg.LocationID,
+		arg.Kind,
+		arg.From,
+		arg.To,
+		arg.CursorCreatedAt,
+		arg.CursorID,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMovementsWithCreatedByNameRow
+	for rows.Next() {
+		var i ListMovementsWithCreatedByNameRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ShopID,
+			&i.VariantID,
+			&i.LocationID,
+			&i.Kind,
+			&i.Qty,
+			&i.UnitCost,
+			&i.RefType,
+			&i.RefID,
+			&i.AdjustmentReason,
+			&i.Reason,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.CreatedByName,
 		); err != nil {
 			return nil, err
 		}
