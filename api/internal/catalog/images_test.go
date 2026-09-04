@@ -47,8 +47,8 @@ func TestAddProductImage_capAndDuplicateAndCoverDefaults(t *testing.T) {
 		t.Fatalf("err = %#v, want 400 VALIDATION_FAILED", err)
 	}
 	fields := apiErr.Details["fields"].(map[string]string)
-	if fields["images"] != "too_long" {
-		t.Fatalf("fields = %+v, want images=too_long", fields)
+	if fields["mediaId"] != "invalid" {
+		t.Fatalf("fields = %+v, want mediaId=invalid", fields)
 	}
 }
 

@@ -110,7 +110,7 @@ func (h *Handler) AddProductImage(ctx context.Context, req gen.AddProductImageRe
 		return nil, fmt.Errorf("catalog: count product images: %w", err)
 	}
 	if count >= maxProductImages {
-		return nil, apierr.Validation(map[string]string{"images": "too_long"})
+		return nil, apierr.Validation(map[string]string{"mediaId": "invalid"})
 	}
 
 	isCover := count == 0
