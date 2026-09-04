@@ -1,6 +1,15 @@
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
 import { Button, Layout, Menu, Space, Tag, Typography } from "antd";
-import { LayoutDashboard, LogOut, MapPin, Settings, Users } from "lucide-react";
+import {
+  FolderTree,
+  LayoutDashboard,
+  LogOut,
+  MapPin,
+  Package,
+  Settings,
+  Tags,
+  Users,
+} from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -41,6 +50,24 @@ function AppShell() {
       icon: <LayoutDashboard size={16} />,
       label: <Link to="/">{t("nav.dashboard")}</Link>,
       permission: null,
+    },
+    {
+      key: "/products",
+      icon: <Package size={16} />,
+      label: <Link to="/products">{t("nav.products")}</Link>,
+      permission: null,
+    },
+    {
+      key: "/categories",
+      icon: <FolderTree size={16} />,
+      label: <Link to="/categories">{t("nav.categories")}</Link>,
+      permission: "catalog.write",
+    },
+    {
+      key: "/settings/attributes",
+      icon: <Tags size={16} />,
+      label: <Link to="/settings/attributes">{t("nav.attributes")}</Link>,
+      permission: "catalog.write",
     },
     {
       key: "/staff",

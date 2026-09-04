@@ -98,4 +98,34 @@ describe("AppLayout navigation", () => {
     expect(screen.queryByText("Locations")).toBeNull();
     expect(screen.queryByText("Settings")).toBeNull();
   });
+
+  it("shows Products to every role but Categories/Attributes only with catalog.write", async () => {
+    fetchMeMock.mockResolvedValueOnce(buildMe([]));
+    const { router, queryClient } = buildRouterAndClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByText("Test Shop")).toBeTruthy());
+    expect(screen.getByText("Products")).toBeTruthy();
+    expect(screen.queryByText("Categories")).toBeNull();
+    expect(screen.queryByText("Attributes")).toBeNull();
+  });
+
+  it("shows Categories and Attributes with catalog.write", async () => {
+    fetchMeMock.mockResolvedValueOnce(buildMe(["catalog.write"]));
+    const { router, queryClient } = buildRouterAndClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByText("Test Shop")).toBeTruthy());
+    expect(screen.getByText("Products")).toBeTruthy();
+    expect(screen.getByText("Categories")).toBeTruthy();
+    expect(screen.getByText("Attributes")).toBeTruthy();
+  });
 });

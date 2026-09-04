@@ -10,7 +10,9 @@
     "cancel": "Cancel",
     "comingSoon": "Coming soon",
     "retry": "Retry",
-    "loadMore": "Load more"
+    "loadMore": "Load more",
+    "search": "Search",
+    "showInactive": "Show inactive"
   },
   "errors": {
     "serviceUnavailable": "Service unavailable. Please try again.",
@@ -31,6 +33,9 @@
   },
   "nav": {
     "dashboard": "Dashboard",
+    "products": "Products",
+    "categories": "Categories",
+    "attributes": "Attributes",
     "staff": "Staff",
     "locations": "Locations",
     "settings": "Settings"
@@ -117,6 +122,85 @@
       "defaultLocale": "Default language",
       "allowNegativeStock": "Allow negative stock",
       "updateCostOnPurchase": "Update cost on purchase"
+    }
+  },
+  "catalog": {
+    "products": {
+      "title": "Products",
+      "add": "Add product",
+      "edit": "Edit",
+      "searchPlaceholder": "Search products",
+      "allCategories": "All categories",
+      "uncategorized": "Uncategorized",
+      "createTitle": "New product",
+      "editTitle": "Edit product",
+      "saved": "Product saved",
+      "columns": {
+        "image": "Image",
+        "name": "Name",
+        "sku": "SKU",
+        "category": "Category",
+        "basePrice": "Price",
+        "costPrice": "Cost",
+        "promo": "Promo",
+        "featured": "Featured",
+        "active": "Active"
+      },
+      "tabs": {
+        "general": "General",
+        "prices": "Prices",
+        "variants": "Variants & images"
+      },
+      "fields": {
+        "name": "Name",
+        "description": "Description",
+        "category": "Category",
+        "unit": "Unit",
+        "slug": "Slug",
+        "sku": "SKU",
+        "isActive": "Active",
+        "isFeatured": "Featured",
+        "basePrice": "Base price",
+        "costPrice": "Cost price",
+        "promoPrice": "Promo price",
+        "promoRange": "Promo period"
+      }
+    },
+    "categories": {
+      "title": "Categories",
+      "addRoot": "Add category",
+      "addChild": "Add subcategory",
+      "edit": "Edit category",
+      "delete": "Delete",
+      "confirmDelete": "Delete this category?",
+      "inactive": "Inactive",
+      "maxDepthReached": "Categories can be nested at most 3 levels deep",
+      "fields": {
+        "name": "Name",
+        "description": "Description",
+        "slug": "Slug",
+        "sortOrder": "Sort order",
+        "isActive": "Active"
+      }
+    },
+    "attributes": {
+      "title": "Attribute definitions",
+      "add": "Add attribute",
+      "edit": "Edit attribute",
+      "columns": {
+        "code": "Code",
+        "name": "Name",
+        "sortOrder": "Sort order"
+      },
+      "fields": {
+        "code": "Code",
+        "name": "Name",
+        "sortOrder": "Sort order"
+      }
+    },
+    "variantsPlaceholder": "Variants and images are managed on the next tab, coming in a later update.",
+    "errors": {
+      "categoryHasProducts": "This category still has products and can't be deleted."
     }
   }
 }
