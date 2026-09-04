@@ -14,3 +14,15 @@ if (typeof window !== "undefined" && !window.matchMedia) {
       dispatchEvent: () => false,
     }) as MediaQueryList;
 }
+
+// jsdom also has no `ResizeObserver`, which `Tree`/`TreeSelect` (rc-resize-
+// observer) mount unconditionally. A no-op stub is enough for tests — they
+// don't assert on resize-driven layout.
+if (typeof window !== "undefined" && !window.ResizeObserver) {
+  class ResizeObserverStub {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  window.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver;
+}
