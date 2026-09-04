@@ -281,10 +281,44 @@ func TestListLow_productOverrideElseShopDefault(t *testing.T) {
 	lowB := stockVariant(ctx, t, q, shop.ID, productB.ID, `{"size":"S"}`)    // qty 4 <= 5: low
 	notLowB := stockVariant(ctx, t, q, shop.ID, productB.ID, `{"size":"M"}`) // qty 10 > 5: not low
 
+	// Never stocked: no applyDelta call at all, so no stock_levels row ever
+	// exists for it. Owner ruling: this does NOT count as low — it is
+	// untracked, not "0 and therefore low".
+	neverStocked := stockVariant(ctx, t, q, shop.ID, productA.ID, `{"size":"L"}`)
+
+	// A variant on an inactive product: stocked, low qty, but the product
+	// itself is not active — excluded.
+	productC, err := q.CreateProduct(ctx, db.CreateProductParams{
+		ID: uuid.New(), ShopID: shop.ID, UnitID: unit.ID, Slug: "shirt-c",
+		BasePrice: numeric(t, "125000.00"), IsActive: false,
+	})
+	if err != nil {
+		t.Fatalf("CreateProduct (inactive): %v", err)
+	}
+	inactiveProductVariant, err := q.CreateVariant(ctx, db.CreateVariantParams{
+		ID: uuid.New(), ShopID: shop.ID, ProductID: productC.ID,
+		Attributes: json.RawMessage(`{}`), IsActive: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateVariant on inactive product: %v", err)
+	}
+
+	// An inactive variant on productA (which is itself active): stocked,
+	// low qty, but the variant itself is not active — excluded.
+	inactiveVariant, err := q.CreateVariant(ctx, db.CreateVariantParams{
+		ID: uuid.New(), ShopID: shop.ID, ProductID: productA.ID,
+		Attributes: json.RawMessage(`{"size":"XL"}`), IsActive: false,
+	})
+	if err != nil {
+		t.Fatalf("CreateVariant (inactive variant): %v", err)
+	}
+
 	applyDelta(ctx, t, q, shop.ID, lowA.ID, loc.ID, db.StockMovementKindPurchaseIn, "1.000")
 	applyDelta(ctx, t, q, shop.ID, notLowA.ID, loc.ID, db.StockMovementKindPurchaseIn, "3.000")
 	applyDelta(ctx, t, q, shop.ID, lowB.ID, loc.ID, db.StockMovementKindPurchaseIn, "4.000")
 	applyDelta(ctx, t, q, shop.ID, notLowB.ID, loc.ID, db.StockMovementKindPurchaseIn, "10.000")
+	applyDelta(ctx, t, q, shop.ID, inactiveProductVariant.ID, loc.ID, db.StockMovementKindPurchaseIn, "1.000")
+	applyDelta(ctx, t, q, shop.ID, inactiveVariant.ID, loc.ID, db.StockMovementKindPurchaseIn, "1.000")
 
 	rows, err := q.ListLow(ctx, db.ListLowParams{ShopID: shop.ID, Limit: 100})
 	if err != nil {
@@ -311,5 +345,14 @@ func TestListLow_productOverrideElseShopDefault(t *testing.T) {
 	}
 	if _, ok := got[notLowB.ID]; ok {
 		t.Error("want the above-product-override variant absent from ListLow, found it")
+	}
+	if _, ok := got[neverStocked.ID]; ok {
+		t.Error("want a never-stocked variant (no stock_levels row) absent from ListLow, found it")
+	}
+	if _, ok := got[inactiveProductVariant.ID]; ok {
+		t.Error("want a variant of an inactive product absent from ListLow, found it")
+	}
+	if _, ok := got[inactiveVariant.ID]; ok {
+		t.Error("want an inactive variant absent from ListLow, found it")
 	}
 }

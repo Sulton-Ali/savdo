@@ -79,19 +79,22 @@ LIMIT sqlc.arg('limit');
 -- name: ListLow :many
 -- A variant is low when its total qty across every location is at or
 -- below the effective threshold: the product's own low_stock_threshold
--- override, else the shop's default (D-44). Starts from product_variants
--- (not stock_levels) with a LEFT JOIN, so a variant with no stock_levels
--- row at all (never moved) still totals to 0 and counts as low, not
--- silently skipped. Cursor on variant_id (stable, unique).
+-- override, else the shop's default (D-44). Owner ruling: only variants
+-- that have been stocked at least once (an INNER JOIN to stock_levels — a
+-- variant that has never had a stock_levels row, i.e. never moved, is not
+-- "low", it is simply not tracked yet; a variant that sold out to qty 0
+-- DOES still count, since it has a row), and only active products and
+-- active variants (soft-deleted rows are already excluded by
+-- deleted_at IS NULL). Cursor on variant_id (stable, unique).
 SELECT t.variant_id, t.product_id, t.qty::numeric(12,3) AS qty, COALESCE(p.low_stock_threshold, s.low_stock_threshold) AS threshold
 FROM (
-    SELECT pv.id AS variant_id, pv.product_id, COALESCE(SUM(sl.qty), 0::numeric) AS qty
+    SELECT pv.id AS variant_id, pv.product_id, SUM(sl.qty) AS qty
     FROM product_variants pv
-    LEFT JOIN stock_levels sl ON sl.variant_id = pv.id AND sl.shop_id = pv.shop_id
-    WHERE pv.shop_id = sqlc.arg('shop_id') AND pv.deleted_at IS NULL
+    JOIN stock_levels sl ON sl.variant_id = pv.id AND sl.shop_id = pv.shop_id
+    WHERE pv.shop_id = sqlc.arg('shop_id') AND pv.deleted_at IS NULL AND pv.is_active
     GROUP BY pv.id, pv.product_id
 ) t
-JOIN products p ON p.id = t.product_id AND p.deleted_at IS NULL
+JOIN products p ON p.id = t.product_id AND p.deleted_at IS NULL AND p.is_active
 JOIN shops s ON s.id = sqlc.arg('shop_id')
 WHERE t.qty <= COALESCE(p.low_stock_threshold, s.low_stock_threshold)
     AND (
