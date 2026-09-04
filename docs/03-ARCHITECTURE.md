@@ -62,6 +62,7 @@ Dependency direction: `handler → service → db`. Services may call other serv
 | `catalog` | `categories`, `products`, `product_variants`, `units`, `*_translations`, `attribute_definitions` | no   |
 | `media`   | `media_files`, `product_images`                                               | no                   |
 | `stock`   | `stock_movements`, `stock_levels`, `purchases`, `purchase_items`              | **yes**              |
+| `audit`   | `audit_log` (writer only, no handler)                                        | no                   |
 | `sales`   | `sales`, `sale_items`, `sale_payments`, `discounts`                           | **yes**              |
 | `crm`     | `customers`, `suppliers`                                                      | no                   |
 | `content` | `content_blocks`                                                              | no                   |
@@ -86,9 +87,7 @@ Dependency direction: `handler → service → db`. Services may call other serv
 
 ### Receive a purchase
 
-`POST /purchases` → `stock.Service.ReceivePurchase` inserts `purchases` + items, and for
-each item a `purchase_in` movement at the given location with the cost price. The
-product's `cost_price` may be updated to the latest cost (shop setting).
+`POST /purchases` creates a `draft` purchase with its items (number from `shops.next_purchase_number` under row lock, D-45). `POST /purchases/{id}/receive` → `stock.Service.ReceivePurchase` in one transaction: for each item a `purchase_in` movement at the purchase's location with the line `unit_cost` via `stock.Service.Move`, `total_cost` computed server-side, status `received`, an `audit_log` row (D-47). When `update_cost_on_purchase` is on, each received variant's `cost_override` is set to the line `unit_cost` (D-42, D-48). A received purchase is immutable; `POST /purchases/{id}/cancel` writes reversing movements under the same negative-stock rule.
 
 ### Landing render
 
