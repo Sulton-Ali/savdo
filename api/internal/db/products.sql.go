@@ -305,13 +305,23 @@ func (q *Queries) GetProductPublic(ctx context.Context, arg GetProductPublicPara
 }
 
 const listProductTranslations = `-- name: ListProductTranslations :many
-SELECT product_id, locale, name, description FROM product_translations
-WHERE product_id = $1
-ORDER BY locale
+SELECT t.product_id, t.locale, t.name, t.description FROM product_translations t
+JOIN products p ON p.id = t.product_id AND p.shop_id = $2
+WHERE t.product_id = $1
+ORDER BY t.locale
 `
 
-func (q *Queries) ListProductTranslations(ctx context.Context, productID uuid.UUID) ([]ProductTranslation, error) {
-	rows, err := q.db.Query(ctx, listProductTranslations, productID)
+type ListProductTranslationsParams struct {
+	ProductID uuid.UUID `json:"product_id"`
+	ShopID    uuid.UUID `json:"shop_id"`
+}
+
+// shop_id is joined through the parent product, not a column on
+// product_translations itself: a translation row must not be readable
+// through the wrong shop_id (hard rule 1 — every query filters by
+// shop_id), even though the bare product_id FK would otherwise let it scan.
+func (q *Queries) ListProductTranslations(ctx context.Context, arg ListProductTranslationsParams) ([]ProductTranslation, error) {
+	rows, err := q.db.Query(ctx, listProductTranslations, arg.ProductID, arg.ShopID)
 	if err != nil {
 		return nil, err
 	}

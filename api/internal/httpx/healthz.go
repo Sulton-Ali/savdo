@@ -7,6 +7,7 @@ import (
 
 	"github.com/Sulton-Ali/savdo/api/gen"
 	"github.com/Sulton-Ali/savdo/api/internal/auth"
+	"github.com/Sulton-Ali/savdo/api/internal/catalog"
 	"github.com/Sulton-Ali/savdo/api/internal/media"
 	"github.com/Sulton-Ali/savdo/api/internal/shop"
 )
@@ -16,20 +17,22 @@ import (
 // (docs/03-ARCHITECTURE.md § Module map); httpx composes them — auth's
 // Login/Logout/GetMe/ListSessions/RevokeSession are promoted from the
 // embedded *auth.Handler; shop's nine `/shop`, `/locations` and `/staff`
-// operations and media's `/media` operation are forwarded to their named
-// *shop.Handler / *media.Handler fields (shop.go, media.go) — named, not
-// embedded, because every one of these handler types is called "Handler"
-// and an anonymous field's name is its type name, so embedding more than
-// one would collide; GetHealthz/GetReadyz are defined directly on server
-// (below and in readyz.go).
+// operations, media's `/media` operation and catalog's 21 catalogue/
+// product-image operations are forwarded to their named *shop.Handler /
+// *media.Handler / *catalog.Handler fields (shop.go, media.go, catalog.go)
+// — named, not embedded, because every one of these handler types is
+// called "Handler" and an anonymous field's name is its type name, so
+// embedding more than one would collide; GetHealthz/GetReadyz are defined
+// directly on server (below and in readyz.go).
 type server struct {
 	// pool backs GetReadyz's DB check (readyz.go). No other Phase 1
 	// operation touches it yet.
 	pool *pgxpool.Pool
 
 	*auth.Handler
-	shop  *shop.Handler
-	media *media.Handler
+	shop    *shop.Handler
+	media   *media.Handler
+	catalog *catalog.Handler
 }
 
 // GetHealthz reports the process is up. It does not touch the database —

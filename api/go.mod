@@ -15,6 +15,7 @@ require (
 	github.com/oapi-codegen/nullable v1.1.0
 	github.com/oapi-codegen/runtime v1.7.0
 	github.com/pressly/goose/v3 v3.28.0
+	github.com/shopspring/decimal v1.4.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.44.0
 	golang.org/x/crypto v0.56.0
 	golang.org/x/image v0.45.0

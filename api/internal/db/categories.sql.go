@@ -77,10 +77,11 @@ const getCategory = `-- name: GetCategory :one
 SELECT
     c.id, c.shop_id, c.parent_id, c.slug, c.sort_order, c.is_active, c.image_id, c.deleted_at, c.created_at, c.updated_at,
     COALESCE(t.locale, '') AS locale_used,
-    COALESCE(t.name, '') AS name
+    COALESCE(t.name, '') AS name,
+    t.description
 FROM categories c
 LEFT JOIN LATERAL (
-    SELECT ct.locale, ct.name
+    SELECT ct.locale, ct.name, ct.description
     FROM category_translations ct
     WHERE ct.category_id = c.id
     ORDER BY
@@ -101,18 +102,19 @@ type GetCategoryParams struct {
 }
 
 type GetCategoryRow struct {
-	ID         uuid.UUID  `json:"id"`
-	ShopID     uuid.UUID  `json:"shop_id"`
-	ParentID   *uuid.UUID `json:"parent_id"`
-	Slug       string     `json:"slug"`
-	SortOrder  int32      `json:"sort_order"`
-	IsActive   bool       `json:"is_active"`
-	ImageID    *uuid.UUID `json:"image_id"`
-	DeletedAt  *time.Time `json:"deleted_at"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
-	LocaleUsed string     `json:"locale_used"`
-	Name       string     `json:"name"`
+	ID          uuid.UUID  `json:"id"`
+	ShopID      uuid.UUID  `json:"shop_id"`
+	ParentID    *uuid.UUID `json:"parent_id"`
+	Slug        string     `json:"slug"`
+	SortOrder   int32      `json:"sort_order"`
+	IsActive    bool       `json:"is_active"`
+	ImageID     *uuid.UUID `json:"image_id"`
+	DeletedAt   *time.Time `json:"deleted_at"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+	LocaleUsed  string     `json:"locale_used"`
+	Name        string     `json:"name"`
+	Description *string    `json:"description"`
 }
 
 // Same locale-fallback + COALESCE pattern as ListCategories.
@@ -132,6 +134,7 @@ func (q *Queries) GetCategory(ctx context.Context, arg GetCategoryParams) (GetCa
 		&i.UpdatedAt,
 		&i.LocaleUsed,
 		&i.Name,
+		&i.Description,
 	)
 	return i, err
 }
@@ -140,13 +143,14 @@ const getCategoryDepth = `-- name: GetCategoryDepth :one
 WITH RECURSIVE ancestors AS (
     SELECT cat.id, cat.parent_id, 1 AS depth
     FROM categories cat
-    WHERE cat.id = $1 AND cat.shop_id = $2
+    WHERE cat.id = $1 AND cat.shop_id = $2 AND cat.deleted_at IS NULL
 
     UNION ALL
 
     SELECT c.id, c.parent_id, a.depth + 1
     FROM categories c
     JOIN ancestors a ON c.id = a.parent_id
+    WHERE c.shop_id = $2 AND c.deleted_at IS NULL
 )
 SELECT COALESCE(max(a.depth), 0)::int AS depth FROM ancestors a
 `
@@ -159,14 +163,53 @@ type GetCategoryDepthParams struct {
 // Depth of category_id counting from 1 at a root (no parent), by walking
 // parent_id up to the root. The service calls this before creating or
 // re-parenting a category to enforce depth <= 3 (§ 04-DATA-MODEL.md).
-// COALESCE: category_id not found (or wrong shop) makes ancestors empty,
-// and max() over zero rows is NULL — 0 reads better than NULL for "does not
-// exist / has no ancestors" here.
+// Both arms filter deleted_at IS NULL and shop_id: a soft-deleted category
+// (or one that somehow belongs to another shop) must not be usable as a
+// parent, and must not silently participate in a live category's own
+// ancestor chain either.
+// COALESCE: category_id not found (wrong shop, or soft-deleted) makes
+// ancestors empty, and max() over zero rows is NULL — 0 reads better than
+// NULL for "does not exist / has no ancestors" here.
 func (q *Queries) GetCategoryDepth(ctx context.Context, arg GetCategoryDepthParams) (int32, error) {
 	row := q.db.QueryRow(ctx, getCategoryDepth, arg.CategoryID, arg.ShopID)
 	var depth int32
 	err := row.Scan(&depth)
 	return depth, err
+}
+
+const getCategorySubtreeHeight = `-- name: GetCategorySubtreeHeight :one
+WITH RECURSIVE descendants AS (
+    SELECT cat.id, 1 AS height
+    FROM categories cat
+    WHERE cat.id = $1 AND cat.shop_id = $2 AND cat.deleted_at IS NULL
+
+    UNION ALL
+
+    SELECT c.id, d.height + 1
+    FROM categories c
+    JOIN descendants d ON c.parent_id = d.id
+    WHERE c.shop_id = $2 AND c.deleted_at IS NULL
+)
+SELECT COALESCE(max(d.height), 0)::int AS height FROM descendants d
+`
+
+type GetCategorySubtreeHeightParams struct {
+	CategoryID uuid.UUID `json:"category_id"`
+	ShopID     uuid.UUID `json:"shop_id"`
+}
+
+// Height of category_id's own subtree counting from 1 at itself (a leaf
+// has height 1), by walking parent_id -> children down from it. The
+// service calls this before re-parenting a category to make sure the
+// category's own descendants would not end up past depth 3: if placed
+// under a parent at depth(parent), the deepest descendant would land at
+// depth(parent) + height(self), which must stay <= 3. Both arms filter
+// deleted_at IS NULL and shop_id, same reasoning as GetCategoryDepth.
+func (q *Queries) GetCategorySubtreeHeight(ctx context.Context, arg GetCategorySubtreeHeightParams) (int32, error) {
+	row := q.db.QueryRow(ctx, getCategorySubtreeHeight, arg.CategoryID, arg.ShopID)
+	var height int32
+	err := row.Scan(&height)
+	return height, err
 }
 
 const listCategories = `-- name: ListCategories :many
@@ -178,10 +221,16 @@ SELECT
     -- translation matches, and sqlc does not infer that as nullable. An
     -- empty string, not a real locale, signals "no translation yet".
     COALESCE(t.locale, '') AS locale_used,
-    COALESCE(t.name, '') AS name
+    COALESCE(t.name, '') AS name,
+    -- No COALESCE here, unlike name/locale_used above: description is
+    -- nullable at the column level (category_translations.description has
+    -- no NOT NULL), so sqlc already infers *string for it straight from the
+    -- schema — the LATERAL-join NULL-when-no-match case lands on the same
+    -- nullable type instead of needing a '' sentinel.
+    t.description
 FROM categories c
 LEFT JOIN LATERAL (
-    SELECT ct.locale, ct.name
+    SELECT ct.locale, ct.name, ct.description
     FROM category_translations ct
     WHERE ct.category_id = c.id
     ORDER BY
@@ -205,18 +254,19 @@ type ListCategoriesParams struct {
 }
 
 type ListCategoriesRow struct {
-	ID         uuid.UUID  `json:"id"`
-	ShopID     uuid.UUID  `json:"shop_id"`
-	ParentID   *uuid.UUID `json:"parent_id"`
-	Slug       string     `json:"slug"`
-	SortOrder  int32      `json:"sort_order"`
-	IsActive   bool       `json:"is_active"`
-	ImageID    *uuid.UUID `json:"image_id"`
-	DeletedAt  *time.Time `json:"deleted_at"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
-	LocaleUsed string     `json:"locale_used"`
-	Name       string     `json:"name"`
+	ID          uuid.UUID  `json:"id"`
+	ShopID      uuid.UUID  `json:"shop_id"`
+	ParentID    *uuid.UUID `json:"parent_id"`
+	Slug        string     `json:"slug"`
+	SortOrder   int32      `json:"sort_order"`
+	IsActive    bool       `json:"is_active"`
+	ImageID     *uuid.UUID `json:"image_id"`
+	DeletedAt   *time.Time `json:"deleted_at"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+	LocaleUsed  string     `json:"locale_used"`
+	Name        string     `json:"name"`
+	Description *string    `json:"description"`
 }
 
 // Flat list (the service builds the tree from parent_id); resolved name by
@@ -245,7 +295,51 @@ func (q *Queries) ListCategories(ctx context.Context, arg ListCategoriesParams) 
 			&i.UpdatedAt,
 			&i.LocaleUsed,
 			&i.Name,
+			&i.Description,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCategoryTranslations = `-- name: ListCategoryTranslations :many
+SELECT t.locale, t.name, t.description
+FROM category_translations t
+JOIN categories c ON c.id = t.category_id AND c.shop_id = $2
+WHERE t.category_id = $1
+ORDER BY t.locale
+`
+
+type ListCategoryTranslationsParams struct {
+	CategoryID uuid.UUID `json:"category_id"`
+	ShopID     uuid.UUID `json:"shop_id"`
+}
+
+type ListCategoryTranslationsRow struct {
+	Locale      string  `json:"locale"`
+	Name        string  `json:"name"`
+	Description *string `json:"description"`
+}
+
+// shop_id is joined through the parent category, same reasoning as
+// ListProductTranslations: a translation row must not be readable through
+// the wrong shop_id (hard rule 1), even though the bare category_id FK
+// would otherwise let it scan.
+func (q *Queries) ListCategoryTranslations(ctx context.Context, arg ListCategoryTranslationsParams) ([]ListCategoryTranslationsRow, error) {
+	rows, err := q.db.Query(ctx, listCategoryTranslations, arg.CategoryID, arg.ShopID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListCategoryTranslationsRow
+	for rows.Next() {
+		var i ListCategoryTranslationsRow
+		if err := rows.Scan(&i.Locale, &i.Name, &i.Description); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -275,36 +369,39 @@ func (q *Queries) SoftDeleteCategory(ctx context.Context, arg SoftDeleteCategory
 const updateCategory = `-- name: UpdateCategory :one
 UPDATE categories
 SET
-    parent_id = COALESCE($1, parent_id),
-    slug = COALESCE($2, slug),
-    sort_order = COALESCE($3, sort_order),
-    is_active = COALESCE($4, is_active),
-    image_id = COALESCE($5, image_id),
+    parent_id = CASE WHEN $1::bool THEN NULL ELSE COALESCE($2, parent_id) END,
+    slug = COALESCE($3, slug),
+    sort_order = COALESCE($4, sort_order),
+    is_active = COALESCE($5, is_active),
+    image_id = CASE WHEN $6::bool THEN NULL ELSE COALESCE($7, image_id) END,
     updated_at = now()
-WHERE shop_id = $6 AND id = $7 AND deleted_at IS NULL
+WHERE shop_id = $8 AND id = $9 AND deleted_at IS NULL
 RETURNING id, shop_id, parent_id, slug, sort_order, is_active, image_id, deleted_at, created_at, updated_at
 `
 
 type UpdateCategoryParams struct {
-	ParentID  *uuid.UUID `json:"parent_id"`
-	Slug      *string    `json:"slug"`
-	SortOrder *int32     `json:"sort_order"`
-	IsActive  *bool      `json:"is_active"`
-	ImageID   *uuid.UUID `json:"image_id"`
-	ShopID    uuid.UUID  `json:"shop_id"`
-	ID        uuid.UUID  `json:"id"`
+	ClearParent bool       `json:"clear_parent"`
+	ParentID    *uuid.UUID `json:"parent_id"`
+	Slug        *string    `json:"slug"`
+	SortOrder   *int32     `json:"sort_order"`
+	IsActive    *bool      `json:"is_active"`
+	ClearImage  bool       `json:"clear_image"`
+	ImageID     *uuid.UUID `json:"image_id"`
+	ShopID      uuid.UUID  `json:"shop_id"`
+	ID          uuid.UUID  `json:"id"`
 }
 
-// Patch: parent_id and image_id cannot be cleared through COALESCE (there is
-// no "clear" flag for them here because re-parenting to NULL or removing the
-// category image are not exposed as edits in Phase 2 — only setting them to
-// a new value is). slug/sort_order/is_active are plain optional fields.
+// Patch with explicit clear flags for parent_id/image_id (COALESCE cannot
+// express "set to NULL"), same pattern as UpdateProduct/UpdateVariant.
+// slug/sort_order/is_active are plain optional fields.
 func (q *Queries) UpdateCategory(ctx context.Context, arg UpdateCategoryParams) (Category, error) {
 	row := q.db.QueryRow(ctx, updateCategory,
+		arg.ClearParent,
 		arg.ParentID,
 		arg.Slug,
 		arg.SortOrder,
 		arg.IsActive,
+		arg.ClearImage,
 		arg.ImageID,
 		arg.ShopID,
 		arg.ID,

@@ -1,0 +1,444 @@
+package catalog_test
+
+import (
+	"context"
+	"testing"
+
+	"github.com/google/uuid"
+
+	"github.com/Sulton-Ali/savdo/api/gen"
+	"github.com/Sulton-Ali/savdo/api/internal/apierr"
+	"github.com/Sulton-Ali/savdo/api/internal/db"
+)
+
+func TestCreateVariant_replacesImplicitAndSetsHasVariants(t *testing.T) {
+	h, q, _ := newTestHandler(t)
+	ctx := context.Background()
+	shopRow := seedShop(ctx, t, q, "shop-a")
+	unit := seedUnit(ctx, t, q, shopRow.ID, "pcs")
+	seedAttribute(ctx, t, q, shopRow.ID, "size")
+
+	product := mustCreateProduct(t, h, shopRow.ID, unit.ID, "Cotton Shirt", "125000.00")
+	if product.Variants == nil || len(*product.Variants) != 1 {
+		t.Fatalf("initial variants = %+v, want exactly the implicit one", product.Variants)
+	}
+	implicitID := (*product.Variants)[0].Id
+
+	resp, err := h.CreateVariant(owner(shopRow.ID), gen.CreateVariantRequestObject{
+		Id:   product.Id,
+		Body: &gen.CreateVariantJSONRequestBody{Attributes: gen.AttributeValues{"size": "L"}},
+	})
+	if err != nil {
+		t.Fatalf("CreateVariant: %v", err)
+	}
+	created := resp.(gen.CreateVariant201JSONResponse)
+	if created.Attributes["size"] != "L" {
+		t.Fatalf("created.Attributes = %+v, want size=L", created.Attributes)
+	}
+
+	listResp, err := h.ListVariants(owner(shopRow.ID), gen.ListVariantsRequestObject{Id: product.Id})
+	if err != nil {
+		t.Fatalf("ListVariants: %v", err)
+	}
+	items := listResp.(gen.ListVariants200JSONResponse).Items
+	if len(items) != 1 {
+		t.Fatalf("variants after create = %+v, want exactly 1 (implicit replaced)", items)
+	}
+	if items[0].Id == implicitID {
+		t.Fatalf("the implicit variant is still present, want it soft-deleted")
+	}
+}
+
+func TestCreateVariant_duplicateAttributesConflict(t *testing.T) {
+	h, q, _ := newTestHandler(t)
+	ctx := context.Background()
+	shopRow := seedShop(ctx, t, q, "shop-a")
+	unit := seedUnit(ctx, t, q, shopRow.ID, "pcs")
+	seedAttribute(ctx, t, q, shopRow.ID, "size")
+
+	product := mustCreateProduct(t, h, shopRow.ID, unit.ID, "Cotton Shirt", "125000.00")
+
+	if _, err := h.CreateVariant(owner(shopRow.ID), gen.CreateVariantRequestObject{
+		Id: product.Id, Body: &gen.CreateVariantJSONRequestBody{Attributes: gen.AttributeValues{"size": "L"}},
+	}); err != nil {
+		t.Fatalf("CreateVariant (1st): %v", err)
+	}
+
+	_, err := h.CreateVariant(owner(shopRow.ID), gen.CreateVariantRequestObject{
+		Id: product.Id, Body: &gen.CreateVariantJSONRequestBody{Attributes: gen.AttributeValues{"size": "L"}},
+	})
+	apiErr, ok := err.(*apierr.Error)
+	if !ok || apiErr.Code != gen.CONFLICT || apiErr.Details["field"] != "attributes" {
+		t.Fatalf("err = %#v, want 409 CONFLICT field=attributes", err)
+	}
+}
+
+func TestCreateVariant_invalidAttributeCode(t *testing.T) {
+	h, q, _ := newTestHandler(t)
+	ctx := context.Background()
+	shopRow := seedShop(ctx, t, q, "shop-a")
+	unit := seedUnit(ctx, t, q, shopRow.ID, "pcs")
+	// No attribute definitions seeded — "size" is not a known code.
+
+	product := mustCreateProduct(t, h, shopRow.ID, unit.ID, "Cotton Shirt", "125000.00")
+
+	_, err := h.CreateVariant(owner(shopRow.ID), gen.CreateVariantRequestObject{
+		Id: product.Id, Body: &gen.CreateVariantJSONRequestBody{Attributes: gen.AttributeValues{"size": "L"}},
+	})
+	apiErr, ok := err.(*apierr.Error)
+	if !ok || apiErr.Code != gen.VALIDATIONFAILED {
+		t.Fatalf("err = %#v, want 400 VALIDATION_FAILED", err)
+	}
+	fields := apiErr.Details["fields"].(map[string]string)
+	if fields["attributes"] != "invalid" {
+		t.Fatalf("fields = %+v, want attributes=invalid", fields)
+	}
+}
+
+func TestDeleteVariant_onlyActiveVariantRejected(t *testing.T) {
+	h, q, _ := newTestHandler(t)
+	ctx := context.Background()
+	shopRow := seedShop(ctx, t, q, "shop-a")
+	unit := seedUnit(ctx, t, q, shopRow.ID, "pcs")
+	seedAttribute(ctx, t, q, shopRow.ID, "size")
+
+	product := mustCreateProduct(t, h, shopRow.ID, unit.ID, "Cotton Shirt", "125000.00")
+	implicitID := (*product.Variants)[0].Id
+
+	// With only the implicit variant, deleting it must be rejected.
+	_, err := h.DeleteVariant(owner(shopRow.ID), gen.DeleteVariantRequestObject{Id: implicitID})
+	apiErr, ok := err.(*apierr.Error)
+	if !ok || apiErr.Code != gen.VALIDATIONFAILED {
+		t.Fatalf("err = %#v, want 400 VALIDATION_FAILED", err)
+	}
+	fields := apiErr.Details["fields"].(map[string]string)
+	if fields["id"] != "invalid" {
+		t.Fatalf("fields = %+v, want id=invalid", fields)
+	}
+
+	// Add a second (real) variant, replacing the implicit one — now
+	// exactly one active variant exists again, and it must still be
+	// undeletable.
+	resp, err := h.CreateVariant(owner(shopRow.ID), gen.CreateVariantRequestObject{
+		Id: product.Id, Body: &gen.CreateVariantJSONRequestBody{Attributes: gen.AttributeValues{"size": "L"}},
+	})
+	if err != nil {
+		t.Fatalf("CreateVariant: %v", err)
+	}
+	onlyVariant := resp.(gen.CreateVariant201JSONResponse)
+
+	_, err = h.DeleteVariant(owner(shopRow.ID), gen.DeleteVariantRequestObject{Id: onlyVariant.Id})
+	apiErr, ok = err.(*apierr.Error)
+	if !ok || apiErr.Code != gen.VALIDATIONFAILED {
+		t.Fatalf("err = %#v, want 400 VALIDATION_FAILED", err)
+	}
+
+	// A second real variant makes the first one deletable.
+	if _, err := h.CreateVariant(owner(shopRow.ID), gen.CreateVariantRequestObject{
+		Id: product.Id, Body: &gen.CreateVariantJSONRequestBody{Attributes: gen.AttributeValues{"size": "M"}},
+	}); err != nil {
+		t.Fatalf("CreateVariant (2nd real): %v", err)
+	}
+	if _, err := h.DeleteVariant(owner(shopRow.ID), gen.DeleteVariantRequestObject{Id: onlyVariant.Id}); err != nil {
+		t.Fatalf("DeleteVariant should now succeed: %v", err)
+	}
+}
+
+func TestUpdateVariant_attributesRewrittenInPlaceKeepingID(t *testing.T) {
+	h, q, _ := newTestHandler(t)
+	ctx := context.Background()
+	shopRow := seedShop(ctx, t, q, "shop-a")
+	unit := seedUnit(ctx, t, q, shopRow.ID, "pcs")
+	seedAttribute(ctx, t, q, shopRow.ID, "size")
+
+	product := mustCreateProduct(t, h, shopRow.ID, unit.ID, "Cotton Shirt", "125000.00")
+	created, err := h.CreateVariant(owner(shopRow.ID), gen.CreateVariantRequestObject{
+		Id: product.Id, Body: &gen.CreateVariantJSONRequestBody{Attributes: gen.AttributeValues{"size": "L"}},
+	})
+	if err != nil {
+		t.Fatalf("CreateVariant: %v", err)
+	}
+	variant := created.(gen.CreateVariant201JSONResponse)
+
+	newAttrs := gen.AttributeValues{"size": "XL"}
+	resp, err := h.UpdateVariant(owner(shopRow.ID), gen.UpdateVariantRequestObject{
+		Id: variant.Id, Body: &gen.UpdateVariantJSONRequestBody{Attributes: &newAttrs},
+	})
+	if err != nil {
+		t.Fatalf("UpdateVariant: %v", err)
+	}
+	updated := gen.Variant(resp.(gen.UpdateVariant200JSONResponse))
+
+	if updated.Id != variant.Id {
+		t.Fatalf("Id = %v, want unchanged %v (stock/sales references must survive)", updated.Id, variant.Id)
+	}
+	if updated.Attributes["size"] != "XL" {
+		t.Fatalf("Attributes = %+v, want size=XL", updated.Attributes)
+	}
+
+	// Persisted, not just in the response: a fresh list shows the same id
+	// with the new attributes.
+	listResp, err := h.ListVariants(owner(shopRow.ID), gen.ListVariantsRequestObject{Id: product.Id})
+	if err != nil {
+		t.Fatalf("ListVariants: %v", err)
+	}
+	items := listResp.(gen.ListVariants200JSONResponse).Items
+	if len(items) != 1 || items[0].Id != variant.Id || items[0].Attributes["size"] != "XL" {
+		t.Fatalf("items = %+v, want the same variant with size=XL", items)
+	}
+}
+
+func TestUpdateVariant_attributesValidatedLikeCreate(t *testing.T) {
+	h, q, _ := newTestHandler(t)
+	ctx := context.Background()
+	shopRow := seedShop(ctx, t, q, "shop-a")
+	unit := seedUnit(ctx, t, q, shopRow.ID, "pcs")
+	seedAttribute(ctx, t, q, shopRow.ID, "size")
+
+	product := mustCreateProduct(t, h, shopRow.ID, unit.ID, "Cotton Shirt", "125000.00")
+	created, err := h.CreateVariant(owner(shopRow.ID), gen.CreateVariantRequestObject{
+		Id: product.Id, Body: &gen.CreateVariantJSONRequestBody{Attributes: gen.AttributeValues{"size": "L"}},
+	})
+	if err != nil {
+		t.Fatalf("CreateVariant: %v", err)
+	}
+	variant := created.(gen.CreateVariant201JSONResponse)
+
+	invalidAttrs := gen.AttributeValues{"color": "blue"} // "color" is not a known attribute code
+	_, err = h.UpdateVariant(owner(shopRow.ID), gen.UpdateVariantRequestObject{
+		Id: variant.Id, Body: &gen.UpdateVariantJSONRequestBody{Attributes: &invalidAttrs},
+	})
+	apiErr, ok := err.(*apierr.Error)
+	if !ok || apiErr.Code != gen.VALIDATIONFAILED {
+		t.Fatalf("err = %#v, want 400 VALIDATION_FAILED", err)
+	}
+	fields := apiErr.Details["fields"].(map[string]string)
+	if fields["attributes"] != "invalid" {
+		t.Fatalf("fields = %+v, want attributes=invalid", fields)
+	}
+}
+
+func TestUpdateVariant_attributesConflictOnDuplicateCombination(t *testing.T) {
+	h, q, _ := newTestHandler(t)
+	ctx := context.Background()
+	shopRow := seedShop(ctx, t, q, "shop-a")
+	unit := seedUnit(ctx, t, q, shopRow.ID, "pcs")
+	seedAttribute(ctx, t, q, shopRow.ID, "size")
+
+	product := mustCreateProduct(t, h, shopRow.ID, unit.ID, "Cotton Shirt", "125000.00")
+	if _, err := h.CreateVariant(owner(shopRow.ID), gen.CreateVariantRequestObject{
+		Id: product.Id, Body: &gen.CreateVariantJSONRequestBody{Attributes: gen.AttributeValues{"size": "L"}},
+	}); err != nil {
+		t.Fatalf("CreateVariant (L): %v", err)
+	}
+	createdM, err := h.CreateVariant(owner(shopRow.ID), gen.CreateVariantRequestObject{
+		Id: product.Id, Body: &gen.CreateVariantJSONRequestBody{Attributes: gen.AttributeValues{"size": "M"}},
+	})
+	if err != nil {
+		t.Fatalf("CreateVariant (M): %v", err)
+	}
+	variantM := createdM.(gen.CreateVariant201JSONResponse)
+
+	dupAttrs := gen.AttributeValues{"size": "L"}
+	_, err = h.UpdateVariant(owner(shopRow.ID), gen.UpdateVariantRequestObject{
+		Id: variantM.Id, Body: &gen.UpdateVariantJSONRequestBody{Attributes: &dupAttrs},
+	})
+	apiErr, ok := err.(*apierr.Error)
+	if !ok || apiErr.Code != gen.CONFLICT || apiErr.Details["field"] != "attributes" {
+		t.Fatalf("err = %#v, want 409 CONFLICT field=attributes", err)
+	}
+}
+
+func TestDeleteVariant_lastVariantRejectedEvenWhenInactive(t *testing.T) {
+	h, q, _ := newTestHandler(t)
+	ctx := context.Background()
+	shopRow := seedShop(ctx, t, q, "shop-a")
+	unit := seedUnit(ctx, t, q, shopRow.ID, "pcs")
+	seedAttribute(ctx, t, q, shopRow.ID, "size")
+
+	product := mustCreateProduct(t, h, shopRow.ID, unit.ID, "Cotton Shirt", "125000.00")
+	resp, err := h.CreateVariant(owner(shopRow.ID), gen.CreateVariantRequestObject{
+		Id: product.Id, Body: &gen.CreateVariantJSONRequestBody{Attributes: gen.AttributeValues{"size": "L"}},
+	})
+	if err != nil {
+		t.Fatalf("CreateVariant: %v", err)
+	}
+	onlyVariant := resp.(gen.CreateVariant201JSONResponse)
+
+	inactive := false
+	if _, err := h.UpdateVariant(owner(shopRow.ID), gen.UpdateVariantRequestObject{
+		Id: onlyVariant.Id, Body: &gen.UpdateVariantJSONRequestBody{IsActive: &inactive},
+	}); err != nil {
+		t.Fatalf("UpdateVariant (deactivate): %v", err)
+	}
+
+	// Deactivating does not delete it — it is still the product's only
+	// non-deleted variant, so deleting it must still be rejected even
+	// though it is no longer active.
+	_, err = h.DeleteVariant(owner(shopRow.ID), gen.DeleteVariantRequestObject{Id: onlyVariant.Id})
+	apiErr, ok := err.(*apierr.Error)
+	if !ok || apiErr.Code != gen.VALIDATIONFAILED {
+		t.Fatalf("err = %#v, want 400 VALIDATION_FAILED", err)
+	}
+	fields := apiErr.Details["fields"].(map[string]string)
+	if fields["id"] != "invalid" {
+		t.Fatalf("fields = %+v, want id=invalid", fields)
+	}
+}
+
+func TestDeleteVariant_hasVariantsRecomputed(t *testing.T) {
+	h, q, _ := newTestHandler(t)
+	ctx := context.Background()
+	shopRow := seedShop(ctx, t, q, "shop-a")
+	unit := seedUnit(ctx, t, q, shopRow.ID, "pcs")
+	seedAttribute(ctx, t, q, shopRow.ID, "size")
+
+	product := mustCreateProduct(t, h, shopRow.ID, unit.ID, "Cotton Shirt", "125000.00")
+	respL, err := h.CreateVariant(owner(shopRow.ID), gen.CreateVariantRequestObject{
+		Id: product.Id, Body: &gen.CreateVariantJSONRequestBody{Attributes: gen.AttributeValues{"size": "L"}},
+	})
+	if err != nil {
+		t.Fatalf("CreateVariant (L): %v", err)
+	}
+	respM, err := h.CreateVariant(owner(shopRow.ID), gen.CreateVariantRequestObject{
+		Id: product.Id, Body: &gen.CreateVariantJSONRequestBody{Attributes: gen.AttributeValues{"size": "M"}},
+	})
+	if err != nil {
+		t.Fatalf("CreateVariant (M): %v", err)
+	}
+	variantL := respL.(gen.CreateVariant201JSONResponse)
+	variantM := respM.(gen.CreateVariant201JSONResponse)
+
+	getHasVariants := func() bool {
+		t.Helper()
+		row, err := q.GetProductForStaff(ctx, db.GetProductForStaffParams{Locale: "uz", ShopID: shopRow.ID, ID: product.Id})
+		if err != nil {
+			t.Fatalf("GetProductForStaff: %v", err)
+		}
+		return row.HasVariants
+	}
+
+	if !getHasVariants() {
+		t.Fatal("HasVariants = false, want true after two real variants exist")
+	}
+
+	if _, err := h.DeleteVariant(owner(shopRow.ID), gen.DeleteVariantRequestObject{Id: variantM.Id}); err != nil {
+		t.Fatalf("DeleteVariant (M): %v", err)
+	}
+	if !getHasVariants() {
+		t.Fatal("HasVariants = false, want true (one real, non-implicit variant remains)")
+	}
+	_ = variantL
+
+	// The "only the implicit variant remains" branch: a fresh product's
+	// sole variant is the implicit `{}` one (has_variants already false).
+	// The normal API flow can never bring a product back to "implicit +
+	// one real variant" once a real variant has replaced the implicit one
+	// (CreateVariant's replacesImplicit destroys it for good), so this
+	// state is built directly via sqlc, bypassing that replace logic, to
+	// exercise DeleteVariant's recompute on it.
+	product2 := mustCreateProduct(t, h, shopRow.ID, unit.ID, "Plain Cap", "50000.00")
+	implicit2 := (*product2.Variants)[0].Id
+	extra, err := q.CreateVariant(ctx, db.CreateVariantParams{
+		ID: uuid.New(), ShopID: shopRow.ID, ProductID: product2.Id, Attributes: []byte(`{"note":"extra"}`), IsActive: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateVariant (direct, extra): %v", err)
+	}
+	if err := q.SetProductHasVariants(ctx, db.SetProductHasVariantsParams{ShopID: shopRow.ID, ID: product2.Id, HasVariants: true}); err != nil {
+		t.Fatalf("SetProductHasVariants: %v", err)
+	}
+
+	getHasVariants2 := func() bool {
+		t.Helper()
+		row, err := q.GetProductForStaff(ctx, db.GetProductForStaffParams{Locale: "uz", ShopID: shopRow.ID, ID: product2.Id})
+		if err != nil {
+			t.Fatalf("GetProductForStaff: %v", err)
+		}
+		return row.HasVariants
+	}
+	if !getHasVariants2() {
+		t.Fatal("HasVariants = false, want true (implicit + extra variant coexist)")
+	}
+
+	if _, err := h.DeleteVariant(owner(shopRow.ID), gen.DeleteVariantRequestObject{Id: extra.ID}); err != nil {
+		t.Fatalf("DeleteVariant (extra): %v", err)
+	}
+	if getHasVariants2() {
+		t.Fatal("HasVariants = true, want false (only the implicit variant remains)")
+	}
+
+	// The implicit variant itself is still there and still undeletable
+	// (it is the only non-deleted variant again).
+	_, err = h.DeleteVariant(owner(shopRow.ID), gen.DeleteVariantRequestObject{Id: implicit2})
+	apiErr, ok := err.(*apierr.Error)
+	if !ok || apiErr.Code != gen.VALIDATIONFAILED {
+		t.Fatalf("err = %#v, want 400 VALIDATION_FAILED", err)
+	}
+}
+
+// TestDeleteVariant_concurrentDeletesOfLastTwoLeaveExactlyOne proves the
+// LockShop-serialized count-then-delete in DeleteVariant closes the race
+// a naive "count, then delete" would have: two requests racing to delete a
+// product's last two variants must not both see "2 remain" and both
+// succeed, which would leave the product with zero variants. Run with
+// -race to also catch any unsynchronized access.
+func TestDeleteVariant_concurrentDeletesOfLastTwoLeaveExactlyOne(t *testing.T) {
+	h, q, _ := newTestHandler(t)
+	ctx := context.Background()
+	shopRow := seedShop(ctx, t, q, "shop-a")
+	unit := seedUnit(ctx, t, q, shopRow.ID, "pcs")
+	seedAttribute(ctx, t, q, shopRow.ID, "size")
+
+	product := mustCreateProduct(t, h, shopRow.ID, unit.ID, "Cotton Shirt", "125000.00")
+	respL, err := h.CreateVariant(owner(shopRow.ID), gen.CreateVariantRequestObject{
+		Id: product.Id, Body: &gen.CreateVariantJSONRequestBody{Attributes: gen.AttributeValues{"size": "L"}},
+	})
+	if err != nil {
+		t.Fatalf("CreateVariant (L): %v", err)
+	}
+	respM, err := h.CreateVariant(owner(shopRow.ID), gen.CreateVariantRequestObject{
+		Id: product.Id, Body: &gen.CreateVariantJSONRequestBody{Attributes: gen.AttributeValues{"size": "M"}},
+	})
+	if err != nil {
+		t.Fatalf("CreateVariant (M): %v", err)
+	}
+	variantL := respL.(gen.CreateVariant201JSONResponse)
+	variantM := respM.(gen.CreateVariant201JSONResponse)
+
+	results := make(chan error, 2)
+	start := make(chan struct{})
+	for _, id := range []uuid.UUID{variantL.Id, variantM.Id} {
+		go func(id uuid.UUID) {
+			<-start
+			_, err := h.DeleteVariant(owner(shopRow.ID), gen.DeleteVariantRequestObject{Id: id})
+			results <- err
+		}(id)
+	}
+	close(start)
+
+	var oks, rejections int
+	for range 2 {
+		switch err := <-results; err {
+		case nil:
+			oks++
+		default:
+			apiErr, ok := err.(*apierr.Error)
+			if !ok || apiErr.Code != gen.VALIDATIONFAILED {
+				t.Fatalf("concurrent delete error = %#v, want nil or 400 VALIDATION_FAILED", err)
+			}
+			rejections++
+		}
+	}
+	if oks != 1 || rejections != 1 {
+		t.Fatalf("oks=%d rejections=%d, want exactly one of each", oks, rejections)
+	}
+
+	remaining, err := q.ListVariantsForStaff(ctx, db.ListVariantsForStaffParams{ShopID: shopRow.ID, ProductID: product.Id})
+	if err != nil {
+		t.Fatalf("ListVariantsForStaff: %v", err)
+	}
+	if len(remaining) != 1 {
+		t.Fatalf("remaining variants = %+v, want exactly 1", remaining)
+	}
+}

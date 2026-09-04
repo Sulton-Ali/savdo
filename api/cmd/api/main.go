@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Sulton-Ali/savdo/api/internal/auth"
+	"github.com/Sulton-Ali/savdo/api/internal/catalog"
 	"github.com/Sulton-Ali/savdo/api/internal/config"
 	"github.com/Sulton-Ali/savdo/api/internal/db"
 	"github.com/Sulton-Ali/savdo/api/internal/httpx"
@@ -70,6 +71,7 @@ func run() error {
 
 	authSvc := auth.NewService(queries, cfg, shopRow.ID)
 	shopSvc := shop.NewService(pool, queries)
+	catalogSvc := catalog.NewService(pool, queries, shopRow.DefaultLocale, cfg.MediaBaseURL)
 
 	// LocalStorage writes under Config.MediaDir (ADR-008); mediaSvc caps
 	// an upload's file part at Config.MediaMaxBytes, bounds concurrent
@@ -102,7 +104,7 @@ func run() error {
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           httpx.NewRouter(logger, pool, authSvc, shopSvc, mediaSvc, devMedia),
+		Handler:           httpx.NewRouter(logger, pool, authSvc, shopSvc, mediaSvc, devMedia, catalogSvc),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      15 * time.Second,
