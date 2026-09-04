@@ -61,7 +61,7 @@ func (h *Handler) ListStaff(ctx context.Context, req gen.ListStaffRequestObject)
 	for i, u := range items {
 		genItems[i] = toGenUser(u)
 	}
-	return gen.ListStaff200JSONResponse(gen.UserList{Items: genItems, NextCursor: nextCursorResponse(nextCursor)}), nil
+	return gen.ListStaff200JSONResponse(gen.UserList{Items: genItems, NextCursor: nullableString(nextCursor)}), nil
 }
 
 // validateUsername trims, lowercases and length/pattern-checks a

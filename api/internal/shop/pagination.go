@@ -4,7 +4,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/oapi-codegen/nullable"
 
 	"github.com/Sulton-Ali/savdo/api/gen"
 	"github.com/Sulton-Ali/savdo/api/internal/pagination"
@@ -67,18 +66,4 @@ func paginateT[T any](rows []T, limit int32, keyOf func(T) (time.Time, uuid.UUID
 	createdAt, id := keyOf(items[len(items)-1])
 	cursor := pagination.Encode(createdAt, id)
 	return items, &cursor
-}
-
-// nextCursorResponse converts paginateT's *string (nil = no further page)
-// into the tri-state nullable.Nullable[string] the generated `nextCursor`
-// field now requires (D-35's nullable-type ripple: every `["T", "null"]`
-// schema in the spec gets this type, not just the PATCH fields D-35
-// introduced it for). The field is always required in a response, so the
-// result is always explicitly specified: null when there is no next page,
-// the cursor value otherwise.
-func nextCursorResponse(cursor *string) nullable.Nullable[string] {
-	if cursor == nil {
-		return nullable.NewNullNullable[string]()
-	}
-	return nullable.NewNullableWithValue(*cursor)
 }
