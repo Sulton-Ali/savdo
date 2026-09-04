@@ -72,15 +72,17 @@ func conflictField(err error) (string, bool) {
 		return "name", true
 	case "locations_shop_id_default_key":
 		// The partial unique index enforcing "at most one default
-		// location per shop". CreateLocation and UpdateLocation lock
-		// the current default row (GetDefaultLocationForUpdate) before
-		// deciding anything, which serializes the common race; this
-		// mapping is the backstop for what that locking order doesn't
-		// itself rule out — e.g. two shops-with-zero-locations creates
-		// racing to be the very first, with no default row yet for
-		// either to lock (see CreateLocation's doc comment) — so a
+		// location per shop". CreateLocation and UpdateLocation both
+		// lock the shop row itself (LockShop) as their first statement
+		// before deciding anything default-related, which fully
+		// serializes every default-changing transaction for a shop —
+		// this mapping is only a last-resort backstop for whatever this
+		// codebase might get wrong about that locking order in the
+		// future, not a path expected to fire in production: a
 		// concurrent request that also ended up trying to set
-		// is_default=true loses here with a clean 409 instead of a 500.
+		// is_default=true would lose here with a clean 409 instead of a
+		// 500, rather than corrupting the "at most one default"
+		// invariant the index itself still guarantees regardless.
 		return "isDefault", true
 	default:
 		return "", false

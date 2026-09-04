@@ -514,16 +514,13 @@ func TestUpdateLocationTakeoverClearsOldDefault(t *testing.T) {
 // TestUpdateLocationConcurrentTakeoverExactlyOneDefaultRemains is
 // MAJOR-1's concurrency check: two goroutines each try to make a
 // different (currently non-default) location the shop's default at the
-// same time. Both lock the shop's current default row
-// (GetDefaultLocationForUpdate) before deciding anything, so they
-// serialize on it: the loser sees the winner's committed result rather
-// than a stale snapshot, and — with that ordering — both calls are
-// expected to succeed (last writer wins). The assertion is deliberately
-// the weaker "no 500 and exactly one default" rather than "both must
-// return nil": locations_shop_id_default_key (mapped to 409 CONFLICT
-// details.field=isDefault by conflictField) still stands as a backstop
-// for any interleaving the locking order doesn't itself rule out, and a
-// 409 there is a correct outcome too, just never a 500.
+// same time. Both lock the shop row itself (LockShop) as their first
+// statement, so they fully serialize on it: whichever gets there first
+// runs to completion before the second even reads its own state. With
+// that ordering both calls are expected to succeed outright (last
+// writer wins, 200/200) — not merely "no 500" — since the shop lock
+// rules out the interleaving that could otherwise trip
+// locations_shop_id_default_key.
 func TestUpdateLocationConcurrentTakeoverExactlyOneDefaultRemains(t *testing.T) {
 	svc, q, ctx := newTestService(t)
 	shopRow := seedShop(ctx, t, q, "shop-a")
@@ -558,12 +555,8 @@ func TestUpdateLocationConcurrentTakeoverExactlyOneDefaultRemains(t *testing.T) 
 	wg.Wait()
 
 	for i, err := range errs {
-		if err == nil {
-			continue
-		}
-		apiErr, ok := err.(*apierr.Error)
-		if !ok || apiErr.Status != 409 || apiErr.Details["field"] != "isDefault" {
-			t.Fatalf("goroutine %d: err = %v (%T), want nil or 409 CONFLICT details.field=isDefault", i, err, err)
+		if err != nil {
+			t.Fatalf("goroutine %d: err = %v, want nil (both takeovers should succeed with the shop lock in place)", i, err)
 		}
 	}
 
@@ -579,6 +572,131 @@ func TestUpdateLocationConcurrentTakeoverExactlyOneDefaultRemains(t *testing.T) 
 	}
 	if defaults != 1 {
 		t.Fatalf("locations with IsDefault=true = %d, want exactly 1 (all locations: %+v)", defaults, all)
+	}
+}
+
+// TestCreateLocationConcurrentWithNonDefaultRacingATakeover is
+// MAJOR-3's regression check: a plain CreateLocation (isDefault: false,
+// not the shop's first location) running concurrently with an
+// UpdateLocation takeover must never itself become the default —
+// before the shop-row lock, CreateLocation inferred "am I first" from
+// whether GetDefaultLocationForUpdate found a default row, and a
+// concurrent takeover's FOR UPDATE re-evaluation could make that lock
+// report "no default row" even though the shop already had one,
+// silently making the plain create the new default (reproduced live,
+// 4/15 runs). With LockShop serializing every default-changing
+// transaction, the create must see the shop already has a location
+// (ShopHasLocations) no matter how the takeover interleaves.
+func TestCreateLocationConcurrentWithNonDefaultRacingATakeover(t *testing.T) {
+	svc, q, ctx := newTestService(t)
+	shopRow := seedShop(ctx, t, q, "shop-a")
+
+	first, err := svc.CreateLocation(ctx, shopRow.ID, "First", db.LocationKindStore, false)
+	if err != nil {
+		t.Fatalf("CreateLocation(first): %v", err)
+	}
+	second, err := svc.CreateLocation(ctx, shopRow.ID, "Second", db.LocationKindWarehouse, false)
+	if err != nil {
+		t.Fatalf("CreateLocation(second): %v", err)
+	}
+	if !first.IsDefault || second.IsDefault {
+		t.Fatalf("setup: first.IsDefault=%v second.IsDefault=%v, want true/false", first.IsDefault, second.IsDefault)
+	}
+
+	wantDefault := true
+	var wg sync.WaitGroup
+	var createErr, takeoverErr error
+	var created db.Location
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		created, createErr = svc.CreateLocation(ctx, shopRow.ID, "Third", db.LocationKindWarehouse, false)
+	}()
+	go func() {
+		defer wg.Done()
+		_, takeoverErr = svc.UpdateLocation(ctx, shopRow.ID, second.ID, LocationPatchInput{IsDefault: &wantDefault})
+	}()
+	wg.Wait()
+
+	if createErr != nil {
+		t.Fatalf("CreateLocation(third, concurrent): %v", createErr)
+	}
+	if takeoverErr != nil {
+		t.Fatalf("UpdateLocation(takeover, concurrent): %v", takeoverErr)
+	}
+	if created.IsDefault {
+		t.Fatal("the plain create (isDefault: false, not the shop's first location) became the default")
+	}
+
+	all, err := q.ListLocations(ctx, db.ListLocationsParams{ShopID: shopRow.ID, Limit: 10})
+	if err != nil {
+		t.Fatalf("ListLocations: %v", err)
+	}
+	defaults := 0
+	for _, l := range all {
+		if l.IsDefault {
+			defaults++
+		}
+	}
+	if defaults != 1 {
+		t.Fatalf("locations with IsDefault=true = %d, want exactly 1 (all locations: %+v)", defaults, all)
+	}
+}
+
+// TestCreateLocationConcurrentFirstLocations is MAJOR-3's other
+// required test: two concurrent creates for a shop with zero locations,
+// neither requesting isDefault. With LockShop serializing them, exactly
+// one becomes the (auto) default, the other does not, and neither call
+// errors — no 500 (the old failure mode) and no 409 either (the shop
+// lock rules out the race the unique-index backstop existed for).
+func TestCreateLocationConcurrentFirstLocations(t *testing.T) {
+	svc, q, ctx := newTestService(t)
+	shopRow := seedShop(ctx, t, q, "shop-a")
+
+	var wg sync.WaitGroup
+	results := make([]db.Location, 2)
+	errs := make([]error, 2)
+	names := []string{"A", "B"}
+	for i := range names {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			results[i], errs[i] = svc.CreateLocation(ctx, shopRow.ID, names[i], db.LocationKindStore, false)
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("goroutine %d: err = %v, want nil", i, err)
+		}
+	}
+
+	defaults := 0
+	for _, l := range results {
+		if l.IsDefault {
+			defaults++
+		}
+	}
+	if defaults != 1 {
+		t.Fatalf("results with IsDefault=true = %d, want exactly 1 (results: %+v)", defaults, results)
+	}
+
+	all, err := q.ListLocations(ctx, db.ListLocationsParams{ShopID: shopRow.ID, Limit: 10})
+	if err != nil {
+		t.Fatalf("ListLocations: %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("len(all) = %d, want 2", len(all))
+	}
+	allDefaults := 0
+	for _, l := range all {
+		if l.IsDefault {
+			allDefaults++
+		}
+	}
+	if allDefaults != 1 {
+		t.Fatalf("locations with IsDefault=true = %d, want exactly 1 (all locations: %+v)", allDefaults, all)
 	}
 }
 
