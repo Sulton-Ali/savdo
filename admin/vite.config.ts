@@ -27,5 +27,11 @@ export default defineConfig({
     // Vitest's 5s default under machine load; give them headroom.
     testTimeout: 15000,
     hookTimeout: 15000,
+    // `forks` is Vitest 4's own default, made explicit here; `maxWorkers`
+    // bounds it to 2 child processes. Unbounded worker counts have been
+    // observed crashing under load on the dev machine (phase-2 T6b) —
+    // this trades some speed for a suite that finishes reliably.
+    pool: "forks",
+    maxWorkers: 2,
   },
 });
