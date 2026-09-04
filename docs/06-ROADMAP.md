@@ -53,7 +53,7 @@ green.
 
 ## Phase 2 — Catalogue (products, variants, categories, media) + admin screens
 
-- [ ] Owner answers Q-03, Q-04, Q-12
+- [ ] Owner answers Q-03, Q-04, Q-12, Q-16, Q-20 (answered 2026-09-04: D-32..D-37)
 - [ ] Migrations: `units`, `categories(+translations)`, `attribute_definitions`, `products(+translations)`, `product_variants`, `media_files`, `product_images`
 - [ ] `catalog` service + handlers per `05-API.md` § Catalogue; cursor pagination; `?q=` search
 - [ ] `media`: upload, validation (mime, size), WebP derivatives, local `Storage`, Caddy path
