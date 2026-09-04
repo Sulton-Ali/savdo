@@ -130,7 +130,7 @@ func (q *Queries) InsertMovement(ctx context.Context, arg InsertMovementParams) 
 const listLevels = `-- name: ListLevels :many
 SELECT sl.shop_id, sl.variant_id, sl.location_id, sl.qty, sl.updated_at, pv.product_id
 FROM stock_levels sl
-JOIN product_variants pv ON pv.id = sl.variant_id
+JOIN product_variants pv ON pv.id = sl.variant_id AND pv.shop_id = sl.shop_id
 WHERE sl.shop_id = $1
     AND ($2::uuid IS NULL OR sl.variant_id = $2)
     AND ($3::uuid IS NULL OR pv.product_id = $3)

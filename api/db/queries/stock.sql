@@ -64,7 +64,7 @@ LIMIT sqlc.arg('limit');
 -- every stock move and would make keyset pagination unstable while paging.
 SELECT sl.shop_id, sl.variant_id, sl.location_id, sl.qty, sl.updated_at, pv.product_id
 FROM stock_levels sl
-JOIN product_variants pv ON pv.id = sl.variant_id
+JOIN product_variants pv ON pv.id = sl.variant_id AND pv.shop_id = sl.shop_id
 WHERE sl.shop_id = sqlc.arg('shop_id')
     AND (sqlc.narg('variant_id')::uuid IS NULL OR sl.variant_id = sqlc.narg('variant_id'))
     AND (sqlc.narg('product_id')::uuid IS NULL OR pv.product_id = sqlc.narg('product_id'))
