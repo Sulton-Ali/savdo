@@ -4,14 +4,14 @@
  * object (e.g. by Ant Design's `ConfigProvider` in `admin/`) and mirrored as
  * CSS variables in `./tokens.css` for plain CSS / Tailwind usage.
  *
- * `color.primary` is a placeholder (`#0f766e`, teal-700) chosen only so the
- * apps have a working theme from Phase 0. The real brand colour is an owner
- * decision for a later phase — swap it here and in `tokens.css` when picked.
+ * `color.primary` is terracotta (`#c2410c`) — the owner's brand pick (D-36).
+ * Provisional: may change after visual review in Phase 6 — swap it here and
+ * in `tokens.css` if it does.
  */
 export const tokens = {
   color: {
-    primary: "#0f766e",
-    primaryHover: "#0d9488",
+    primary: "#c2410c",
+    primaryHover: "#9a3412",
     bg: "#f5f5f4",
     surface: "#ffffff",
     text: "#1f2937",
@@ -26,7 +26,7 @@ export const tokens = {
     lg: 12,
   },
   font: {
-    family: "Inter, system-ui, sans-serif",
+    family: '"Inter Variable", Inter, system-ui, sans-serif',
   },
 } as const;
 
