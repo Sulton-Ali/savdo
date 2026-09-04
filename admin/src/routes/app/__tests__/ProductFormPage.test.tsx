@@ -226,6 +226,53 @@ describe("ProductFormPage", () => {
     });
   });
 
+  // T6b (D-35/D-44): clearing the per-product low-stock threshold override
+  // must send a real `null`, not omit the field, so the API falls back to
+  // the shop default.
+  it("patches lowStockThreshold as null when the per-product override is cleared", async () => {
+    const existing: Product = {
+      id: "p1",
+      categoryId: null,
+      slug: "existing-product",
+      sku: null,
+      unitId: "unit1",
+      basePrice: "10000.00",
+      promoPrice: null,
+      promoFrom: null,
+      promoTo: null,
+      isActive: true,
+      isFeatured: false,
+      name: "Existing product",
+      description: null,
+      locale: "uz",
+      translationFallback: false,
+      lowStockThreshold: 5,
+      translations: { uz: { name: "Existing product" } },
+    };
+    mockGetByPath({
+      "/categories": { items: [] },
+      "/units": { items: [unit()] },
+      "/products/{id}": existing,
+    });
+    mockedApi.PATCH.mockResolvedValueOnce(jsonResult({ ...existing, lowStockThreshold: null }));
+
+    renderForm("p1");
+
+    await screen.findByRole("button", { name: "Save" });
+
+    const thresholdInput = await screen.findByLabelText("Low stock threshold");
+    fireEvent.change(thresholdInput, { target: { value: "" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(mockedApi.PATCH).toHaveBeenCalledWith("/products/{id}", {
+        params: { path: { id: "p1" } },
+        body: { lowStockThreshold: null },
+      });
+    });
+  });
+
   // T6a review MINOR: a 409 CONFLICT naming a real, mounted field (slug is a
   // top-level Form.Item, unlike the nested translation fields) must still
   // land as an inline field error.

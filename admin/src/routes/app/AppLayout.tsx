@@ -1,7 +1,10 @@
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
 import { Button, Layout, Menu, Space, Tag, Typography } from "antd";
 import {
+  AlertTriangle,
+  Boxes,
   FolderTree,
+  History,
   LayoutDashboard,
   LogOut,
   MapPin,
@@ -70,6 +73,26 @@ function AppShell() {
       icon: <Tags size={16} />,
       label: <Link to="/settings/attributes">{t("nav.attributes")}</Link>,
       permission: "catalog.write",
+    },
+    // T6b: stock levels are visible to every role (D-40); movements and low
+    // stock are manager+ (`stock.write`).
+    {
+      key: "/stock",
+      icon: <Boxes size={16} />,
+      label: <Link to="/stock">{t("nav.stockLevels")}</Link>,
+      permission: null,
+    },
+    {
+      key: "/stock/movements",
+      icon: <History size={16} />,
+      label: <Link to="/stock/movements">{t("nav.stockMovements")}</Link>,
+      permission: "stock.write",
+    },
+    {
+      key: "/stock/low",
+      icon: <AlertTriangle size={16} />,
+      label: <Link to="/stock/low">{t("nav.stockLow")}</Link>,
+      permission: "stock.write",
     },
     {
       key: "/staff",

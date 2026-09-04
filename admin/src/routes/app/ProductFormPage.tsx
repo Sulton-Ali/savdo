@@ -54,6 +54,7 @@ interface ProductFormValues {
   costPrice?: number;
   promoPrice?: number;
   promoRange?: [Dayjs, Dayjs] | null;
+  lowStockThreshold?: number;
 }
 
 /** Shared by `productNewRoute` (`productId` undefined) and `productEditRoute`
@@ -113,6 +114,7 @@ export function ProductFormPage({ productId }: { productId?: string }) {
           basePrice: parseMoney(product.basePrice),
           costPrice: parseMoney(product.costPrice),
           promoPrice: parseMoney(product.promoPrice),
+          lowStockThreshold: product.lowStockThreshold ?? undefined,
           promoRange:
             product.promoFrom && product.promoTo
               ? [dayjs(product.promoFrom), dayjs(product.promoTo)]
@@ -179,6 +181,9 @@ export function ProductFormPage({ productId }: { productId?: string }) {
         ...(values.promoPrice != null ? { promoPrice: formatMoney(values.promoPrice) } : {}),
         ...(values.promoRange?.[0] ? { promoFrom: values.promoRange[0].toISOString() } : {}),
         ...(values.promoRange?.[1] ? { promoTo: values.promoRange[1].toISOString() } : {}),
+        ...(values.lowStockThreshold != null
+          ? { lowStockThreshold: values.lowStockThreshold }
+          : {}),
       };
       createMutation.mutate(body);
       return;
@@ -235,6 +240,11 @@ export function ProductFormPage({ productId }: { productId?: string }) {
     const normPromoTo = values.promoRange?.[1] ? values.promoRange[1].toISOString() : null;
     if (!sameInstant(normPromoTo, product.promoTo ?? null)) {
       patch.promoTo = normPromoTo;
+    }
+
+    const normLowStockThreshold = values.lowStockThreshold ?? null;
+    if (normLowStockThreshold !== (product.lowStockThreshold ?? null)) {
+      patch.lowStockThreshold = normLowStockThreshold;
     }
 
     if (values.isActive !== product.isActive) {
@@ -371,6 +381,13 @@ export function ProductFormPage({ productId }: { productId?: string }) {
                     valuePropName="checked"
                   >
                     <Switch />
+                  </Form.Item>
+                  <Form.Item
+                    name="lowStockThreshold"
+                    label={t("catalog.products.fields.lowStockThreshold")}
+                    extra={t("catalog.products.lowStockThresholdHint")}
+                  >
+                    <InputNumber min={0} precision={0} style={{ width: "100%" }} />
                   </Form.Item>
                 </>
               ),
