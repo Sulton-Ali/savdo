@@ -50,3 +50,13 @@ sql:
               import: "time"
               type: "Time"
               pointer: true
+          # jsonb -> encoding/json.RawMessage (a []byte alias, so nil already
+          # represents NULL/absent — no separate nullable pair needed, unlike
+          # uuid/timestamptz above). Used by product_variants.attributes and
+          # by translation-aggregate query results; numeric stays sqlc's
+          # pgx/v5 default (pgtype.Numeric) per docs/04-DATA-MODEL.md — the
+          # service layer converts with shopspring/decimal.
+          - db_type: "jsonb"
+            go_type:
+              import: "encoding/json"
+              type: "RawMessage"
