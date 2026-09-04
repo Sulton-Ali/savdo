@@ -16,6 +16,7 @@ import (
 	"github.com/Sulton-Ali/savdo/api/internal/config"
 	"github.com/Sulton-Ali/savdo/api/internal/db"
 	"github.com/Sulton-Ali/savdo/api/internal/db/testdb"
+	"github.com/Sulton-Ali/savdo/api/internal/media"
 	"github.com/Sulton-Ali/savdo/api/internal/shop"
 )
 
@@ -66,9 +67,10 @@ func newShopTestFixture(t *testing.T) shopTestFixture {
 	}
 	authSvc := auth.NewService(q, cfg, shopRow.ID)
 	shopSvc := shop.NewService(pool, q)
+	mediaSvc := media.NewService(q, nil, "/media", 10<<20)
 
 	return shopTestFixture{
-		router:        NewRouter(testLogger(), pool, authSvc, shopSvc),
+		router:        NewRouter(testLogger(), pool, authSvc, shopSvc, mediaSvc, ""),
 		q:             q,
 		shopID:        shopRow.ID,
 		ownerUsername: owner.Username,

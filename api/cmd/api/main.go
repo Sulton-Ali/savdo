@@ -18,6 +18,7 @@ import (
 	"github.com/Sulton-Ali/savdo/api/internal/config"
 	"github.com/Sulton-Ali/savdo/api/internal/db"
 	"github.com/Sulton-Ali/savdo/api/internal/httpx"
+	"github.com/Sulton-Ali/savdo/api/internal/media"
 	"github.com/Sulton-Ali/savdo/api/internal/shop"
 )
 
@@ -70,9 +71,21 @@ func run() error {
 	authSvc := auth.NewService(queries, cfg, shopRow.ID)
 	shopSvc := shop.NewService(pool, queries)
 
+	// LocalStorage writes under Config.MediaDir (ADR-008); mediaSvc caps
+	// an upload's file part at Config.MediaMaxBytes and builds derivative
+	// URLs under Config.MediaBaseURL. In dev the API also serves the same
+	// directory itself (devMediaDir below); in prod Caddy does
+	// (docs/07-DEVOPS.md § Production), so devMediaDir stays empty there.
+	mediaStorage := media.NewLocalStorage(cfg.MediaDir, cfg.MediaBaseURL)
+	mediaSvc := media.NewService(queries, mediaStorage, cfg.MediaBaseURL, cfg.MediaMaxBytes)
+	var devMediaDir string
+	if cfg.Env != "prod" {
+		devMediaDir = cfg.MediaDir
+	}
+
 	srv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           httpx.NewRouter(logger, pool, authSvc, shopSvc),
+		Handler:           httpx.NewRouter(logger, pool, authSvc, shopSvc, mediaSvc, devMediaDir),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      15 * time.Second,

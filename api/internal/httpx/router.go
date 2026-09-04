@@ -16,6 +16,7 @@ import (
 	"github.com/Sulton-Ali/savdo/api/gen"
 	"github.com/Sulton-Ali/savdo/api/internal/apierr"
 	"github.com/Sulton-Ali/savdo/api/internal/auth"
+	"github.com/Sulton-Ali/savdo/api/internal/media"
 	"github.com/Sulton-Ali/savdo/api/internal/shop"
 )
 
@@ -29,12 +30,18 @@ import (
 // listing only GetHealthz/GetReadyz/Login (internal/auth/middleware.go) —
 // and the five `/auth/*` operations via auth.NewHandler. shopSvc backs
 // the nine `/shop`, `/locations` and `/staff` operations via
-// shop.NewHandler, forwarded from server's own methods (shop.go).
-func NewRouter(logger *slog.Logger, pool *pgxpool.Pool, authSvc *auth.Service, shopSvc *shop.Service) http.Handler {
+// shop.NewHandler, forwarded from server's own methods (shop.go). mediaSvc
+// backs POST /media via media.NewHandler, forwarded from media.go.
+// devMediaDir, when non-empty, additionally mounts GET /media/ as a
+// direct static file server over that directory (media.DevHandler) — cmd/
+// api passes Config.MediaDir here only when Config.Env != "prod"
+// (docs/07-DEVOPS.md § Local development; § Production: Caddy serves the
+// same volume there instead, so this stays unmounted).
+func NewRouter(logger *slog.Logger, pool *pgxpool.Pool, authSvc *auth.Service, shopSvc *shop.Service, mediaSvc *media.Service, devMediaDir string) http.Handler {
 	mux := http.NewServeMux()
 
 	strictHandler := gen.NewStrictHandlerWithOptions(
-		server{pool: pool, Handler: auth.NewHandler(authSvc), shop: shop.NewHandler(shopSvc)},
+		server{pool: pool, Handler: auth.NewHandler(authSvc), shop: shop.NewHandler(shopSvc), media: media.NewHandler(mediaSvc)},
 		[]gen.StrictMiddlewareFunc{authSvc.Middleware},
 		gen.StrictHTTPServerOptions{
 			RequestErrorHandlerFunc:  writeRequestError,
@@ -47,6 +54,10 @@ func NewRouter(logger *slog.Logger, pool *pgxpool.Pool, authSvc *auth.Service, s
 		BaseRouter:       mux,
 		ErrorHandlerFunc: writeRequestError,
 	})
+
+	if devMediaDir != "" {
+		mux.Handle("/media/", http.StripPrefix("/media/", media.DevHandler(devMediaDir)))
+	}
 
 	var handler http.Handler = mux
 	handler = requestLogger(logger)(handler)
