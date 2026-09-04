@@ -42,7 +42,10 @@
     "locations": "Filiallar",
     "suppliers": "Yetkazib beruvchilar",
     "purchases": "Xaridlar",
-    "settings": "Sozlamalar"
+    "settings": "Sozlamalar",
+    "stockLevels": "Qoldiqlar",
+    "stockMovements": "Ombor harakatlari",
+    "stockLow": "Kam qoldiq"
   },
   "auth": {
     "login": {
@@ -125,7 +128,89 @@
       "timezone": "Vaqt zonasi",
       "defaultLocale": "Standart til",
       "allowNegativeStock": "Manfiy qoldiqqa ruxsat berish",
-      "updateCostOnPurchase": "Xaridda tannarxni yangilash"
+      "updateCostOnPurchase": "Xaridda tannarxni yangilash",
+      "lowStockThreshold": "Kam qoldiq chegarasi"
+    }
+  },
+  "stock": {
+    "levels": {
+      "title": "Qoldiqlar",
+      "productPlaceholder": "Mahsulotlarni qidirish",
+      "locationPlaceholder": "Barcha filiallar",
+      "columns": {
+        "product": "Mahsulot",
+        "variant": "Variant",
+        "sku": "SKU",
+        "total": "Jami"
+      }
+    },
+    "movements": {
+      "title": "Ombor harakatlari",
+      "locationPlaceholder": "Barcha filiallar",
+      "kindPlaceholder": "Barcha turlar",
+      "dateRangeLabel": "Sana oralig'i",
+      "columns": {
+        "kind": "Turi",
+        "qty": "Miqdor",
+        "unitCost": "Birlik tannarxi",
+        "reference": "Havola",
+        "reason": "Sabab",
+        "who": "Kim",
+        "when": "Qachon"
+      }
+    },
+    "low": {
+      "title": "Kam qoldiq",
+      "columns": {
+        "product": "Mahsulot",
+        "variant": "Variant",
+        "sku": "SKU",
+        "qty": "Miqdor",
+        "threshold": "Chegara"
+      }
+    },
+    "actions": {
+      "adjust": "Qoldiqni tuzatish",
+      "transfer": "Qoldiqni ko‘chirish"
+    },
+    "fields": {
+      "variant": "Variant",
+      "location": "Filial",
+      "fromLocation": "Qayerdan",
+      "toLocation": "Qayerga",
+      "adjustmentQty": "Miqdor",
+      "adjustmentQtyHint": "Musbat qiymat qoldiqni oshiradi (masalan, topilgan), manfiy qiymat kamaytiradi (masalan, shikastlangan yoki yo‘qolgan).",
+      "transferQty": "Miqdor",
+      "reason": "Sabab",
+      "note": "Izoh"
+    },
+    "errors": {
+      "variantRequired": "Variantni tanlang",
+      "locationRequired": "Filialni tanlang",
+      "qtyRequired": "Miqdorni kiriting",
+      "reasonRequired": "Sababni tanlang",
+      "sameLocation": "Boshqa filialni tanlang",
+      "insufficient": "Faqat {{available}} mavjud"
+    },
+    "adjustmentReasons": {
+      "count_correction": "Hisob-kitob tuzatishi",
+      "damaged": "Shikastlangan",
+      "lost": "Yo‘qolgan",
+      "found": "Topilgan",
+      "other": "Boshqa"
+    },
+    "movementKinds": {
+      "purchase_in": "Xarid",
+      "sale_out": "Sotuv",
+      "sale_void_in": "Sotuv bekor qilindi",
+      "return_in": "Qaytarish",
+      "adjustment": "Tuzatish",
+      "transfer_out": "Ko‘chirish (chiqim)",
+      "transfer_in": "Ko‘chirish (kirim)"
+    },
+    "picker": {
+      "product": "Mahsulotni qidirish",
+      "variant": "Variantni tanlang"
     }
   },
   "suppliers": {
@@ -253,8 +338,10 @@
         "basePrice": "Asosiy narx",
         "costPrice": "Tannarx",
         "promoPrice": "Aksiya narxi",
-        "promoRange": "Aksiya muddati"
-      }
+        "promoRange": "Aksiya muddati",
+        "lowStockThreshold": "Kam qoldiq chegarasi"
+      },
+      "lowStockThresholdHint": "Do‘kon standart qiymatidan foydalanish uchun bo‘sh qoldiring."
     },
     "categories": {
       "title": "Kategoriyalar",

@@ -1,7 +1,7 @@
 import { locales } from "@savdo/i18n";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
-import { App, Button, Card, Form, Input, Select, Skeleton, Switch } from "antd";
+import { App, Button, Card, Form, Input, InputNumber, Select, Skeleton, Switch } from "antd";
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { applyApiErrorToForm, notifyApiError } from "../../lib/errors";
@@ -25,6 +25,7 @@ interface SettingsFormValues {
   defaultLocale: (typeof locales)[number];
   allowNegativeStock: boolean;
   updateCostOnPurchase: boolean;
+  lowStockThreshold: number;
 }
 
 export function SettingsPage() {
@@ -44,6 +45,7 @@ export function SettingsPage() {
         defaultLocale: shop.defaultLocale,
         allowNegativeStock: shop.allowNegativeStock,
         updateCostOnPurchase: shop.updateCostOnPurchase,
+        lowStockThreshold: shop.lowStockThreshold,
       });
     }
   }, [shop, form]);
@@ -125,6 +127,13 @@ export function SettingsPage() {
           valuePropName="checked"
         >
           <Switch />
+        </Form.Item>
+        <Form.Item
+          name="lowStockThreshold"
+          label={t("settings.fields.lowStockThreshold")}
+          rules={[{ required: true, type: "integer", min: 0 }]}
+        >
+          <InputNumber min={0} precision={0} style={{ width: "100%" }} />
         </Form.Item>
         <Form.Item>
           <Button type="primary" htmlType="submit" loading={saveMutation.isPending}>

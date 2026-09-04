@@ -42,7 +42,10 @@
     "locations": "Locations",
     "suppliers": "Suppliers",
     "purchases": "Purchases",
-    "settings": "Settings"
+    "settings": "Settings",
+    "stockLevels": "Stock levels",
+    "stockMovements": "Stock movements",
+    "stockLow": "Low stock"
   },
   "auth": {
     "login": {
@@ -125,7 +128,89 @@
       "timezone": "Timezone",
       "defaultLocale": "Default language",
       "allowNegativeStock": "Allow negative stock",
-      "updateCostOnPurchase": "Update cost on purchase"
+      "updateCostOnPurchase": "Update cost on purchase",
+      "lowStockThreshold": "Low stock threshold"
+    }
+  },
+  "stock": {
+    "levels": {
+      "title": "Stock levels",
+      "productPlaceholder": "Search products",
+      "locationPlaceholder": "All locations",
+      "columns": {
+        "product": "Product",
+        "variant": "Variant",
+        "sku": "SKU",
+        "total": "Total"
+      }
+    },
+    "movements": {
+      "title": "Stock movements",
+      "locationPlaceholder": "All locations",
+      "kindPlaceholder": "All kinds",
+      "dateRangeLabel": "Date range",
+      "columns": {
+        "kind": "Kind",
+        "qty": "Qty",
+        "unitCost": "Unit cost",
+        "reference": "Reference",
+        "reason": "Reason",
+        "who": "By",
+        "when": "When"
+      }
+    },
+    "low": {
+      "title": "Low stock",
+      "columns": {
+        "product": "Product",
+        "variant": "Variant",
+        "sku": "SKU",
+        "qty": "Qty",
+        "threshold": "Threshold"
+      }
+    },
+    "actions": {
+      "adjust": "Adjust stock",
+      "transfer": "Transfer stock"
+    },
+    "fields": {
+      "variant": "Variant",
+      "location": "Location",
+      "fromLocation": "From location",
+      "toLocation": "To location",
+      "adjustmentQty": "Quantity",
+      "adjustmentQtyHint": "Positive adds stock (e.g. found), negative removes it (e.g. damaged or lost).",
+      "transferQty": "Quantity",
+      "reason": "Reason",
+      "note": "Note"
+    },
+    "errors": {
+      "variantRequired": "Select a variant",
+      "locationRequired": "Select a location",
+      "qtyRequired": "Enter a quantity",
+      "reasonRequired": "Select a reason",
+      "sameLocation": "Choose a different location",
+      "insufficient": "Only {{available}} available"
+    },
+    "adjustmentReasons": {
+      "count_correction": "Count correction",
+      "damaged": "Damaged",
+      "lost": "Lost",
+      "found": "Found",
+      "other": "Other"
+    },
+    "movementKinds": {
+      "purchase_in": "Purchase",
+      "sale_out": "Sale",
+      "sale_void_in": "Sale void",
+      "return_in": "Return",
+      "adjustment": "Adjustment",
+      "transfer_out": "Transfer out",
+      "transfer_in": "Transfer in"
+    },
+    "picker": {
+      "product": "Search product",
+      "variant": "Select variant"
     }
   },
   "suppliers": {
@@ -253,8 +338,10 @@
         "basePrice": "Base price",
         "costPrice": "Cost price",
         "promoPrice": "Promo price",
-        "promoRange": "Promo period"
-      }
+        "promoRange": "Promo period",
+        "lowStockThreshold": "Low stock threshold"
+      },
+      "lowStockThresholdHint": "Leave empty to use the shop default."
     },
     "categories": {
       "title": "Categories",

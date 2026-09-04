@@ -14,6 +14,9 @@ import { purchaseNewRoute } from "./routes/app/purchaseNewRoute";
 import { purchasesRoute } from "./routes/app/purchasesRoute";
 import { settingsRoute } from "./routes/app/settingsRoute";
 import { staffRoute } from "./routes/app/staffRoute";
+import { stockLevelsRoute } from "./routes/app/stockLevelsRoute";
+import { stockLowRoute } from "./routes/app/stockLowRoute";
+import { stockMovementsRoute } from "./routes/app/stockMovementsRoute";
 import { suppliersRoute } from "./routes/app/suppliersRoute";
 import { loginRoute } from "./routes/login/loginRoute";
 import { rootRoute } from "./routes/root";
@@ -36,6 +39,9 @@ const routeTree = rootRoute.addChildren([
     purchaseNewRoute,
     purchaseEditRoute,
     settingsRoute,
+    stockLevelsRoute,
+    stockMovementsRoute,
+    stockLowRoute,
   ]),
 ]);
 

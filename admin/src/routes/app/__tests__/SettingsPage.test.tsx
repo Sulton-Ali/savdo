@@ -5,9 +5,9 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { App as AntApp } from "antd";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../../lib/api", () => ({
   api: { GET: vi.fn(), POST: vi.fn(), PATCH: vi.fn() },
@@ -75,6 +75,10 @@ describe("SettingsPage", () => {
     } as never);
   });
 
+  afterEach(() => {
+    cleanup();
+  });
+
   it("posts a ShopPatch on save and shows the saved notification", async () => {
     mockedApi.PATCH.mockResolvedValueOnce({
       data: { ...shop, name: "New Shop Name" },
@@ -97,10 +101,41 @@ describe("SettingsPage", () => {
           defaultLocale: "uz",
           allowNegativeStock: false,
           updateCostOnPurchase: true,
+          lowStockThreshold: 2,
         },
       });
     });
 
     expect(await screen.findByText("Settings saved")).toBeTruthy();
+  });
+
+  // T6b (D-44): the shop-wide default low-stock threshold lives next to the
+  // two stock switches.
+  it("posts a changed lowStockThreshold as part of the ShopPatch", async () => {
+    mockedApi.PATCH.mockResolvedValueOnce({
+      data: { ...shop, lowStockThreshold: 5 },
+      error: undefined,
+      response: new Response(null, { status: 200 }),
+    } as never);
+
+    renderPage();
+
+    const thresholdInput = await screen.findByLabelText("Low stock threshold");
+    fireEvent.change(thresholdInput, { target: { value: "5" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(mockedApi.PATCH).toHaveBeenCalledWith("/shop", {
+        body: {
+          name: "Test Shop",
+          timezone: "Asia/Tashkent",
+          defaultLocale: "uz",
+          allowNegativeStock: false,
+          updateCostOnPurchase: true,
+          lowStockThreshold: 5,
+        },
+      });
+    });
   });
 });
