@@ -2,8 +2,6 @@ package media
 
 import (
 	"fmt"
-	"path/filepath"
-	"strings"
 
 	"github.com/google/uuid"
 
@@ -23,27 +21,31 @@ const (
 	fullLongestSide  = 1600
 )
 
-// originalKey builds the storage key for an uploaded original:
-// "<shop_id>/<yyyy>/<mm>/<media_id>.<ext>" (docs/06-ROADMAP.md Phase 2 T3
-// spec). ext comes from the sniffed content type (service.go) — never
-// from the client's filename.
-func originalKey(shopID, id uuid.UUID, year int, month int, ext string) string {
-	return fmt.Sprintf("%s/%04d/%02d/%s.%s", shopID, year, month, id, ext)
+// keyStem builds the storage key stem an upload's three WebP derivatives
+// share: "<shop_id>/<yyyy>/<mm>/<media_id>" — this is also
+// media_files.storage_key (orchestrator decision O-16). There is
+// deliberately no extension and no key for the original at all: only the
+// three derivatives (below) are ever written to disk. The original's
+// bytes are decoded, hashed and then discarded — never stored, so there
+// is nothing to serve under a guessable name and no path for an
+// uploaded file's own bytes (EXIF, or a crafted polyglot payload sharing
+// the file with some other format) to reach an HTTP response.
+func keyStem(shopID, id uuid.UUID, year int, month int) string {
+	return fmt.Sprintf("%s/%04d/%02d/%s", shopID, year, month, id)
 }
 
-// derivativeKey rewrites an original storage key into one of its three
-// WebP derivatives by replacing the original extension with
-// "<suffix>.webp" — e.g. ".../abc.jpg" + suffixThumb -> ".../abc_thumb.webp".
-func derivativeKey(original, suffix string) string {
-	ext := filepath.Ext(original)
-	return strings.TrimSuffix(original, ext) + suffix + ".webp"
+// derivativeKey appends one of the three WebP derivative suffixes to a
+// storage key stem — e.g. stem + suffixThumb -> "<stem>_thumb.webp".
+func derivativeKey(stem, suffix string) string {
+	return stem + suffix + ".webp"
 }
 
 // URLs builds the MediaUrls (thumb/card/full) a MediaFile or ProductImage
-// response exposes for a media_files row's storage_key, each prefixed
+// response exposes for a media_files row's storage_key (which, per O-16,
+// is the key *stem* — there is no original to link to), each prefixed
 // with baseURL (Config.MediaBaseURL). This is the one place that
-// translates a stored original key into its derivative URLs — the media
-// module's own Handler uses it (handler.go), and catalog (Phase 2 T4,
+// translates a stored stem into its derivative URLs — the media module's
+// own Handler uses it (handler.go), and catalog (Phase 2 T4,
 // product_images) calls it the same way: media.URLs(cfg.MediaBaseURL,
 // mediaFileRow.StorageKey), given only the storage_key a
 // db.GetMediaFile/db.GetMediaFileBySHA256 row carries — no Storage or

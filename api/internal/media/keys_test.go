@@ -6,36 +6,36 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestOriginalKey(t *testing.T) {
+func TestKeyStem(t *testing.T) {
 	shopID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	id := uuid.MustParse("00000000-0000-0000-0000-000000000002")
 
-	got := originalKey(shopID, id, 2026, 9, "jpg")
-	want := shopID.String() + "/2026/09/" + id.String() + ".jpg"
+	got := keyStem(shopID, id, 2026, 9)
+	want := shopID.String() + "/2026/09/" + id.String()
 	if got != want {
-		t.Fatalf("originalKey = %q, want %q", got, want)
+		t.Fatalf("keyStem = %q, want %q", got, want)
 	}
 }
 
 func TestDerivativeKey(t *testing.T) {
 	tests := []struct {
-		original string
-		suffix   string
-		want     string
+		stem   string
+		suffix string
+		want   string
 	}{
-		{"shop/2026/09/id.jpg", suffixThumb, "shop/2026/09/id_thumb.webp"},
-		{"shop/2026/09/id.png", suffixCard, "shop/2026/09/id_card.webp"},
-		{"shop/2026/09/id.webp", suffixFull, "shop/2026/09/id_full.webp"},
+		{"shop/2026/09/id", suffixThumb, "shop/2026/09/id_thumb.webp"},
+		{"shop/2026/09/id", suffixCard, "shop/2026/09/id_card.webp"},
+		{"shop/2026/09/id", suffixFull, "shop/2026/09/id_full.webp"},
 	}
 	for _, tt := range tests {
-		if got := derivativeKey(tt.original, tt.suffix); got != tt.want {
-			t.Errorf("derivativeKey(%q, %q) = %q, want %q", tt.original, tt.suffix, got, tt.want)
+		if got := derivativeKey(tt.stem, tt.suffix); got != tt.want {
+			t.Errorf("derivativeKey(%q, %q) = %q, want %q", tt.stem, tt.suffix, got, tt.want)
 		}
 	}
 }
 
 func TestURLs(t *testing.T) {
-	got := URLs("/media", "shop/2026/09/id.jpg")
+	got := URLs("/media", "shop/2026/09/id")
 	want := struct{ Thumb, Card, Full string }{
 		Thumb: "/media/shop/2026/09/id_thumb.webp",
 		Card:  "/media/shop/2026/09/id_card.webp",
@@ -46,7 +46,7 @@ func TestURLs(t *testing.T) {
 	}
 
 	// A trailing slash on baseURL must not produce a double slash.
-	got2 := URLs("/media/", "shop/2026/09/id.jpg")
+	got2 := URLs("/media/", "shop/2026/09/id")
 	if got2.Thumb != want.Thumb {
 		t.Fatalf("URLs with trailing-slash baseURL: Thumb = %q, want %q", got2.Thumb, want.Thumb)
 	}

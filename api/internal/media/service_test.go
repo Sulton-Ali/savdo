@@ -4,12 +4,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
+	"hash/crc32"
 	"image"
 	"image/jpeg"
 	"image/png"
 	"io"
+	"runtime"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -61,11 +66,12 @@ func jpegBytes(t *testing.T, w, h int) []byte {
 }
 
 // withFakeEXIF inserts a synthetic APP1 "Exif" segment right after a
-// JPEG's SOI marker — enough for a test to assert the original keeps it
-// and every WebP derivative (re-encoded from the decoded pixels, not
-// copied bytes) does not. Go's image/jpeg decoder skips any APPn segment
-// it doesn't specifically parse (APP0/APP14), so this is decodable like
-// any ordinary EXIF-carrying JPEG a camera or phone produces.
+// JPEG's SOI marker — the same mechanism a polyglot file (one crafted to
+// also be valid as some other format via an embedded payload) would use
+// to smuggle a second payload inside an otherwise-ordinary JPEG. Go's
+// image/jpeg decoder skips any APPn segment it doesn't specifically parse
+// (APP0/APP14), so this is decodable like any ordinary EXIF-carrying JPEG
+// a camera or phone produces.
 func withFakeEXIF(jpg []byte) []byte {
 	payload := append([]byte("Exif\x00\x00"), []byte("FAKE-EXIF-PAYLOAD-FOR-TEST-ONLY")...)
 	segLen := len(payload) + 2
@@ -84,7 +90,53 @@ func withFakeEXIF(jpg []byte) []byte {
 	return out
 }
 
+// craftedPNGHeader hand-builds a minimal, otherwise-empty PNG (signature +
+// IHDR + IEND, no pixel data at all) declaring width×height. image.Decode
+// would fail on it (there is no IDAT chunk to decode pixels from) — which
+// is exactly why these tests use it only to prove image.DecodeConfig-based
+// rejection happens *before* Upload ever calls the real image.Decode: a
+// well-formed PNG decoder only needs to read through IHDR to answer
+// DecodeConfig, so this is enough to make Upload see the claimed
+// dimensions without ever needing a real, fully-decodable multi-gigabyte
+// image on disk or in memory.
+func craftedPNGHeader(t *testing.T, width, height uint32) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	buf.Write([]byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'})
+
+	var ihdr bytes.Buffer
+	_ = binary.Write(&ihdr, binary.BigEndian, width)
+	_ = binary.Write(&ihdr, binary.BigEndian, height)
+	ihdr.WriteByte(8) // bit depth
+	ihdr.WriteByte(6) // color type: truecolor + alpha
+	ihdr.WriteByte(0) // compression method
+	ihdr.WriteByte(0) // filter method
+	ihdr.WriteByte(0) // interlace method
+	writePNGChunk(&buf, "IHDR", ihdr.Bytes())
+	writePNGChunk(&buf, "IEND", nil)
+	return buf.Bytes()
+}
+
+func writePNGChunk(buf *bytes.Buffer, typ string, data []byte) {
+	n := len(data)
+	if n > 0xFFFFFFFF {
+		panic("test fixture: chunk data too large for a 4-byte PNG chunk length")
+	}
+	var lenBytes [4]byte
+	binary.BigEndian.PutUint32(lenBytes[:], uint32(n))
+	buf.Write(lenBytes[:])
+	chunk := append([]byte(typ), data...)
+	buf.Write(chunk)
+	var crcBytes [4]byte
+	binary.BigEndian.PutUint32(crcBytes[:], crc32.ChecksumIEEE(chunk))
+	buf.Write(crcBytes[:])
+}
+
 func newTestService(t *testing.T) (*Service, *db.Queries, db.Shop, db.User) {
+	return newTestServiceWithConcurrency(t, 2)
+}
+
+func newTestServiceWithConcurrency(t *testing.T, concurrency int) (*Service, *db.Queries, db.Shop, db.User) {
 	t.Helper()
 	pool := testdb.New(t)
 	testdb.Truncate(t, pool)
@@ -93,12 +145,15 @@ func newTestService(t *testing.T) (*Service, *db.Queries, db.Shop, db.User) {
 	shopRow := seedShop(ctx, t, q, "media-shop")
 	userRow := seedUser(ctx, t, q, shopRow.ID, "uploader")
 
-	storage := NewLocalStorage(t.TempDir(), "/media")
-	svc := NewService(q, storage, "/media", 10<<20)
+	storage, err := NewLocalStorage(t.TempDir(), "/media")
+	if err != nil {
+		t.Fatalf("NewLocalStorage: %v", err)
+	}
+	svc := NewService(q, storage, "/media", 10<<20, concurrency)
 	return svc, q, shopRow, userRow
 }
 
-func TestUpload_pngCreatesOriginalAndThreeDerivatives(t *testing.T) {
+func TestUpload_pngCreatesThreeDerivativesOnly(t *testing.T) {
 	svc, q, shopRow, userRow := newTestService(t)
 	ctx := context.Background()
 
@@ -127,18 +182,11 @@ func TestUpload_pngCreatesOriginalAndThreeDerivatives(t *testing.T) {
 		t.Errorf("fetched StorageKey = %q, want %q", fetched.StorageKey, row.StorageKey)
 	}
 
-	// Original bytes are stored unmodified.
-	rc, err := svc.storage.Open(ctx, row.StorageKey)
-	if err != nil {
-		t.Fatalf("Open original: %v", err)
-	}
-	originalOnDisk, err := io.ReadAll(rc)
-	_ = rc.Close()
-	if err != nil {
-		t.Fatalf("read original: %v", err)
-	}
-	if !bytes.Equal(originalOnDisk, data) {
-		t.Error("stored original bytes differ from the uploaded bytes")
+	// O-16: the original is never stored — there is no file at the bare
+	// stem itself, only at the three derivative keys.
+	if rc, err := svc.storage.Open(ctx, row.StorageKey); err == nil {
+		_ = rc.Close()
+		t.Fatalf("an original file exists on disk at the bare stem %q; O-16 says it must not", row.StorageKey)
 	}
 
 	// Three derivatives exist, are valid WebP, and have the expected
@@ -199,11 +247,13 @@ func TestUpload_dedupeBySHA256(t *testing.T) {
 	}
 }
 
-func TestUpload_jpegDerivativesDropEXIF(t *testing.T) {
-	// Orientation correctness is explicitly out of scope here (docs/06-
-	// ROADMAP.md Phase 2 T3 spec note); this only asserts the EXIF bytes
-	// themselves are gone from every re-encoded derivative while the
-	// stored original — never re-encoded — keeps them.
+// TestUpload_polyglotJPEGYieldsDerivativesOnly is Review B MAJOR 3 / O-16's
+// direct test: a JPEG carrying an embedded second payload (simulated here
+// with a fake EXIF segment, the same smuggling mechanism a genuine
+// polyglot file — one valid as two different formats at once — would use)
+// never reaches disk itself. Only its three re-encoded derivatives do,
+// and none of them carry the payload.
+func TestUpload_polyglotJPEGYieldsDerivativesOnly(t *testing.T) {
 	svc, _, shopRow, userRow := newTestService(t)
 	ctx := context.Background()
 
@@ -217,17 +267,9 @@ func TestUpload_jpegDerivativesDropEXIF(t *testing.T) {
 		t.Fatalf("Upload: %v", err)
 	}
 
-	rc, err := svc.storage.Open(ctx, row.StorageKey)
-	if err != nil {
-		t.Fatalf("Open original: %v", err)
-	}
-	originalOnDisk, err := io.ReadAll(rc)
-	_ = rc.Close()
-	if err != nil {
-		t.Fatalf("read original: %v", err)
-	}
-	if !bytes.Contains(originalOnDisk, []byte("Exif")) {
-		t.Error("stored original lost its EXIF segment; expected it stored unmodified")
+	if rc, err := svc.storage.Open(ctx, row.StorageKey); err == nil {
+		_ = rc.Close()
+		t.Fatalf("an original file exists on disk at the bare stem %q; O-16 says it must not", row.StorageKey)
 	}
 
 	for _, suffix := range []string{suffixThumb, suffixCard, suffixFull} {
@@ -242,7 +284,7 @@ func TestUpload_jpegDerivativesDropEXIF(t *testing.T) {
 			t.Fatalf("read derivative %s: %v", suffix, err)
 		}
 		if bytes.Contains(derived, []byte("Exif")) {
-			t.Errorf("derivative %s retained an EXIF segment; re-encoding should have dropped it", suffix)
+			t.Errorf("derivative %s carried the injected payload; re-encoding should have dropped it", suffix)
 		}
 	}
 }
@@ -272,6 +314,164 @@ func TestUpload_rejectsOverMaxBytes(t *testing.T) {
 	oversized := bytes.Repeat([]byte{0xAB}, 101)
 	_, err := svc.Upload(ctx, shopRow.ID, userRow.ID, bytes.NewReader(oversized))
 	assertValidationFile(t, err, "too_long")
+}
+
+// TestUpload_rejectsDecompressionBombWithoutFullDecode is Review B
+// CRITICAL 1's test: a PNG whose header alone declares 30000×30000 (3.6
+// billion claimed pixels) must be rejected via image.DecodeConfig's
+// cheap, header-only read — never via a real image.Decode, which would
+// try to allocate a pixel buffer around 3.6 GB for this. craftedPNGHeader
+// builds a file with no pixel data at all, so if Upload's ordering ever
+// regressed to decode-then-check, this would fail with either an
+// out-of-memory condition or, at minimum, a large jump in allocated
+// memory — which the runtime.MemStats comparison below asserts against
+// directly, in addition to checking the expected 400.
+func TestUpload_rejectsDecompressionBombWithoutFullDecode(t *testing.T) {
+	svc, _, shopRow, userRow := newTestService(t)
+	ctx := context.Background()
+
+	data := craftedPNGHeader(t, 30000, 30000)
+
+	runtime.GC()
+	var before runtime.MemStats
+	runtime.ReadMemStats(&before)
+
+	_, err := svc.Upload(ctx, shopRow.ID, userRow.ID, bytes.NewReader(data))
+
+	var after runtime.MemStats
+	runtime.ReadMemStats(&after)
+
+	assertValidationFile(t, err, "invalid")
+
+	allocated := after.TotalAlloc - before.TotalAlloc
+	const tooMuch = 50 << 20 // 50 MiB — a real decode would need ~3.6 GB
+	t.Logf("TotalAlloc grew by %d bytes (%.2f MB) rejecting a 30000x30000 header", allocated, float64(allocated)/(1<<20))
+	if allocated > tooMuch {
+		t.Fatalf("TotalAlloc grew by %d bytes (%.1f MB), want < %d MB — looks like the full image.Decode ran", allocated, float64(allocated)/(1<<20), tooMuch>>20)
+	}
+}
+
+// TestUpload_rejectsHighMegapixelDimensions covers the other half of
+// Review B CRITICAL 1: 6000×5000 stays under maxDimension (8000) on both
+// sides individually, but its 30-megapixel product exceeds maxPixels (24
+// MP) and must still be rejected — again via the cheap DecodeConfig path,
+// not a real decode of a ~30 MP image.
+func TestUpload_rejectsHighMegapixelDimensions(t *testing.T) {
+	svc, _, shopRow, userRow := newTestService(t)
+	ctx := context.Background()
+
+	data := craftedPNGHeader(t, 6000, 5000)
+	_, err := svc.Upload(ctx, shopRow.ID, userRow.ID, bytes.NewReader(data))
+	assertValidationFile(t, err, "invalid")
+}
+
+// TestAcquireDeriveSlot_respectsContextCancellation is Review B MAJOR 4's
+// direct, deterministic test of the one behavior that's otherwise hard to
+// observe through a full Upload call: a request queued for a decode slot
+// must give up the instant its context is done, not wait for the slot
+// regardless.
+func TestAcquireDeriveSlot_respectsContextCancellation(t *testing.T) {
+	sem := make(chan struct{}, 1)
+	sem <- struct{}{} // fill the only slot so acquiring would otherwise block forever
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := acquireDeriveSlot(ctx, sem)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("acquireDeriveSlot with an already-canceled ctx = %v, want context.Canceled", err)
+	}
+}
+
+// TestUpload_concurrencyIsBounded is Review B MAJOR 4's test that the
+// semaphore is exercised, not merely configured: with concurrency forced
+// to 1, three uploads run concurrently must still all succeed, and
+// Service's own inFlight/maxInFlight bookkeeping (service.go) must never
+// have observed more than one goroutine inside the decode/derive section
+// at once — a hard invariant a size-1 buffered channel guarantees
+// regardless of how the goroutines happen to be scheduled, so this
+// assertion is not a timing-dependent probability.
+func TestUpload_concurrencyIsBounded(t *testing.T) {
+	svc, _, shopRow, userRow := newTestServiceWithConcurrency(t, 1)
+	ctx := context.Background()
+
+	const n = 3
+	// Built up front, not inside the goroutines below: t.Fatalf (which
+	// pngBytes/t.Helper can reach) is documented as safe only from the
+	// goroutine running the test itself.
+	datasets := make([][]byte, n)
+	for i := range datasets {
+		// Distinct pixels per upload so sha256 dedupe doesn't collapse
+		// these into a single stored file — each must independently take
+		// a turn through the semaphore.
+		datasets[i] = pngBytes(t, 64+i, 64)
+	}
+
+	var wg sync.WaitGroup
+	errs := make([]error, n)
+	ids := make([]uuid.UUID, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			row, err := svc.Upload(ctx, shopRow.ID, userRow.ID, bytes.NewReader(datasets[i]))
+			errs[i] = err
+			ids[i] = row.ID
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("upload %d: %v", i, err)
+		}
+	}
+	seen := map[uuid.UUID]bool{}
+	for i, id := range ids {
+		if id == uuid.Nil {
+			continue
+		}
+		if seen[id] {
+			t.Errorf("upload %d produced a duplicate id %s", i, id)
+		}
+		seen[id] = true
+	}
+
+	if observedMax := svc.maxInFlight.Load(); observedMax > 1 {
+		t.Fatalf("maxInFlight = %d, want <= 1 (concurrency was set to 1)", observedMax)
+	}
+}
+
+// TestUpload_respectsCtxCancellationWhileWaitingForASlot exercises the
+// same behavior as TestAcquireDeriveSlot_respectsContextCancellation but
+// through the real Upload path: with the single slot held by one
+// in-flight upload, a second upload whose context is already canceled
+// must return promptly with that cancellation, not block.
+func TestUpload_respectsCtxCancellationWhileWaitingForASlot(t *testing.T) {
+	svc, _, shopRow, userRow := newTestServiceWithConcurrency(t, 1)
+
+	// Hold the only slot for the duration of this test.
+	svc.sem <- struct{}{}
+	defer func() { <-svc.sem }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	data := pngBytes(t, 64, 64)
+	done := make(chan error, 1)
+	go func() {
+		_, err := svc.Upload(ctx, shopRow.ID, userRow.ID, bytes.NewReader(data))
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("Upload with a context that will expire while queued = %v, want context.DeadlineExceeded (wrapped)", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Upload did not return within 2s of its context expiring while waiting for a decode slot")
+	}
 }
 
 // assertValidationFile fails the test unless err is an *apierr.Error

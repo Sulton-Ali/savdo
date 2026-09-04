@@ -11,7 +11,10 @@ import (
 
 func TestLocalStorage_PutOpenDelete(t *testing.T) {
 	root := t.TempDir()
-	s := NewLocalStorage(root, "/media")
+	s, err := NewLocalStorage(root, "/media")
+	if err != nil {
+		t.Fatalf("NewLocalStorage: %v", err)
+	}
 	ctx := context.Background()
 	key := "shop-1/2026/09/abc.jpg"
 	content := []byte("hello media")
@@ -63,7 +66,10 @@ func TestLocalStorage_PutOpenDelete(t *testing.T) {
 
 func TestLocalStorage_PutIsAtomic(t *testing.T) {
 	root := t.TempDir()
-	s := NewLocalStorage(root, "/media")
+	s, err := NewLocalStorage(root, "/media")
+	if err != nil {
+		t.Fatalf("NewLocalStorage: %v", err)
+	}
 	ctx := context.Background()
 	key := "shop-1/2026/09/atomic.jpg"
 
@@ -86,7 +92,10 @@ func TestLocalStorage_PutIsAtomic(t *testing.T) {
 
 func TestLocalStorage_RejectsHostileKeys(t *testing.T) {
 	root := t.TempDir()
-	s := NewLocalStorage(root, "/media")
+	s, err := NewLocalStorage(root, "/media")
+	if err != nil {
+		t.Fatalf("NewLocalStorage: %v", err)
+	}
 	ctx := context.Background()
 
 	hostile := []string{
@@ -113,7 +122,10 @@ func TestLocalStorage_RejectsHostileKeys(t *testing.T) {
 
 func TestLocalStorage_OpenMissingKey(t *testing.T) {
 	root := t.TempDir()
-	s := NewLocalStorage(root, "/media")
+	s, err := NewLocalStorage(root, "/media")
+	if err != nil {
+		t.Fatalf("NewLocalStorage: %v", err)
+	}
 
 	if _, err := s.Open(context.Background(), "shop-1/2026/09/missing.jpg"); err == nil {
 		t.Fatal("Open of a missing key: want error, got nil")
