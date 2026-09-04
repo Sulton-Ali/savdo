@@ -51,7 +51,7 @@ func testMediaService() *media.Service {
 // for tests that never exercise a catalogue/product-image route — a nil
 // pool and nil *db.Queries are never dereferenced in that case.
 func testCatalogService() *catalog.Service {
-	return catalog.NewService(nil, nil, "uz")
+	return catalog.NewService(nil, nil, "uz", "/media")
 }
 
 func TestHealthz(t *testing.T) {

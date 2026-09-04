@@ -23,7 +23,7 @@ func newTestHandler(t *testing.T) (*catalog.Handler, *db.Queries, *pgxpool.Pool)
 	pool := testdb.New(t)
 	testdb.Truncate(t, pool)
 	q := db.New(pool)
-	svc := catalog.NewService(pool, q, "uz")
+	svc := catalog.NewService(pool, q, "uz", "/media")
 	return catalog.NewHandler(svc), q, pool
 }
 

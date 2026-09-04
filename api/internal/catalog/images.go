@@ -12,21 +12,25 @@ import (
 	"github.com/Sulton-Ali/savdo/api/internal/apierr"
 	"github.com/Sulton-Ali/savdo/api/internal/auth"
 	"github.com/Sulton-Ali/savdo/api/internal/db"
+	"github.com/Sulton-Ali/savdo/api/internal/media"
 )
 
 // maxProductImages is the "up to 8 images per product" cap (D-34).
 const maxProductImages = 8
 
 // toGenProductImage builds a gen.ProductImage from a joined
-// product_images/media_files row.
-func toGenProductImage(row db.ListProductImagesRow) gen.ProductImage {
+// product_images/media_files row, deriving its thumb/card/full URLs via
+// media.URLs(s.mediaBaseURL, ...) — the same helper the media module's
+// own Handler uses, so a stored storage_key becomes a URL exactly the
+// same way regardless of which module builds the response.
+func (s *Service) toGenProductImage(row db.ListProductImagesRow) gen.ProductImage {
 	return gen.ProductImage{
 		Id:        row.ID,
 		MediaId:   row.MediaID,
 		VariantId: nullableUUID(row.VariantID),
 		SortOrder: int(row.SortOrder),
 		IsCover:   row.IsCover,
-		Urls:      mediaURLs(row.StorageKey),
+		Urls:      media.URLs(s.mediaBaseURL, row.StorageKey),
 	}
 }
 
@@ -40,7 +44,7 @@ func (s *Service) productImagesFor(ctx context.Context, shopID, productID uuid.U
 	}
 	items := make([]gen.ProductImage, len(rows))
 	for i, r := range rows {
-		items[i] = toGenProductImage(r)
+		items[i] = s.toGenProductImage(r)
 	}
 	return items, nil
 }
@@ -69,7 +73,7 @@ func (h *Handler) AddProductImage(ctx context.Context, req gen.AddProductImageRe
 
 	body := req.Body
 
-	media, err := h.svc.q.GetMediaFile(ctx, db.GetMediaFileParams{ShopID: authCtx.ShopID, ID: body.MediaId})
+	mediaFile, err := h.svc.q.GetMediaFile(ctx, db.GetMediaFileParams{ShopID: authCtx.ShopID, ID: body.MediaId})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, apierr.Validation(map[string]string{"mediaId": "invalid"})
@@ -138,7 +142,7 @@ func (h *Handler) AddProductImage(ctx context.Context, req gen.AddProductImageRe
 
 	resp := gen.ProductImage{
 		Id: created.ID, MediaId: created.MediaID, VariantId: nullableUUID(created.VariantID),
-		SortOrder: int(created.SortOrder), IsCover: created.IsCover, Urls: mediaURLs(media.StorageKey),
+		SortOrder: int(created.SortOrder), IsCover: created.IsCover, Urls: media.URLs(h.svc.mediaBaseURL, mediaFile.StorageKey),
 	}
 	return gen.AddProductImage201JSONResponse(resp), nil
 }

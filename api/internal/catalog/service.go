@@ -23,19 +23,26 @@ import (
 // Service holds catalog's dependencies: the pool (needed for the
 // multi-statement writes — product+translations+implicit variant,
 // category slug retry, image cover swap — that must run in one
-// transaction) and the shop's default locale, resolved once at startup
-// (O-11: single-shop MVP) rather than re-queried per request.
+// transaction), the shop's default locale, resolved once at startup
+// (O-11: single-shop MVP) rather than re-queried per request, and the
+// media base URL product images resolve their thumb/card/full links
+// against (media.URLs — see images.go).
 type Service struct {
 	pool          *pgxpool.Pool
 	q             *db.Queries
 	defaultLocale string
+	mediaBaseURL  string
 }
 
 // NewService builds the catalog Service. defaultLocale is the shop's
 // `default_locale` column, used as the locale-fallback target and as the
 // locale a Create's `translations` must include an entry for.
-func NewService(pool *pgxpool.Pool, q *db.Queries, defaultLocale string) *Service {
-	return &Service{pool: pool, q: q, defaultLocale: defaultLocale}
+// mediaBaseURL is Config.MediaBaseURL (the same value media.Service is
+// constructed with), injected rather than read from the environment here
+// so catalog has exactly one source of truth for it, shared with the
+// media module.
+func NewService(pool *pgxpool.Pool, q *db.Queries, defaultLocale, mediaBaseURL string) *Service {
+	return &Service{pool: pool, q: q, defaultLocale: defaultLocale, mediaBaseURL: mediaBaseURL}
 }
 
 // Handler implements catalog's 21 gen.StrictServerInterface operations by

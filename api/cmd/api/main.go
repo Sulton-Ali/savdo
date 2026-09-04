@@ -71,7 +71,7 @@ func run() error {
 
 	authSvc := auth.NewService(queries, cfg, shopRow.ID)
 	shopSvc := shop.NewService(pool, queries)
-	catalogSvc := catalog.NewService(pool, queries, shopRow.DefaultLocale)
+	catalogSvc := catalog.NewService(pool, queries, shopRow.DefaultLocale, cfg.MediaBaseURL)
 
 	// LocalStorage writes under Config.MediaDir (ADR-008); mediaSvc caps
 	// an upload's file part at Config.MediaMaxBytes, bounds concurrent
