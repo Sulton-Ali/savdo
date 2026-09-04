@@ -148,6 +148,7 @@
       "title": "Ombor harakatlari",
       "locationPlaceholder": "Barcha filiallar",
       "kindPlaceholder": "Barcha turlar",
+      "dateRangeLabel": "Sana oralig'i",
       "columns": {
         "kind": "Turi",
         "qty": "Miqdor",

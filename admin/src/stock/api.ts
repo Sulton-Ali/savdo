@@ -136,12 +136,38 @@ export async function fetchAllLocations(): Promise<Location[]> {
   return all;
 }
 
+/** Parses a decimal quantity string into its value in milli-units — an
+ * integer at the wire's 3-decimal precision (`quantity NUMERIC(12,3)`,
+ * `docs/04-DATA-MODEL.md` § 8) — via string splitting and `BigInt`, never
+ * `Number`, so summing many values never drifts the way float addition can
+ * (`0.1 + 0.2 !== 0.3`). */
+function toMilliUnits(value: string): bigint {
+  const trimmed = value.trim();
+  const negative = trimmed.startsWith("-");
+  const unsigned = negative ? trimmed.slice(1) : trimmed;
+  const [wholePart, fracPart = ""] = unsigned.split(".");
+  const frac = `${fracPart}000`.slice(0, 3);
+  const milli = BigInt(wholePart || "0") * 1000n + BigInt(frac || "0");
+  return negative ? -milli : milli;
+}
+
+/** Inverse of `toMilliUnits`: milli-units back to a 3-decimal wire string. */
+function fromMilliUnits(milli: bigint): string {
+  const negative = milli < 0n;
+  const abs = negative ? -milli : milli;
+  const whole = abs / 1000n;
+  const frac = abs % 1000n;
+  return `${negative ? "-" : ""}${whole}.${frac.toString().padStart(3, "0")}`;
+}
+
 /** Sums decimal quantity strings (`ADR-007`) for the levels grid's total
- * column, formatted back to the same 3-decimal-place wire precision
- * (`quantity NUMERIC(12,3)`, `docs/04-DATA-MODEL.md` § 8). */
+ * column, formatted back to the same 3-decimal-place wire precision — fixed-
+ * point via `BigInt` milli-units, not float addition (`sumQty(["0.1",
+ * "0.2", "0.3"])` must be exactly `"0.600"`, which `Number` addition alone
+ * cannot guarantee). */
 export function sumQty(values: string[]): string {
-  const total = values.reduce((sum, value) => sum + Number(value), 0);
-  return total.toFixed(3);
+  const total = values.reduce((sum, value) => sum + toMilliUnits(value), 0n);
+  return fromMilliUnits(total);
 }
 
 /** Trims a decimal quantity string's trailing zeros for display (`"3.000"`

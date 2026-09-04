@@ -2,6 +2,7 @@ import type { components } from "@savdo/api-client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { App as AntApp, ConfigProvider } from "antd";
+import dayjs from "dayjs";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../../lib/api", () => ({
@@ -14,6 +15,8 @@ import { StockMovementsPage } from "../StockMovementsPage";
 
 type StockMovement = components["schemas"]["StockMovement"];
 type Location = components["schemas"]["Location"];
+type Product = components["schemas"]["Product"];
+type Variant = components["schemas"]["Variant"];
 
 const mockedApi = vi.mocked(api, { deep: true });
 
@@ -22,6 +25,34 @@ const locationA: Location = {
   name: "Main Store",
   kind: "store",
   isDefault: true,
+  isActive: true,
+};
+
+const product: Product = {
+  id: "p1",
+  categoryId: null,
+  slug: "t-shirt",
+  sku: null,
+  unitId: "u1",
+  basePrice: "10000.00",
+  promoPrice: null,
+  promoFrom: null,
+  promoTo: null,
+  isActive: true,
+  isFeatured: false,
+  name: "T-Shirt",
+  description: null,
+  locale: "en",
+  translationFallback: false,
+  lowStockThreshold: null,
+};
+
+const variant: Variant = {
+  id: "v1",
+  sku: "SKU1",
+  barcode: null,
+  attributes: { size: "M" },
+  priceOverride: null,
   isActive: true,
 };
 
@@ -71,13 +102,39 @@ function mockEndpoints() {
     }
     if (path === "/products") {
       return Promise.resolve({
-        data: { items: [], nextCursor: null },
+        data: { items: [product], nextCursor: null },
+        error: undefined,
+        response: new Response(null, { status: 200 }),
+      });
+    }
+    if (path === "/products/{id}/variants") {
+      return Promise.resolve({
+        data: { items: [variant] },
         error: undefined,
         response: new Response(null, { status: 200 }),
       });
     }
     throw new Error(`unexpected GET ${path}`);
   }) as never);
+}
+
+/** rc-select keeps a closed dropdown's option nodes in the DOM (just
+ * hidden), so once more than one `Select` has ever been opened, a plain
+ * `findByText` on an option label can match a stale, already-closed
+ * dropdown too. Always pick the *last* matching `.ant-select-item-option`
+ * node — the most recently opened dropdown's (mirrors
+ * `StockActionsDrawer.test.tsx`). */
+async function selectOption(text: string) {
+  await waitFor(() => {
+    const matches = Array.from(document.querySelectorAll(".ant-select-item-option")).filter(
+      (el) => el.textContent === text,
+    );
+    expect(matches.length).toBeGreaterThan(0);
+  });
+  const matches = Array.from(document.querySelectorAll(".ant-select-item-option")).filter(
+    (el) => el.textContent === text,
+  );
+  fireEvent.click(matches[matches.length - 1] as HTMLElement);
 }
 
 describe("StockMovementsPage", () => {
@@ -132,6 +189,59 @@ describe("StockMovementsPage", () => {
             ?.params?.query?.kind === "adjustment",
       );
       expect(call).toBeTruthy();
+    });
+  });
+
+  it("requests /stock/movements with variantId once a variant is picked", async () => {
+    mockEndpoints();
+    renderPage();
+    await screen.findByText("Purchase");
+
+    fireEvent.mouseDown(screen.getByLabelText("Search product"));
+    await selectOption("T-Shirt");
+    fireEvent.mouseDown(await screen.findByLabelText("Select variant"));
+    await selectOption("size: M — SKU SKU1");
+
+    await waitFor(() => {
+      const call = mockedApi.GET.mock.calls.find(
+        (entry) =>
+          entry[0] === "/stock/movements" &&
+          (entry[1] as never as { params: { query: { variantId?: string } } })?.params?.query
+            ?.variantId === "v1",
+      );
+      expect(call).toBeTruthy();
+    });
+  });
+
+  it("requests /stock/movements with from/to as start/end-of-day ISO strings once a date range is picked", async () => {
+    mockEndpoints();
+    renderPage();
+    await screen.findByText("Purchase");
+
+    const [startInput, endInput] = screen.getAllByLabelText("Date range");
+    fireEvent.mouseDown(startInput as HTMLElement);
+    fireEvent.change(startInput as HTMLElement, { target: { value: "2026-01-05" } });
+    fireEvent.keyDown(startInput as HTMLElement, { key: "Enter", code: "Enter" });
+    fireEvent.change(endInput as HTMLElement, { target: { value: "2026-01-10" } });
+    fireEvent.keyDown(endInput as HTMLElement, { key: "Enter", code: "Enter" });
+
+    const expectedFrom = dayjs("2026-01-05").startOf("day").toISOString();
+    const expectedTo = dayjs("2026-01-10").endOf("day").toISOString();
+
+    await waitFor(() => {
+      const call = mockedApi.GET.mock.calls.find(
+        (entry) =>
+          entry[0] === "/stock/movements" &&
+          (entry[1] as never as { params: { query: { from?: string; to?: string } } })?.params
+            ?.query?.from === expectedFrom,
+      );
+      expect(call).toBeTruthy();
+      if (!call) {
+        return;
+      }
+      const query = (call[1] as never as { params: { query: { from?: string; to?: string } } })
+        .params.query;
+      expect(query.to).toBe(expectedTo);
     });
   });
 });

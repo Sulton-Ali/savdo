@@ -81,15 +81,31 @@ function mockGetEndpoints(locations: Location[] = [locationA, locationB]) {
   }) as never);
 }
 
-function renderDrawer(node: ReactNode) {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+function wrap(node: ReactNode, queryClient: QueryClient) {
+  return (
     <ConfigProvider theme={{ token: { motion: false } }}>
       <QueryClientProvider client={queryClient}>
         <AntApp>{node}</AntApp>
       </QueryClientProvider>
-    </ConfigProvider>,
+    </ConfigProvider>
   );
+}
+
+/** Renders `node` wrapped the same way every test in this file needs
+ * (`ConfigProvider`/`QueryClientProvider`/`AntApp`). Accepts an existing
+ * `queryClient` so a test can spy on it (`invalidateQueries`) or drive a
+ * close/reopen cycle via `rerenderWith`, which re-wraps the replacement
+ * node with the *same* client rather than a fresh one. */
+function renderDrawer(
+  node: ReactNode,
+  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+) {
+  const utils = render(wrap(node, queryClient));
+  return {
+    ...utils,
+    queryClient,
+    rerenderWith: (next: ReactNode) => utils.rerender(wrap(next, queryClient)),
+  };
 }
 
 /** rc-select keeps a closed dropdown's option nodes in the DOM (just
@@ -205,6 +221,108 @@ describe("StockAdjustmentDrawer", () => {
     expect(secondCall[1].params.header["Idempotency-Key"]).toBe(key);
   });
 
+  it("generates a new Idempotency-Key after the drawer is closed and reopened", async () => {
+    mockGetEndpoints();
+    mockedApi.POST.mockResolvedValue(
+      jsonResult(
+        {
+          id: "mv1",
+          variantId: "v1",
+          locationId: "l1",
+          kind: "adjustment",
+          qty: "1.000",
+          unitCost: null,
+          refType: null,
+          refId: null,
+          reason: "found",
+          note: null,
+          createdBy: "u1",
+          createdAt: "2026-01-05T10:00:00Z",
+        },
+        201,
+      ),
+    );
+
+    async function fillAndSubmit() {
+      await pickVariant();
+      fireEvent.mouseDown(screen.getByLabelText("Location"));
+      await selectOption("Main Store");
+      fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "1" } });
+      fireEvent.mouseDown(screen.getByLabelText("Reason"));
+      await selectOption("Found");
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    }
+
+    const onClose = vi.fn();
+    const { rerenderWith } = renderDrawer(<StockAdjustmentDrawer open onClose={onClose} />);
+
+    await fillAndSubmit();
+    await waitFor(() => expect(mockedApi.POST).toHaveBeenCalledTimes(1));
+    const firstKey = (
+      mockedApi.POST.mock.calls[0] as unknown as [
+        string,
+        { params: { header: { "Idempotency-Key": string } } },
+      ]
+    )[1].params.header["Idempotency-Key"];
+
+    // Close, then reopen — a fresh drawer session must get a fresh key,
+    // never the one from before it closed.
+    rerenderWith(<StockAdjustmentDrawer open={false} onClose={onClose} />);
+    rerenderWith(<StockAdjustmentDrawer open onClose={onClose} />);
+
+    await fillAndSubmit();
+    await waitFor(() => expect(mockedApi.POST).toHaveBeenCalledTimes(2));
+    const secondKey = (
+      mockedApi.POST.mock.calls[1] as unknown as [
+        string,
+        { params: { header: { "Idempotency-Key": string } } },
+      ]
+    )[1].params.header["Idempotency-Key"];
+
+    expect(secondKey).not.toBe(firstKey);
+  });
+
+  it("invalidates stock levels, movements and low-stock queries on a successful adjustment", async () => {
+    mockGetEndpoints();
+    mockedApi.POST.mockResolvedValueOnce(
+      jsonResult(
+        {
+          id: "mv1",
+          variantId: "v1",
+          locationId: "l1",
+          kind: "adjustment",
+          qty: "1.000",
+          unitCost: null,
+          refType: null,
+          refId: null,
+          reason: "found",
+          note: null,
+          createdBy: "u1",
+          createdAt: "2026-01-05T10:00:00Z",
+        },
+        201,
+      ),
+    );
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    renderDrawer(<StockAdjustmentDrawer open onClose={vi.fn()} />, queryClient);
+
+    await pickVariant();
+    fireEvent.mouseDown(screen.getByLabelText("Location"));
+    await selectOption("Main Store");
+    fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "1" } });
+    fireEvent.mouseDown(screen.getByLabelText("Reason"));
+    await selectOption("Found");
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["stock", "levels"] });
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["stock", "movements"] });
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["stock", "low"] });
+    });
+  });
+
   it("shows the available qty from STOCK_INSUFFICIENT details on the qty field", async () => {
     mockGetEndpoints();
     mockedApi.POST.mockResolvedValueOnce({
@@ -296,6 +414,62 @@ describe("StockTransferDrawer", () => {
     expect(await screen.findByText("Only 0.000 available")).toBeTruthy();
     expect(mockedApi.POST).toHaveBeenCalledWith("/stock/transfers", {
       body: { variantId: "v1", fromLocationId: "l1", toLocationId: "l2", qty: "3.000" },
+    });
+  });
+
+  it("invalidates stock levels, movements and low-stock queries on a successful transfer", async () => {
+    mockGetEndpoints();
+    mockedApi.POST.mockResolvedValueOnce(
+      jsonResult({
+        items: [
+          {
+            id: "mv1",
+            variantId: "v1",
+            locationId: "l1",
+            kind: "transfer_out",
+            qty: "-1.000",
+            unitCost: null,
+            refType: null,
+            refId: null,
+            reason: null,
+            note: null,
+            createdBy: "u1",
+            createdAt: "2026-01-05T10:00:00Z",
+          },
+          {
+            id: "mv2",
+            variantId: "v1",
+            locationId: "l2",
+            kind: "transfer_in",
+            qty: "1.000",
+            unitCost: null,
+            refType: null,
+            refId: null,
+            reason: null,
+            note: null,
+            createdBy: "u1",
+            createdAt: "2026-01-05T10:00:00Z",
+          },
+        ],
+      }),
+    );
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    renderDrawer(<StockTransferDrawer open onClose={vi.fn()} />, queryClient);
+
+    await pickVariant();
+    fireEvent.mouseDown(screen.getByLabelText("From location"));
+    await selectOption("Main Store");
+    fireEvent.mouseDown(screen.getByLabelText("To location"));
+    await selectOption("Warehouse");
+    fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["stock", "levels"] });
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["stock", "movements"] });
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["stock", "low"] });
     });
   });
 });

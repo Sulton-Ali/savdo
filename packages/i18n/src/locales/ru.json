@@ -148,6 +148,7 @@
       "title": "Движения товара",
       "locationPlaceholder": "Все филиалы",
       "kindPlaceholder": "Все типы",
+      "dateRangeLabel": "Период",
       "columns": {
         "kind": "Тип",
         "qty": "Кол-во",

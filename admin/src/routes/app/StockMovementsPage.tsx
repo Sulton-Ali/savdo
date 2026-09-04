@@ -170,7 +170,11 @@ export function StockMovementsPage() {
               label: t(`stock.movementKinds.${value}`),
             }))}
           />
-          <DatePicker.RangePicker value={dateRange} onChange={(value) => setDateRange(value)} />
+          <DatePicker.RangePicker
+            aria-label={t("stock.movements.dateRangeLabel")}
+            value={dateRange}
+            onChange={(value) => setDateRange(value)}
+          />
         </Space>
       </Space>
 

@@ -148,6 +148,7 @@
       "title": "Stock movements",
       "locationPlaceholder": "All locations",
       "kindPlaceholder": "All kinds",
+      "dateRangeLabel": "Date range",
       "columns": {
         "kind": "Kind",
         "qty": "Qty",
