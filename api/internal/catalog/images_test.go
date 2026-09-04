@@ -428,6 +428,123 @@ func TestUpdateProductImage_coverSwapKeepsExactlyOneCover(t *testing.T) {
 	}
 }
 
+func TestUpdateProductImage_clearOnlyCoverPromotesNextBySortOrder(t *testing.T) {
+	h, q, _ := newTestHandler(t)
+	ctx := context.Background()
+	shopRow := seedShop(ctx, t, q, "shop-a")
+	unit := seedUnit(ctx, t, q, shopRow.ID, "pcs")
+	product := mustCreateProduct(t, h, shopRow.ID, unit.ID, "Cotton Shirt", "125000.00")
+
+	media1 := seedMedia(ctx, t, q, shopRow.ID, "shop/img-1")
+	media2 := seedMedia(ctx, t, q, shopRow.ID, "shop/img-2")
+	media3 := seedMedia(ctx, t, q, shopRow.ID, "shop/img-3")
+	resp1, err := h.AddProductImage(owner(shopRow.ID), gen.AddProductImageRequestObject{Id: product.Id, Body: &gen.AddProductImageJSONRequestBody{MediaId: media1.ID}})
+	if err != nil {
+		t.Fatalf("AddProductImage (1st): %v", err)
+	}
+	image1 := resp1.(gen.AddProductImage201JSONResponse)
+	if !image1.IsCover {
+		t.Fatalf("image1.IsCover = false, want true (first image is cover by default)")
+	}
+	resp2, err := h.AddProductImage(owner(shopRow.ID), gen.AddProductImageRequestObject{Id: product.Id, Body: &gen.AddProductImageJSONRequestBody{MediaId: media2.ID}})
+	if err != nil {
+		t.Fatalf("AddProductImage (2nd): %v", err)
+	}
+	image2 := resp2.(gen.AddProductImage201JSONResponse)
+	resp3, err := h.AddProductImage(owner(shopRow.ID), gen.AddProductImageRequestObject{Id: product.Id, Body: &gen.AddProductImageJSONRequestBody{MediaId: media3.ID}})
+	if err != nil {
+		t.Fatalf("AddProductImage (3rd): %v", err)
+	}
+	image3 := resp3.(gen.AddProductImage201JSONResponse)
+
+	// Clearing image1's cover flag (sort_order 0, the only cover) must
+	// promote image2 (sort_order 1), the lowest sort_order among what's
+	// left — not image3 (sort_order 2) — exactly like RemoveProductImage.
+	isCoverFalse := false
+	patchResp, err := h.UpdateProductImage(owner(shopRow.ID), gen.UpdateProductImageRequestObject{
+		Id: product.Id, ImageId: image1.Id,
+		Body: &gen.UpdateProductImageJSONRequestBody{IsCover: &isCoverFalse},
+	})
+	if err != nil {
+		t.Fatalf("UpdateProductImage (clear only cover): %v", err)
+	}
+	patched := gen.ProductImage(patchResp.(gen.UpdateProductImage200JSONResponse))
+	if patched.IsCover {
+		t.Fatalf("patched.IsCover = true, want false (this image's own flag was cleared)")
+	}
+
+	rows, err := q.ListProductImages(ctx, db.ListProductImagesParams{ShopID: shopRow.ID, ProductID: product.Id})
+	if err != nil {
+		t.Fatalf("ListProductImages: %v", err)
+	}
+	var covers int
+	for _, r := range rows {
+		if r.IsCover {
+			covers++
+			if r.ID != image2.Id {
+				t.Fatalf("cover = %v, want image2 (%v, lowest sort_order among the rest, not image3 %v)", r.ID, image2.Id, image3.Id)
+			}
+		}
+	}
+	if covers != 1 {
+		t.Fatalf("cover count = %d, want exactly 1", covers)
+	}
+}
+
+func TestUpdateProductImage_clearNonCoverIsNoOp(t *testing.T) {
+	h, q, _ := newTestHandler(t)
+	ctx := context.Background()
+	shopRow := seedShop(ctx, t, q, "shop-a")
+	unit := seedUnit(ctx, t, q, shopRow.ID, "pcs")
+	product := mustCreateProduct(t, h, shopRow.ID, unit.ID, "Cotton Shirt", "125000.00")
+
+	media1 := seedMedia(ctx, t, q, shopRow.ID, "shop/img-1")
+	media2 := seedMedia(ctx, t, q, shopRow.ID, "shop/img-2")
+	resp1, err := h.AddProductImage(owner(shopRow.ID), gen.AddProductImageRequestObject{Id: product.Id, Body: &gen.AddProductImageJSONRequestBody{MediaId: media1.ID}})
+	if err != nil {
+		t.Fatalf("AddProductImage (1st): %v", err)
+	}
+	image1 := resp1.(gen.AddProductImage201JSONResponse)
+	resp2, err := h.AddProductImage(owner(shopRow.ID), gen.AddProductImageRequestObject{Id: product.Id, Body: &gen.AddProductImageJSONRequestBody{MediaId: media2.ID}})
+	if err != nil {
+		t.Fatalf("AddProductImage (2nd): %v", err)
+	}
+	image2 := resp2.(gen.AddProductImage201JSONResponse)
+	if image2.IsCover {
+		t.Fatalf("image2.IsCover = true, want false (only the first image defaults to cover)")
+	}
+
+	isCoverFalse := false
+	patchResp, err := h.UpdateProductImage(owner(shopRow.ID), gen.UpdateProductImageRequestObject{
+		Id: product.Id, ImageId: image2.Id,
+		Body: &gen.UpdateProductImageJSONRequestBody{IsCover: &isCoverFalse},
+	})
+	if err != nil {
+		t.Fatalf("UpdateProductImage (clear non-cover): %v", err)
+	}
+	patched := gen.ProductImage(patchResp.(gen.UpdateProductImage200JSONResponse))
+	if patched.IsCover {
+		t.Fatalf("patched.IsCover = true, want false")
+	}
+
+	rows, err := q.ListProductImages(ctx, db.ListProductImagesParams{ShopID: shopRow.ID, ProductID: product.Id})
+	if err != nil {
+		t.Fatalf("ListProductImages: %v", err)
+	}
+	var covers int
+	for _, r := range rows {
+		if r.IsCover {
+			covers++
+			if r.ID != image1.Id {
+				t.Fatalf("cover = %v, want unchanged image1 (%v)", r.ID, image1.Id)
+			}
+		}
+	}
+	if covers != 1 {
+		t.Fatalf("cover count = %d, want exactly 1 (unchanged)", covers)
+	}
+}
+
 func TestUpdateProductImage_variantFromAnotherProductRejected(t *testing.T) {
 	h, q, _ := newTestHandler(t)
 	ctx := context.Background()
@@ -494,6 +611,34 @@ func TestUpdateProductImage_anotherShopIsNotFound(t *testing.T) {
 	apiErr, ok := err.(*apierr.Error)
 	if !ok || apiErr.Code != gen.NOTFOUND {
 		t.Fatalf("err = %#v, want 404 NOT_FOUND (shop isolation)", err)
+	}
+}
+
+func TestUpdateProductImage_imageOfAnotherProductSameShopIsNotFound(t *testing.T) {
+	h, q, _ := newTestHandler(t)
+	ctx := context.Background()
+	shopRow := seedShop(ctx, t, q, "shop-a")
+	unit := seedUnit(ctx, t, q, shopRow.ID, "pcs")
+	productA := mustCreateProduct(t, h, shopRow.ID, unit.ID, "Cotton Shirt", "125000.00")
+	productB := mustCreateProduct(t, h, shopRow.ID, unit.ID, "Denim Jeans", "175000.00")
+
+	media := seedMedia(ctx, t, q, shopRow.ID, "shop/img-1")
+	addResp, err := h.AddProductImage(owner(shopRow.ID), gen.AddProductImageRequestObject{
+		Id: productB.Id, Body: &gen.AddProductImageJSONRequestBody{MediaId: media.ID},
+	})
+	if err != nil {
+		t.Fatalf("AddProductImage: %v", err)
+	}
+	imageOfB := addResp.(gen.AddProductImage201JSONResponse)
+
+	isCoverFalse := false
+	_, err = h.UpdateProductImage(owner(shopRow.ID), gen.UpdateProductImageRequestObject{
+		Id: productA.Id, ImageId: imageOfB.Id,
+		Body: &gen.UpdateProductImageJSONRequestBody{IsCover: &isCoverFalse},
+	})
+	apiErr, ok := err.(*apierr.Error)
+	if !ok || apiErr.Code != gen.NOTFOUND {
+		t.Fatalf("err = %#v, want 404 NOT_FOUND (image belongs to a different product)", err)
 	}
 }
 

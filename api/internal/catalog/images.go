@@ -156,11 +156,14 @@ func (h *Handler) AddProductImage(ctx context.Context, req gen.AddProductImageRe
 // unchanged; `true` makes this image the cover and clears the previous
 // one in the same transaction (ClearCover then the patch, same ordering
 // AddProductImage/ReorderProductImages use so the partial unique index
-// product_images_one_cover_key is never hit); `false` clears only this
-// image's flag — AddProductImage already allows a caller to leave a
-// product with zero cover images by passing isCover:false on its first
-// upload, so this mirrors that existing permissiveness rather than
-// promoting a replacement.
+// product_images_one_cover_key is never hit); `false` clears the flag and,
+// if this was the product's only cover, promotes the next image by sort
+// order — the same policy RemoveProductImage already applies when the
+// removed image was the cover (orchestrator ruling: parity between the
+// two, not a per-endpoint choice). `false` on a non-cover image is a
+// no-op for the flag, no promotion. The response is built from the row
+// UpdateProductImage returns (RETURNING *), not the pre-transaction
+// snapshot, so a concurrent reorder/cover change is never misreported.
 func (h *Handler) UpdateProductImage(ctx context.Context, req gen.UpdateProductImageRequestObject) (gen.UpdateProductImageResponseObject, error) {
 	if _, ok := auth.FromContext(ctx); !ok {
 		return nil, apierr.Unauthenticated()
@@ -174,14 +177,7 @@ func (h *Handler) UpdateProductImage(ctx context.Context, req gen.UpdateProductI
 	if err != nil {
 		return nil, fmt.Errorf("catalog: list product images: %w", err)
 	}
-	var target *db.ListProductImagesRow
-	for i := range rows {
-		if rows[i].ID == req.ImageId {
-			r := rows[i]
-			target = &r
-			break
-		}
-	}
+	target := findImage(rows, req.ImageId)
 	if target == nil {
 		return nil, apierr.NotFound("image")
 	}
@@ -208,6 +204,15 @@ func (h *Handler) UpdateProductImage(ctx context.Context, req gen.UpdateProductI
 		}
 	}
 
+	// Clearing the product's only cover promotes the next image by sort
+	// order, computed from the same pre-transaction snapshot
+	// RemoveProductImage uses — the target's own cover flag isn't touched
+	// by any other write in between.
+	var promote *db.ListProductImagesRow
+	if body.IsCover != nil && !*body.IsCover && target.IsCover {
+		promote = lowestSortOrderExcept(rows, req.ImageId)
+	}
+
 	tx, err := h.svc.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("catalog: begin tx: %w", err)
@@ -220,30 +225,33 @@ func (h *Handler) UpdateProductImage(ctx context.Context, req gen.UpdateProductI
 			return nil, fmt.Errorf("catalog: clear cover: %w", err)
 		}
 	}
-	if err := qtx.UpdateProductImage(ctx, db.UpdateProductImageParams{
+	updated, err := qtx.UpdateProductImage(ctx, db.UpdateProductImageParams{
 		ClearVariant: clearVariant, VariantID: variantID, IsCover: body.IsCover,
 		ShopID: authCtx.ShopID, ID: req.ImageId,
-	}); err != nil {
+	})
+	if err != nil {
 		if apiErr, ok := mapWriteError(err); ok {
 			return nil, apiErr
 		}
 		return nil, fmt.Errorf("catalog: update product image: %w", err)
+	}
+	if promote != nil {
+		// Runs after the clearing update above, so promote's row is never
+		// briefly co-cover with target within the same transaction.
+		if err := qtx.SetCover(ctx, db.SetCoverParams{ShopID: authCtx.ShopID, ID: promote.ID}); err != nil {
+			return nil, fmt.Errorf("catalog: promote cover: %w", err)
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("catalog: commit update product image: %w", err)
 	}
 
-	updated := *target
-	if clearVariant {
-		updated.VariantID = nil
-	} else if variantID != nil {
-		updated.VariantID = variantID
+	resp := gen.ProductImage{
+		Id: updated.ID, MediaId: updated.MediaID, VariantId: nullableUUID(updated.VariantID),
+		SortOrder: int(updated.SortOrder), IsCover: updated.IsCover, Urls: media.URLs(h.svc.mediaBaseURL, target.StorageKey),
 	}
-	if body.IsCover != nil {
-		updated.IsCover = *body.IsCover
-	}
-	return gen.UpdateProductImage200JSONResponse(h.svc.toGenProductImage(updated)), nil
+	return gen.UpdateProductImage200JSONResponse(resp), nil
 }
 
 // RemoveProductImage removes an image from a product. Requires
@@ -263,22 +271,11 @@ func (h *Handler) RemoveProductImage(ctx context.Context, req gen.RemoveProductI
 		return nil, fmt.Errorf("catalog: list product images: %w", err)
 	}
 
-	var target *db.ListProductImagesRow
-	var promote *db.ListProductImagesRow
-	for i := range rows {
-		if rows[i].ID == req.ImageId {
-			r := rows[i]
-			target = &r
-			continue
-		}
-		if promote == nil || rows[i].SortOrder < promote.SortOrder {
-			r := rows[i]
-			promote = &r
-		}
-	}
+	target := findImage(rows, req.ImageId)
 	if target == nil {
 		return nil, apierr.NotFound("image")
 	}
+	promote := lowestSortOrderExcept(rows, req.ImageId)
 
 	tx, err := h.svc.pool.Begin(ctx)
 	if err != nil {
@@ -365,6 +362,39 @@ func (h *Handler) ReorderProductImages(ctx context.Context, req gen.ReorderProdu
 		return nil, fmt.Errorf("catalog: list product images after reorder: %w", err)
 	}
 	return gen.ReorderProductImages200JSONResponse(gen.ProductImageList{Items: items}), nil
+}
+
+// findImage returns the row matching id within rows, or nil — used by
+// RemoveProductImage and UpdateProductImage to resolve the target image
+// off the same shop/product-scoped ListProductImages snapshot they both
+// already need (isolation: an id from another shop or another product
+// never appears in rows, so a missing target means 404).
+func findImage(rows []db.ListProductImagesRow, id uuid.UUID) *db.ListProductImagesRow {
+	for i := range rows {
+		if rows[i].ID == id {
+			r := rows[i]
+			return &r
+		}
+	}
+	return nil
+}
+
+// lowestSortOrderExcept returns the row with the lowest sort_order among
+// rows other than excludeID, or nil if none remain — the next image to
+// promote to cover when the current cover is removed (RemoveProductImage)
+// or explicitly un-covered (UpdateProductImage isCover:false).
+func lowestSortOrderExcept(rows []db.ListProductImagesRow, excludeID uuid.UUID) *db.ListProductImagesRow {
+	var promote *db.ListProductImagesRow
+	for i := range rows {
+		if rows[i].ID == excludeID {
+			continue
+		}
+		if promote == nil || rows[i].SortOrder < promote.SortOrder {
+			r := rows[i]
+			promote = &r
+		}
+	}
+	return promote
 }
 
 func sameIDSet(a []uuid.UUID, b []uuid.UUID) bool {
