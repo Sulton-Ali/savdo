@@ -787,7 +787,7 @@ export interface paths {
         };
         /**
          * List variants at or below their effective low-stock threshold.
-         * @description Requires `manager+`. A variant's total quantity across all locations is compared against the effective threshold — its product's `lowStockThreshold` override, falling back to the shop's default (D-44). Cursor-paginated.
+         * @description Variants whose total quantity across all locations is at or below the effective threshold (product override, else the shop default; D-44). Only variants that were stocked at least once on active products and variants are listed (D-50).
          */
         get: operations["listLowStock"];
         put?: never;
