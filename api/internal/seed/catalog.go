@@ -3,6 +3,7 @@ package seed
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -292,7 +293,7 @@ func seedProducts(ctx context.Context, q *db.Queries, shopID, ownerID uuid.UUID,
 		productsCreated++
 		variantsCreated += len(spec.variants)
 
-		variantIDs := responseVariantIDs(created)
+		variantIDs := responseVariantIDsByAttributes(created)
 		n, err := attachImages(ctx, h, mediaSvc, shopID, ownerID, spec, created.Id, variantIDs)
 		if err != nil {
 			return 0, 0, 0, 0, err
@@ -321,27 +322,55 @@ func repairProductImages(ctx context.Context, q *db.Queries, h *catalog.Handler,
 	if err != nil {
 		return 0, fmt.Errorf("list variants for %q: %w", spec.slug, err)
 	}
-	variantIDs := make([]uuid.UUID, len(variants))
-	for i, v := range variants {
-		variantIDs[i] = v.ID
+	variantIDs, err := rowVariantIDsByAttributes(spec.slug, variants)
+	if err != nil {
+		return 0, err
 	}
 
 	return attachImages(ctx, h, mediaSvc, shopID, ownerID, spec, productID, variantIDs)
 }
 
-// responseVariantIDs extracts a just-created product's variant ids, in the
-// order CreateProduct returned them (buildFullProduct's own
-// ListVariantsForStaff-backed ordering — see attachImages/imageSpec.
-// variantIdx), for attachImages to tie a variant-specific image to.
-func responseVariantIDs(product gen.CreateProduct201JSONResponse) []uuid.UUID {
+// variantKey identifies a variant by its size/color attribute values —
+// the natural key attachImages matches an imageSpec's variantIdx against.
+// A positional match (variantIDs[i]) is NOT safe: every variant of one
+// product is inserted inside the same transaction (createProductAttempt,
+// products.go), and Postgres' now() returns the transaction's start time
+// for every call within it, so every one of those variants gets the
+// *same* created_at — ListVariantsForStaff/ListVariantsForCashier's
+// ORDER BY created_at alone (before the db fix in this same change)
+// leaves their relative order among ties unspecified, which silently tied
+// a variant-tagged image to the wrong variant.
+type variantKey struct{ size, color string }
+
+// responseVariantIDsByAttributes builds a just-created product's
+// variantKey -> id lookup from CreateProduct's own response, for
+// attachImages to tie a variant-specific image to the intended variant
+// regardless of what order the response listed them in.
+func responseVariantIDsByAttributes(product gen.CreateProduct201JSONResponse) map[variantKey]uuid.UUID {
+	out := map[variantKey]uuid.UUID{}
 	if product.Variants == nil {
-		return nil
+		return out
 	}
-	ids := make([]uuid.UUID, len(*product.Variants))
-	for i, v := range *product.Variants {
-		ids[i] = v.Id
+	for _, v := range *product.Variants {
+		out[variantKey{size: v.Attributes["size"], color: v.Attributes["color"]}] = v.Id
 	}
-	return ids
+	return out
+}
+
+// rowVariantIDsByAttributes is responseVariantIDsByAttributes for
+// repairProductImages' ListVariantsForStaff rows, whose attributes column
+// is the raw jsonb `product_variants.attributes` rather than the
+// contract's gen.AttributeValues.
+func rowVariantIDsByAttributes(slug string, rows []db.ProductVariant) (map[variantKey]uuid.UUID, error) {
+	out := make(map[variantKey]uuid.UUID, len(rows))
+	for _, r := range rows {
+		var attrs map[string]string
+		if err := json.Unmarshal(r.Attributes, &attrs); err != nil {
+			return nil, fmt.Errorf("product %q: unmarshal variant %s attributes: %w", slug, r.ID, err)
+		}
+		out[variantKey{size: attrs["size"], color: attrs["color"]}] = r.ID
+	}
+	return out, nil
 }
 
 // createProduct builds and sends the CreateProduct request for spec,
@@ -399,13 +428,18 @@ func createProduct(ctx context.Context, h *catalog.Handler, spec productSpec, ca
 // attachImages generates spec.images' placeholder PNGs, uploads each
 // through mediaSvc.Upload (the media pipeline: validate, derive WebP
 // thumb/card/full, record a media_files row) and attaches it to productID
-// via catalogHandler.AddProductImage, tying it to variantIDs[img.
-// variantIdx] when the imageSpec names one. variantIDs must be in the
-// product's own variant-creation order (spec.variants' order) for that
-// tagging to land on the intended variant — both callers (createProduct's
-// response and repairProductImages' ListVariantsForStaff) already
-// resolve it that way.
-func attachImages(ctx context.Context, h *catalog.Handler, mediaSvc *media.Service, shopID, ownerID uuid.UUID, spec productSpec, productID uuid.UUID, variantIDs []uuid.UUID) (int, error) {
+// via catalogHandler.AddProductImage. When an imageSpec names a variant
+// (img.variantIdx >= 0), the variant to tag is found by matching
+// spec.variants[img.variantIdx]'s own size/color against variantIDs —
+// never by position: two variants of the same product can share the
+// exact same created_at (see variantKey's doc comment), so a positional
+// index into whatever order a list query happened to return is not a
+// reliable way to name "the variant this image is for". A variantIdx
+// that names a spec.variants position with no matching created variant
+// is a bug in this package's own data (or a caller passing a stale
+// variantIDs) — this fails loudly rather than silently tagging the wrong
+// variant or dropping the tag.
+func attachImages(ctx context.Context, h *catalog.Handler, mediaSvc *media.Service, shopID, ownerID uuid.UUID, spec productSpec, productID uuid.UUID, variantIDs map[variantKey]uuid.UUID) (int, error) {
 	count := 0
 	for _, img := range spec.images {
 		data, err := generatePlaceholderImage(img.bgHex, img.label)
@@ -419,8 +453,15 @@ func attachImages(ctx context.Context, h *catalog.Handler, mediaSvc *media.Servi
 		}
 
 		imgBody := gen.ProductImageCreate{MediaId: mediaFile.ID}
-		if img.variantIdx >= 0 && img.variantIdx < len(variantIDs) {
-			vid := variantIDs[img.variantIdx]
+		if img.variantIdx >= 0 {
+			if img.variantIdx >= len(spec.variants) {
+				return count, fmt.Errorf("product %q: image references variantIdx %d but only %d variants are specced", spec.slug, img.variantIdx, len(spec.variants))
+			}
+			want := spec.variants[img.variantIdx]
+			vid, ok := variantIDs[variantKey{size: want.size, color: want.color}]
+			if !ok {
+				return count, fmt.Errorf("product %q: no created variant matches size=%q color=%q (image variantIdx %d)", spec.slug, want.size, want.color, img.variantIdx)
+			}
 			imgBody.VariantId = &vid
 		}
 		if _, err := h.AddProductImage(ctx, gen.AddProductImageRequestObject{Id: productID, Body: &imgBody}); err != nil {

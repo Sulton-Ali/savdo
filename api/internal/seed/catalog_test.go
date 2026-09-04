@@ -2,6 +2,7 @@ package seed_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/google/uuid"
@@ -15,6 +16,69 @@ import (
 	"github.com/Sulton-Ali/savdo/api/internal/media"
 	"github.com/Sulton-Ali/savdo/api/internal/seed"
 )
+
+// taggedProductSlug and wantTaggedVariantAttrs mirror one fixed entry of
+// catalog_data.go's productSpecs — "men-shirt-classic-white" — whose 2nd
+// image is tagged to its own 1st variant (size XS, colour oq/white).
+// Duplicated here deliberately: catalog_data.go's productSpecs are
+// unexported, so this external test package pins the one fact it needs
+// (which attributes the tagged image's variant must have) as its own
+// fixture, rather than reaching into seed's internals.
+const taggedProductSlug = "men-shirt-classic-white"
+
+var wantTaggedVariantAttrs = map[string]string{"size": "XS", "color": "oq"}
+
+// assertTaggedImageMatchesSpecVariant finds productID's one image tagged
+// to a variant and asserts that variant's attributes are exactly
+// wantTaggedVariantAttrs — the regression this test guards: variants
+// created in the same transaction can share created_at (Postgres now()
+// is transaction-time), so a positional match between an imageSpec and
+// whatever order a list query returned silently tagged the wrong
+// variant (confirmed: this exact product's 2nd image landed on size=L
+// instead of XS before the fix).
+func assertTaggedImageMatchesSpecVariant(ctx context.Context, t *testing.T, q *db.Queries, shopID, productID uuid.UUID) {
+	t.Helper()
+
+	images, err := q.ListProductImages(ctx, db.ListProductImagesParams{ShopID: shopID, ProductID: productID})
+	if err != nil {
+		t.Fatalf("ListProductImages(%s) error = %v", taggedProductSlug, err)
+	}
+	var variantID *uuid.UUID
+	for _, img := range images {
+		if img.VariantID != nil {
+			variantID = img.VariantID
+			break
+		}
+	}
+	if variantID == nil {
+		t.Fatalf("product %q: no image is tagged to a variant, want one (catalog_data.go tags its 2nd image)", taggedProductSlug)
+	}
+
+	variant, err := q.GetVariantForStaff(ctx, db.GetVariantForStaffParams{ShopID: shopID, ID: *variantID})
+	if err != nil {
+		t.Fatalf("GetVariantForStaff(%s) error = %v", *variantID, err)
+	}
+	var attrs map[string]string
+	if err := json.Unmarshal(variant.Attributes, &attrs); err != nil {
+		t.Fatalf("unmarshal variant %s attributes: %v", variant.ID, err)
+	}
+	if attrs["size"] != wantTaggedVariantAttrs["size"] || attrs["color"] != wantTaggedVariantAttrs["color"] {
+		t.Errorf("product %q: tagged image's variant attributes = %v, want %v", taggedProductSlug, attrs, wantTaggedVariantAttrs)
+	}
+}
+
+// findProductBySlug locates slug in products, failing the test if it's
+// not there — every caller here expects a specific, always-seeded slug.
+func findProductBySlug(t *testing.T, products []db.ListProductsForStaffRow, slug string) db.ListProductsForStaffRow {
+	t.Helper()
+	for _, p := range products {
+		if p.Slug == slug {
+			return p
+		}
+	}
+	t.Fatalf("product %q not found among %d seeded products", slug, len(products))
+	return db.ListProductsForStaffRow{}
+}
 
 // newCatalogTestDeps builds the same catalog.Handler + media.Service pair
 // runSeedCatalog (cmd/savdo/main.go) wires in production, backed by a
@@ -154,6 +218,9 @@ func TestSeedCatalog_seedsARealisticCatalogueIdempotently(t *testing.T) {
 		t.Errorf("total images in DB = %d, want %d", totalImages, wantImages)
 	}
 
+	taggedProduct := findProductBySlug(t, products, taggedProductSlug)
+	assertTaggedImageMatchesSpecVariant(ctx, t, q, shopReport.ShopID, taggedProduct.ID)
+
 	second, err := seed.Catalog(ctx, q, catalogHandler, mediaSvc, shopReport.ShopID, owner.ID)
 	if err != nil {
 		t.Fatalf("second Catalog() error = %v", err)
@@ -224,10 +291,11 @@ func TestSeedCatalog_repairsMissingImagesOnAnExistingProduct(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListProductsForStaff() error = %v", err)
 	}
-	if len(products) == 0 {
-		t.Fatal("no seeded products to test against")
-	}
-	target := products[0]
+	// Target the one product this file also pins a known tagged-variant
+	// fixture for (taggedProductSlug), so the post-repair assertion below
+	// can check the repaired tagged image landed on the right variant,
+	// not just that some image came back.
+	target := findProductBySlug(t, products, taggedProductSlug)
 
 	images, err := q.ListProductImages(ctx, db.ListProductImagesParams{ShopID: shopReport.ShopID, ProductID: target.ID})
 	if err != nil {
@@ -273,6 +341,7 @@ func TestSeedCatalog_repairsMissingImagesOnAnExistingProduct(t *testing.T) {
 	if len(repaired) != wantRepaired {
 		t.Errorf("product %q has %d images after repair, want %d", target.Slug, len(repaired), wantRepaired)
 	}
+	assertTaggedImageMatchesSpecVariant(ctx, t, q, shopReport.ShopID, target.ID)
 
 	variantsAfter, err := q.ListVariantsForStaff(ctx, db.ListVariantsForStaffParams{ShopID: shopReport.ShopID, ProductID: target.ID})
 	if err != nil {
