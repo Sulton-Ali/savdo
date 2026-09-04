@@ -108,18 +108,26 @@ type UpdateShopInput struct {
 	DefaultLocale        *string
 	AllowNegativeStock   *bool
 	UpdateCostOnPurchase *bool
+	LowStockThreshold    *int
 }
 
 // UpdateShop applies in to shopID's settings. Field-shape validation
-// (name length, a loadable timezone, a known locale) is handler.go's job;
-// by the time this runs, in's values are already known-good.
+// (name length, a loadable timezone, a known locale, a non-negative
+// lowStockThreshold that fits int32) is handler.go's job; by the time
+// this runs, in's values are already known-good.
 func (s *Service) UpdateShop(ctx context.Context, shopID uuid.UUID, in UpdateShopInput) (db.Shop, error) {
+	var lowStockThreshold *int32
+	if in.LowStockThreshold != nil {
+		v := int32(*in.LowStockThreshold) // #nosec G115 -- range-checked in handler.go
+		lowStockThreshold = &v
+	}
 	updated, err := s.q.UpdateShop(ctx, db.UpdateShopParams{
 		Name:                 in.Name,
 		Timezone:             in.Timezone,
 		DefaultLocale:        in.DefaultLocale,
 		AllowNegativeStock:   in.AllowNegativeStock,
 		UpdateCostOnPurchase: in.UpdateCostOnPurchase,
+		LowStockThreshold:    lowStockThreshold,
 		ID:                   shopID,
 	})
 	if err != nil {
@@ -141,5 +149,6 @@ func toGenShop(sh db.Shop) gen.Shop {
 		DefaultLocale:        gen.Locale(sh.DefaultLocale),
 		AllowNegativeStock:   sh.AllowNegativeStock,
 		UpdateCostOnPurchase: sh.UpdateCostOnPurchase,
+		LowStockThreshold:    int(sh.LowStockThreshold),
 	}
 }

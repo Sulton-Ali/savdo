@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Sulton-Ali/savdo/api/gen"
 	"github.com/Sulton-Ali/savdo/api/internal/apierr"
 	"github.com/Sulton-Ali/savdo/api/internal/auth"
 	"github.com/Sulton-Ali/savdo/api/internal/db"
@@ -76,6 +77,23 @@ func newTestService(t *testing.T) (*Service, *db.Queries, context.Context) {
 	return NewService(pool, q), q, context.Background()
 }
 
+// newTestHandler is newTestService plus a Handler wrapping it, for the
+// tests that go through the strict-server surface (UpdateShop's field
+// validation lives in handler.go, not Service.UpdateShop).
+func newTestHandler(t *testing.T) (*Handler, *db.Queries, context.Context) {
+	t.Helper()
+	svc, q, ctx := newTestService(t)
+	return NewHandler(svc), q, ctx
+}
+
+// ownerCtx builds the auth.Context an authenticated owner request carries,
+// the only role PermShopSettings grants (auth/permissions.go).
+func ownerCtx(shopID uuid.UUID) context.Context {
+	return auth.WithContext(context.Background(), auth.Context{
+		ShopID: shopID, UserID: uuid.New(), Role: db.UserRoleOwner, SessionID: uuid.New(), Client: db.SessionClientWeb,
+	})
+}
+
 func TestServiceGetAndUpdateShop(t *testing.T) {
 	svc, q, ctx := newTestService(t)
 	shopRow := seedShop(ctx, t, q, "shop-a")
@@ -99,6 +117,82 @@ func TestServiceGetAndUpdateShop(t *testing.T) {
 	}
 	if updated.Slug != shopRow.Slug || updated.Currency != shopRow.Currency {
 		t.Fatalf("UpdateShop() changed immutable slug/currency: %+v", updated)
+	}
+}
+
+// TestGetShop_lowStockThresholdDefaultsToTwo is D-50's seeded default: a
+// freshly created shop (no UpdateShop call yet) reports the migration's
+// default of 2, both from the raw row and through GetShop/toGenShop.
+func TestGetShop_lowStockThresholdDefaultsToTwo(t *testing.T) {
+	h, q, ctx := newTestHandler(t)
+	shopRow := seedShop(ctx, t, q, "shop-a")
+	if shopRow.LowStockThreshold != 2 {
+		t.Fatalf("seeded shops.low_stock_threshold = %d, want 2 (migration default)", shopRow.LowStockThreshold)
+	}
+
+	resp, err := h.GetShop(ownerCtx(shopRow.ID), gen.GetShopRequestObject{})
+	if err != nil {
+		t.Fatalf("GetShop() error = %v", err)
+	}
+	got := gen.Shop(resp.(gen.GetShop200JSONResponse))
+	if got.LowStockThreshold != 2 {
+		t.Fatalf("GetShop().LowStockThreshold = %d, want 2", got.LowStockThreshold)
+	}
+}
+
+// TestUpdateShop_lowStockThreshold covers D-44/D-50's wiring end to end
+// through the handler: PATCH sets it and persists it in the column, a
+// PATCH that omits the field leaves the previous value untouched, and a
+// negative value is rejected as a field-level 400 before anything is
+// written.
+func TestUpdateShop_lowStockThreshold(t *testing.T) {
+	h, q, ctx := newTestHandler(t)
+	shopRow := seedShop(ctx, t, q, "shop-a")
+
+	seven := 7
+	resp, err := h.UpdateShop(ownerCtx(shopRow.ID), gen.UpdateShopRequestObject{
+		Body: &gen.UpdateShopJSONRequestBody{LowStockThreshold: &seven},
+	})
+	if err != nil {
+		t.Fatalf("UpdateShop(7) error = %v", err)
+	}
+	updated := gen.Shop(resp.(gen.UpdateShop200JSONResponse))
+	if updated.LowStockThreshold != 7 {
+		t.Fatalf("UpdateShop(7).LowStockThreshold = %d, want 7", updated.LowStockThreshold)
+	}
+	refetched, err := q.GetShop(ctx, shopRow.ID)
+	if err != nil {
+		t.Fatalf("GetShop (raw): %v", err)
+	}
+	if refetched.LowStockThreshold != 7 {
+		t.Fatalf("shops.low_stock_threshold = %d, want 7", refetched.LowStockThreshold)
+	}
+
+	// A PATCH that names some other field but not lowStockThreshold must
+	// leave the just-set value of 7 alone.
+	newName := "Renamed Again"
+	resp, err = h.UpdateShop(ownerCtx(shopRow.ID), gen.UpdateShopRequestObject{
+		Body: &gen.UpdateShopJSONRequestBody{Name: &newName},
+	})
+	if err != nil {
+		t.Fatalf("UpdateShop(name only) error = %v", err)
+	}
+	unchanged := gen.Shop(resp.(gen.UpdateShop200JSONResponse))
+	if unchanged.LowStockThreshold != 7 {
+		t.Fatalf("UpdateShop(name only).LowStockThreshold = %d, want unchanged 7", unchanged.LowStockThreshold)
+	}
+
+	negative := -1
+	_, err = h.UpdateShop(ownerCtx(shopRow.ID), gen.UpdateShopRequestObject{
+		Body: &gen.UpdateShopJSONRequestBody{LowStockThreshold: &negative},
+	})
+	apiErr, ok := err.(*apierr.Error)
+	if !ok || apiErr.Code != gen.VALIDATIONFAILED {
+		t.Fatalf("UpdateShop(-1) err = %#v, want 400 VALIDATION_FAILED", err)
+	}
+	fields := apiErr.Details["fields"].(map[string]string)
+	if fields["lowStockThreshold"] != "invalid" {
+		t.Fatalf("fields = %+v, want lowStockThreshold=invalid", fields)
 	}
 }
 
