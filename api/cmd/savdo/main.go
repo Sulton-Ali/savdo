@@ -12,12 +12,16 @@ import (
 	"os"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib" // registers the "pgx" database/sql driver
 	"github.com/pressly/goose/v3"
 
 	"github.com/Sulton-Ali/savdo/api/db"
+	"github.com/Sulton-Ali/savdo/api/internal/catalog"
+	"github.com/Sulton-Ali/savdo/api/internal/config"
 	apidb "github.com/Sulton-Ali/savdo/api/internal/db"
+	"github.com/Sulton-Ali/savdo/api/internal/media"
 	"github.com/Sulton-Ali/savdo/api/internal/seed"
 )
 
@@ -124,21 +128,22 @@ func runSeed(args []string) error {
 		return err
 	}
 
-	dsn, err := databaseURL()
+	// config.Load, not the bare databaseURL() helper: the catalog seed
+	// step below needs MEDIA_DIR/MEDIA_BASE_URL/MEDIA_MAX_BYTES (media.
+	// Service's own constructor arguments, cmd/api/main.go's own doc
+	// comment on cfg.MediaDir) alongside DATABASE_URL, so this is the one
+	// subcommand that reads the full Config rather than DATABASE_URL alone.
+	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}
 
-	env := os.Getenv("ENV")
-	if env == "" {
-		env = "dev"
-	}
-	if env == "prod" && !*force {
+	if cfg.Env == "prod" && !*force {
 		return fmt.Errorf("refusing to seed: ENV=prod (pass --force to seed a production database anyway)")
 	}
 
 	ctx := context.Background()
-	pool, err := openPool(ctx, dsn)
+	pool, err := openPool(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return err
 	}
@@ -156,7 +161,47 @@ func runSeed(args []string) error {
 		}
 		fmt.Printf("%s: %s (%s)\n", entity.Kind, entity.Name, status)
 	}
+
+	catalogReport, err := runSeedCatalog(ctx, pool, cfg, report.ShopID)
+	if err != nil {
+		return fmt.Errorf("seed catalog: %w", err)
+	}
+	fmt.Printf("catalog: %d units, %d attribute definitions, %d categories, %d products, %d variants, %d images created\n",
+		catalogReport.UnitsCreated, catalogReport.AttributesCreated, catalogReport.CategoriesCreated,
+		catalogReport.ProductsCreated, catalogReport.VariantsCreated, catalogReport.ImagesCreated)
 	return nil
+}
+
+// runSeedCatalog wires the catalog service and the media pipeline exactly
+// as cmd/api does (see its own main.go), then calls seed.Catalog —
+// the units/attribute-definitions/categories/products/variants/images
+// pass documented on seed.Seed's own doc comment. MEDIA_DIR must be set
+// (or left at its default, ../infra/data/media, relative to this
+// process's working directory — `make seed` sources infra/.env, which
+// sets it, before running `go run ./cmd/savdo seed` from api/) for the
+// generated placeholder images to have anywhere to be stored.
+func runSeedCatalog(ctx context.Context, pool *pgxpool.Pool, cfg config.Config, shopID uuid.UUID) (seed.CatalogReport, error) {
+	q := apidb.New(pool)
+
+	shopRow, err := q.GetShop(ctx, shopID)
+	if err != nil {
+		return seed.CatalogReport{}, fmt.Errorf("get shop: %w", err)
+	}
+	owner, err := q.GetOwner(ctx, shopID)
+	if err != nil {
+		return seed.CatalogReport{}, fmt.Errorf("get owner: %w", err)
+	}
+
+	mediaStorage, err := media.NewLocalStorage(cfg.MediaDir, cfg.MediaBaseURL)
+	if err != nil {
+		return seed.CatalogReport{}, fmt.Errorf("open media storage at MEDIA_DIR=%q: %w", cfg.MediaDir, err)
+	}
+	mediaSvc := media.NewService(q, mediaStorage, cfg.MediaBaseURL, cfg.MediaMaxBytes, cfg.MediaConcurrency, cfg.MediaQueue)
+
+	catalogSvc := catalog.NewService(pool, q, shopRow.DefaultLocale, cfg.MediaBaseURL)
+	catalogHandler := catalog.NewHandler(catalogSvc)
+
+	return seed.Catalog(ctx, q, catalogHandler, mediaSvc, shopID, owner.ID)
 }
 
 func runResetOwnerPassword(args []string) error {

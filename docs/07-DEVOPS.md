@@ -25,6 +25,13 @@ without `--force`): shop `savdo-demo`; `owner` / `owner-dev-pass`, `manager` /
 `printf 'new-password\n' | go run ./cmd/savdo reset-owner-password --password-stdin`
 (from `api/`); it revokes the owner's sessions (D-28).
 
+`make seed` also seeds a full demo clothing catalogue for `savdo-demo` (Phase 2 T5): 4
+units, size/colour attribute definitions, ~8 categories (Men/Women/Kids), ~30 products
+with variants and generated placeholder images, entirely through the catalog service and
+media pipeline — idempotent, so re-running it never duplicates anything. This step needs
+`MEDIA_DIR` set (`infra/.env` already sets it for `make seed`; running `go run ./cmd/savdo
+seed` directly needs `DATABASE_URL` and `MEDIA_DIR` in the environment, same as `cmd/api`).
+
 Media files in dev go to `infra/data/media/` (gitignored).
 
 ## Environment variables
