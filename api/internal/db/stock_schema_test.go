@@ -3,11 +3,13 @@ package db_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Sulton-Ali/savdo/api/internal/db"
 	"github.com/Sulton-Ali/savdo/api/internal/db/testdb"
@@ -33,6 +35,28 @@ func numericString(t *testing.T, n pgtype.Numeric) string {
 		t.Fatalf("numeric Value() returned %T, want string", v)
 	}
 	return s
+}
+
+// normalizeScale3 pads/truncates a decimal string's fractional part to
+// exactly 3 digits by string manipulation (never float arithmetic —
+// § 04-DATA-MODEL.md rule 3), so a bare "0" (SumMovementsForLevel's
+// COALESCE(..., 0::numeric) fallback, which does not carry the
+// numeric(12,3) column's display scale) compares equal to a column-sourced
+// "0.000".
+func normalizeScale3(s string) string {
+	neg := strings.HasPrefix(s, "-")
+	if neg {
+		s = s[1:]
+	}
+	intPart, fracPart, _ := strings.Cut(s, ".")
+	for len(fracPart) < 3 {
+		fracPart += "0"
+	}
+	out := intPart + "." + fracPart[:3]
+	if neg && out != "0.000" {
+		out = "-" + out
+	}
+	return out
 }
 
 // stockLocation creates a location for the ledger tests below; kind and
@@ -179,27 +203,79 @@ func TestStockMovements_adjustmentReasonRequiredOnlyForAdjustment(t *testing.T) 
 
 // applyDelta runs stock.Service.Move's write sequence (UpsertLevelRow,
 // GetLevelForUpdate, ApplyLevelDelta) plus the matching movement insert,
-// exactly as the stock service will, so these schema tests do not read a
-// level that was never locked.
-func applyDelta(ctx context.Context, t *testing.T, q *db.Queries, shopID, variantID, locationID uuid.UUID, kind db.StockMovementKind, delta string) {
+// inside one transaction — the same as the stock service will run it, so
+// the FOR UPDATE lock GetLevelForUpdate takes is actually held across all
+// four statements instead of being released the instant each one's own
+// implicit, separate transaction commits.
+func applyDelta(ctx context.Context, t *testing.T, pool *pgxpool.Pool, shopID, variantID, locationID uuid.UUID, kind db.StockMovementKind, delta string) {
 	t.Helper()
-	if err := q.UpsertLevelRow(ctx, db.UpsertLevelRowParams{ShopID: shopID, VariantID: variantID, LocationID: locationID}); err != nil {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }() // no-op once committed
+	qtx := db.New(tx)
+
+	if err := qtx.UpsertLevelRow(ctx, db.UpsertLevelRowParams{ShopID: shopID, VariantID: variantID, LocationID: locationID}); err != nil {
 		t.Fatalf("UpsertLevelRow: %v", err)
 	}
-	if _, err := q.GetLevelForUpdate(ctx, db.GetLevelForUpdateParams{ShopID: shopID, VariantID: variantID, LocationID: locationID}); err != nil {
+	if _, err := qtx.GetLevelForUpdate(ctx, db.GetLevelForUpdateParams{ShopID: shopID, VariantID: variantID, LocationID: locationID}); err != nil {
 		t.Fatalf("GetLevelForUpdate: %v", err)
 	}
-	if _, err := insertMovement(ctx, q, db.InsertMovementParams{
+	if _, err := insertMovement(ctx, qtx, db.InsertMovementParams{
 		ShopID: shopID, VariantID: variantID, LocationID: locationID,
 		Kind: kind, Qty: numeric(t, delta),
 	}); err != nil {
 		t.Fatalf("InsertMovement: %v", err)
 	}
-	if _, err := q.ApplyLevelDelta(ctx, db.ApplyLevelDeltaParams{
+	if _, err := qtx.ApplyLevelDelta(ctx, db.ApplyLevelDeltaParams{
 		ShopID: shopID, VariantID: variantID, LocationID: locationID, Delta: numeric(t, delta),
 	}); err != nil {
 		t.Fatalf("ApplyLevelDelta: %v", err)
 	}
+
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+}
+
+// levelSet reads every stock_levels row for a shop directly (raw SQL is
+// fine here — this is the test's own verification query, not a codepath
+// under test), keyed by (variant_id, location_id).
+type levelKey struct{ variantID, locationID uuid.UUID }
+
+func levelSet(ctx context.Context, t *testing.T, pool *pgxpool.Pool, shopID uuid.UUID) map[levelKey]string {
+	t.Helper()
+	rows, err := pool.Query(ctx, `SELECT variant_id, location_id, qty FROM stock_levels WHERE shop_id = $1`, shopID)
+	if err != nil {
+		t.Fatalf("levelSet query: %v", err)
+	}
+	defer rows.Close()
+	result := map[levelKey]string{}
+	for rows.Next() {
+		var k levelKey
+		var qty pgtype.Numeric
+		if err := rows.Scan(&k.variantID, &k.locationID, &qty); err != nil {
+			t.Fatalf("levelSet scan: %v", err)
+		}
+		result[k] = numericString(t, qty)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("levelSet rows: %v", err)
+	}
+	return result
+}
+
+// levelQty returns the qty for (variantID, locationID) in set, or "0.000"
+// if the combination has no row — treating an absent row as zero, not a
+// failure, since a (variant, location) pair that never had a movement
+// never gets a stock_levels row at all (§ 04-DATA-MODEL.md: only
+// stock.Service.Move writes it).
+func levelQty(set map[levelKey]string, variantID, locationID uuid.UUID) string {
+	if v, ok := set[levelKey{variantID, locationID}]; ok {
+		return v
+	}
+	return "0.000"
 }
 
 func TestStockRebuild_matchesLedgerSum(t *testing.T) {
@@ -211,24 +287,35 @@ func TestStockRebuild_matchesLedgerSum(t *testing.T) {
 	shop := catalogShop(ctx, t, q, "shop-rebuild")
 	unit := catalogUnit(ctx, t, q, shop.ID, "pcs")
 	product := catalogProduct(ctx, t, q, shop.ID, unit.ID, "hoodie")
-	variant := stockVariant(ctx, t, q, shop.ID, product.ID, "{}")
-	loc := stockLocation(ctx, t, q, shop.ID, "Main")
+	v1 := stockVariant(ctx, t, q, shop.ID, product.ID, `{"size":"S"}`)
+	v2 := stockVariant(ctx, t, q, shop.ID, product.ID, `{"size":"M"}`)
+	l1 := stockLocation(ctx, t, q, shop.ID, "L1")
+	l2 := stockLocation(ctx, t, q, shop.ID, "L2")
 
-	applyDelta(ctx, t, q, shop.ID, variant.ID, loc.ID, db.StockMovementKindPurchaseIn, "10.000")
-	applyDelta(ctx, t, q, shop.ID, variant.ID, loc.ID, db.StockMovementKindSaleOut, "-3.000")
-	applyDelta(ctx, t, q, shop.ID, variant.ID, loc.ID, db.StockMovementKindPurchaseIn, "5.000")
+	// v1/l1: two movements, net 7. v2/l2: one movement, net 5.
+	// v1/l2 and v2/l1 are deliberately left untouched — no stock_levels row
+	// for either combination, on either side of the rebuild.
+	applyDelta(ctx, t, pool, shop.ID, v1.ID, l1.ID, db.StockMovementKindPurchaseIn, "10.000")
+	applyDelta(ctx, t, pool, shop.ID, v1.ID, l1.ID, db.StockMovementKindSaleOut, "-3.000")
+	applyDelta(ctx, t, pool, shop.ID, v2.ID, l2.ID, db.StockMovementKindPurchaseIn, "5.000")
 
-	level, err := q.GetLevelForUpdate(ctx, db.GetLevelForUpdateParams{ShopID: shop.ID, VariantID: variant.ID, LocationID: loc.ID})
-	if err != nil {
-		t.Fatalf("GetLevelForUpdate: %v", err)
+	before := levelSet(ctx, t, pool, shop.ID)
+	combos := []levelKey{{v1.ID, l1.ID}, {v1.ID, l2.ID}, {v2.ID, l1.ID}, {v2.ID, l2.ID}}
+	want := map[levelKey]string{
+		{v1.ID, l1.ID}: "7.000",
+		{v1.ID, l2.ID}: "0.000", // absent row
+		{v2.ID, l1.ID}: "0.000", // absent row
+		{v2.ID, l2.ID}: "5.000",
 	}
-	levelStr := numericString(t, level.Qty)
-	if levelStr != "12.000" {
-		t.Fatalf("want stock_levels.qty 12.000 after 10-3+5, got %s", levelStr)
+	for _, c := range combos {
+		if got := levelQty(before, c.variantID, c.locationID); got != want[c] {
+			t.Errorf("before rebuild: want %s for %+v, got %s", want[c], c, got)
+		}
 	}
 
 	// savdo stock rebuild: wipe this shop's levels and recompute from the
-	// ledger; the result must match what ApplyLevelDelta already produced.
+	// ledger; the full set must match what ApplyLevelDelta already
+	// produced, combo for combo, including the two that stay absent.
 	if err := q.TruncateLevelsForShop(ctx, shop.ID); err != nil {
 		t.Fatalf("TruncateLevelsForShop: %v", err)
 	}
@@ -236,20 +323,22 @@ func TestStockRebuild_matchesLedgerSum(t *testing.T) {
 		t.Fatalf("RebuildLevelsFromMovements: %v", err)
 	}
 
-	rebuilt, err := q.GetLevelForUpdate(ctx, db.GetLevelForUpdateParams{ShopID: shop.ID, VariantID: variant.ID, LocationID: loc.ID})
-	if err != nil {
-		t.Fatalf("GetLevelForUpdate after rebuild: %v", err)
-	}
-	if numericString(t, rebuilt.Qty) != "12.000" {
-		t.Fatalf("want rebuilt qty 12.000, got %s", numericString(t, rebuilt.Qty))
+	after := levelSet(ctx, t, pool, shop.ID)
+	for _, c := range combos {
+		b, a := levelQty(before, c.variantID, c.locationID), levelQty(after, c.variantID, c.locationID)
+		if a != b {
+			t.Errorf("rebuild mismatch for %+v: before %s, after %s", c, b, a)
+		}
 	}
 
-	sum, err := q.SumMovementsForLevel(ctx, db.SumMovementsForLevelParams{ShopID: shop.ID, VariantID: variant.ID, LocationID: loc.ID})
-	if err != nil {
-		t.Fatalf("SumMovementsForLevel: %v", err)
-	}
-	if numericString(t, sum) != "12.000" {
-		t.Fatalf("want SumMovementsForLevel 12.000, got %s", numericString(t, sum))
+	for _, c := range combos {
+		sum, err := q.SumMovementsForLevel(ctx, db.SumMovementsForLevelParams{ShopID: shop.ID, VariantID: c.variantID, LocationID: c.locationID})
+		if err != nil {
+			t.Fatalf("SumMovementsForLevel %+v: %v", c, err)
+		}
+		if got := normalizeScale3(numericString(t, sum)); got != want[c] {
+			t.Errorf("SumMovementsForLevel %+v: want %s, got %s", c, want[c], got)
+		}
 	}
 }
 
@@ -313,12 +402,12 @@ func TestListLow_productOverrideElseShopDefault(t *testing.T) {
 		t.Fatalf("CreateVariant (inactive variant): %v", err)
 	}
 
-	applyDelta(ctx, t, q, shop.ID, lowA.ID, loc.ID, db.StockMovementKindPurchaseIn, "1.000")
-	applyDelta(ctx, t, q, shop.ID, notLowA.ID, loc.ID, db.StockMovementKindPurchaseIn, "3.000")
-	applyDelta(ctx, t, q, shop.ID, lowB.ID, loc.ID, db.StockMovementKindPurchaseIn, "4.000")
-	applyDelta(ctx, t, q, shop.ID, notLowB.ID, loc.ID, db.StockMovementKindPurchaseIn, "10.000")
-	applyDelta(ctx, t, q, shop.ID, inactiveProductVariant.ID, loc.ID, db.StockMovementKindPurchaseIn, "1.000")
-	applyDelta(ctx, t, q, shop.ID, inactiveVariant.ID, loc.ID, db.StockMovementKindPurchaseIn, "1.000")
+	applyDelta(ctx, t, pool, shop.ID, lowA.ID, loc.ID, db.StockMovementKindPurchaseIn, "1.000")
+	applyDelta(ctx, t, pool, shop.ID, notLowA.ID, loc.ID, db.StockMovementKindPurchaseIn, "3.000")
+	applyDelta(ctx, t, pool, shop.ID, lowB.ID, loc.ID, db.StockMovementKindPurchaseIn, "4.000")
+	applyDelta(ctx, t, pool, shop.ID, notLowB.ID, loc.ID, db.StockMovementKindPurchaseIn, "10.000")
+	applyDelta(ctx, t, pool, shop.ID, inactiveProductVariant.ID, loc.ID, db.StockMovementKindPurchaseIn, "1.000")
+	applyDelta(ctx, t, pool, shop.ID, inactiveVariant.ID, loc.ID, db.StockMovementKindPurchaseIn, "1.000")
 
 	rows, err := q.ListLow(ctx, db.ListLowParams{ShopID: shop.ID, Limit: 100})
 	if err != nil {
@@ -355,4 +444,344 @@ func TestListLow_productOverrideElseShopDefault(t *testing.T) {
 	if _, ok := got[inactiveVariant.ID]; ok {
 		t.Error("want an inactive variant absent from ListLow, found it")
 	}
+}
+
+// paginateAllMovements walks ListMovements page by page using its
+// (created_at, id) cursor until a short page signals the end, and returns
+// every row collected in the order the pages produced them.
+func paginateAllMovements(ctx context.Context, t *testing.T, q *db.Queries, base db.ListMovementsParams, pageSize int32) []db.StockMovement {
+	t.Helper()
+	p := base
+	p.Limit = pageSize
+	p.CursorCreatedAt = nil
+	p.CursorID = nil
+	var all []db.StockMovement
+	for {
+		page, err := q.ListMovements(ctx, p)
+		if err != nil {
+			t.Fatalf("ListMovements: %v", err)
+		}
+		all = append(all, page...)
+		if int32(len(page)) < pageSize {
+			return all
+		}
+		last := page[len(page)-1]
+		ca, id := last.CreatedAt, last.ID
+		p.CursorCreatedAt, p.CursorID = &ca, &id
+	}
+}
+
+// paginateAllLevels walks ListLevels page by page using its
+// (variant_id, location_id) cursor until a short page signals the end.
+func paginateAllLevels(ctx context.Context, t *testing.T, q *db.Queries, base db.ListLevelsParams, pageSize int32) []db.ListLevelsRow {
+	t.Helper()
+	p := base
+	p.Limit = pageSize
+	p.CursorVariantID = nil
+	p.CursorLocationID = nil
+	var all []db.ListLevelsRow
+	for {
+		page, err := q.ListLevels(ctx, p)
+		if err != nil {
+			t.Fatalf("ListLevels: %v", err)
+		}
+		all = append(all, page...)
+		if int32(len(page)) < pageSize {
+			return all
+		}
+		last := page[len(page)-1]
+		vid, lid := last.VariantID, last.LocationID
+		p.CursorVariantID, p.CursorLocationID = &vid, &lid
+	}
+}
+
+// paginateAllLow walks ListLow page by page using its variant_id cursor
+// until a short page signals the end.
+func paginateAllLow(ctx context.Context, t *testing.T, q *db.Queries, base db.ListLowParams, pageSize int32) []db.ListLowRow {
+	t.Helper()
+	p := base
+	p.Limit = pageSize
+	p.CursorVariantID = nil
+	var all []db.ListLowRow
+	for {
+		page, err := q.ListLow(ctx, p)
+		if err != nil {
+			t.Fatalf("ListLow: %v", err)
+		}
+		all = append(all, page...)
+		if int32(len(page)) < pageSize {
+			return all
+		}
+		last := page[len(page)-1]
+		vid := last.VariantID
+		p.CursorVariantID = &vid
+	}
+}
+
+func TestListMovements_cursorPagination(t *testing.T) {
+	pool := testdb.New(t)
+	testdb.Truncate(t, pool)
+	ctx := context.Background()
+	q := db.New(pool)
+
+	shop := catalogShop(ctx, t, q, "shop-movements-cursor")
+	unit := catalogUnit(ctx, t, q, shop.ID, "pcs")
+	product := catalogProduct(ctx, t, q, shop.ID, unit.ID, "hoodie")
+	variant := stockVariant(ctx, t, q, shop.ID, product.ID, "{}")
+	loc := stockLocation(ctx, t, q, shop.ID, "Main")
+
+	const n = 5
+	for i := 0; i < n; i++ {
+		if _, err := insertMovement(ctx, q, db.InsertMovementParams{
+			ShopID: shop.ID, VariantID: variant.ID, LocationID: loc.ID,
+			Kind: db.StockMovementKindPurchaseIn, Qty: numeric(t, "1.000"),
+		}); err != nil {
+			t.Fatalf("InsertMovement %d: %v", i, err)
+		}
+	}
+
+	base := db.ListMovementsParams{ShopID: shop.ID}
+	refParams := base
+	refParams.Limit = 100
+	reference, err := q.ListMovements(ctx, refParams)
+	if err != nil {
+		t.Fatalf("ListMovements (reference): %v", err)
+	}
+	if len(reference) != n {
+		t.Fatalf("want %d movements, got %d", n, len(reference))
+	}
+
+	paginated := paginateAllMovements(ctx, t, q, base, 2)
+	assertSameOrder(t, "ListMovements", idsOfMovements(reference), idsOfMovements(paginated))
+}
+
+func TestListLevels_cursorPagination(t *testing.T) {
+	pool := testdb.New(t)
+	testdb.Truncate(t, pool)
+	ctx := context.Background()
+	q := db.New(pool)
+
+	shop := catalogShop(ctx, t, q, "shop-levels-cursor")
+	unit := catalogUnit(ctx, t, q, shop.ID, "pcs")
+	product := catalogProduct(ctx, t, q, shop.ID, unit.ID, "hoodie")
+	loc := stockLocation(ctx, t, q, shop.ID, "Main")
+
+	const n = 5
+	for i := 0; i < n; i++ {
+		v := stockVariant(ctx, t, q, shop.ID, product.ID, fmt.Sprintf(`{"size":"S%d"}`, i))
+		applyDelta(ctx, t, pool, shop.ID, v.ID, loc.ID, db.StockMovementKindPurchaseIn, "1.000")
+	}
+
+	base := db.ListLevelsParams{ShopID: shop.ID}
+	refParams := base
+	refParams.Limit = 100
+	reference, err := q.ListLevels(ctx, refParams)
+	if err != nil {
+		t.Fatalf("ListLevels (reference): %v", err)
+	}
+	if len(reference) != n {
+		t.Fatalf("want %d levels, got %d", n, len(reference))
+	}
+
+	paginated := paginateAllLevels(ctx, t, q, base, 2)
+	assertSameOrder(t, "ListLevels", idsOfLevels(reference), idsOfLevels(paginated))
+}
+
+func TestListLow_cursorPagination(t *testing.T) {
+	pool := testdb.New(t)
+	testdb.Truncate(t, pool)
+	ctx := context.Background()
+	q := db.New(pool)
+
+	shop := catalogShop(ctx, t, q, "shop-low-cursor")
+	unit := catalogUnit(ctx, t, q, shop.ID, "pcs")
+	product := catalogProduct(ctx, t, q, shop.ID, unit.ID, "hoodie")
+	loc := stockLocation(ctx, t, q, shop.ID, "Main")
+
+	const n = 5
+	for i := 0; i < n; i++ {
+		v := stockVariant(ctx, t, q, shop.ID, product.ID, fmt.Sprintf(`{"size":"S%d"}`, i))
+		// shop default threshold is 2; qty 1 is low for every one of them.
+		applyDelta(ctx, t, pool, shop.ID, v.ID, loc.ID, db.StockMovementKindPurchaseIn, "1.000")
+	}
+
+	base := db.ListLowParams{ShopID: shop.ID}
+	refParams := base
+	refParams.Limit = 100
+	reference, err := q.ListLow(ctx, refParams)
+	if err != nil {
+		t.Fatalf("ListLow (reference): %v", err)
+	}
+	if len(reference) != n {
+		t.Fatalf("want %d low variants, got %d", n, len(reference))
+	}
+
+	paginated := paginateAllLow(ctx, t, q, base, 2)
+	assertSameOrder(t, "ListLow", idsOfLow(reference), idsOfLow(paginated))
+}
+
+func idsOfMovements(rows []db.StockMovement) []uuid.UUID {
+	ids := make([]uuid.UUID, len(rows))
+	for i, r := range rows {
+		ids[i] = r.ID
+	}
+	return ids
+}
+
+func idsOfLevels(rows []db.ListLevelsRow) []uuid.UUID {
+	ids := make([]uuid.UUID, len(rows))
+	for i, r := range rows {
+		ids[i] = r.VariantID
+	}
+	return ids
+}
+
+func idsOfLow(rows []db.ListLowRow) []uuid.UUID {
+	ids := make([]uuid.UUID, len(rows))
+	for i, r := range rows {
+		ids[i] = r.VariantID
+	}
+	return ids
+}
+
+// assertSameOrder asserts paginated reproduces reference exactly —
+// element for element, in order — which by construction also proves no
+// duplicate and no skipped row (a duplicate or a skip would change the
+// length or an element at some index).
+func assertSameOrder(t *testing.T, label string, reference, paginated []uuid.UUID) {
+	t.Helper()
+	if len(paginated) != len(reference) {
+		t.Fatalf("%s: want %d rows paginated (matching the unpaginated reference), got %d", label, len(reference), len(paginated))
+	}
+	for i := range reference {
+		if paginated[i] != reference[i] {
+			t.Fatalf("%s: order mismatch at index %d: reference %s, paginated %s", label, i, reference[i], paginated[i])
+		}
+	}
+}
+
+// movementFixture is shared setup for the ListMovements filter tests
+// below: two variants, two locations, one movement per (variant,
+// location) combination, each a different kind, so a single filter value
+// picks out an unambiguous subset.
+type movementFixture struct {
+	q                  *db.Queries
+	shopID             uuid.UUID
+	v1, v2             uuid.UUID
+	l1, l2             uuid.UUID
+	mvA, mvB, mvC, mvD db.StockMovement
+}
+
+func newMovementFixture(t *testing.T) movementFixture {
+	t.Helper()
+	pool := testdb.New(t)
+	testdb.Truncate(t, pool)
+	ctx := context.Background()
+	q := db.New(pool)
+
+	shop := catalogShop(ctx, t, q, "shop-movement-filters")
+	unit := catalogUnit(ctx, t, q, shop.ID, "pcs")
+	product := catalogProduct(ctx, t, q, shop.ID, unit.ID, "hoodie")
+	v1 := stockVariant(ctx, t, q, shop.ID, product.ID, `{"size":"S"}`)
+	v2 := stockVariant(ctx, t, q, shop.ID, product.ID, `{"size":"M"}`)
+	l1 := stockLocation(ctx, t, q, shop.ID, "L1")
+	l2 := stockLocation(ctx, t, q, shop.ID, "L2")
+
+	mvA, err := insertMovement(ctx, q, db.InsertMovementParams{
+		ShopID: shop.ID, VariantID: v1.ID, LocationID: l1.ID,
+		Kind: db.StockMovementKindPurchaseIn, Qty: numeric(t, "5.000"),
+	})
+	if err != nil {
+		t.Fatalf("insert mvA: %v", err)
+	}
+	mvB, err := insertMovement(ctx, q, db.InsertMovementParams{
+		ShopID: shop.ID, VariantID: v1.ID, LocationID: l2.ID,
+		Kind: db.StockMovementKindPurchaseIn, Qty: numeric(t, "3.000"),
+	})
+	if err != nil {
+		t.Fatalf("insert mvB: %v", err)
+	}
+	mvC, err := insertMovement(ctx, q, db.InsertMovementParams{
+		ShopID: shop.ID, VariantID: v2.ID, LocationID: l1.ID,
+		Kind: db.StockMovementKindSaleOut, Qty: numeric(t, "-2.000"),
+	})
+	if err != nil {
+		t.Fatalf("insert mvC: %v", err)
+	}
+	mvD, err := insertMovement(ctx, q, db.InsertMovementParams{
+		ShopID: shop.ID, VariantID: v2.ID, LocationID: l2.ID,
+		Kind: db.StockMovementKindAdjustment, Qty: numeric(t, "1.000"),
+		AdjustmentReason: ptr(db.AdjustmentReasonCountCorrection),
+	})
+	if err != nil {
+		t.Fatalf("insert mvD: %v", err)
+	}
+
+	return movementFixture{q: q, shopID: shop.ID, v1: v1.ID, v2: v2.ID, l1: l1.ID, l2: l2.ID, mvA: mvA, mvB: mvB, mvC: mvC, mvD: mvD}
+}
+
+// assertMovementIDs asserts got contains exactly the given movement ids
+// (order-independent — the filter tests only care about set membership).
+func assertMovementIDs(t *testing.T, got []db.StockMovement, want ...uuid.UUID) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("want %d movements, got %d: %+v", len(want), len(got), got)
+	}
+	wantSet := map[uuid.UUID]bool{}
+	for _, id := range want {
+		wantSet[id] = true
+	}
+	for _, mv := range got {
+		if !wantSet[mv.ID] {
+			t.Errorf("unexpected movement %s in result", mv.ID)
+		}
+	}
+}
+
+func TestListMovements_filterByVariant(t *testing.T) {
+	f := newMovementFixture(t)
+	rows, err := f.q.ListMovements(context.Background(), db.ListMovementsParams{ShopID: f.shopID, VariantID: &f.v1, Limit: 100})
+	if err != nil {
+		t.Fatalf("ListMovements: %v", err)
+	}
+	assertMovementIDs(t, rows, f.mvA.ID, f.mvB.ID)
+}
+
+func TestListMovements_filterByLocation(t *testing.T) {
+	f := newMovementFixture(t)
+	rows, err := f.q.ListMovements(context.Background(), db.ListMovementsParams{ShopID: f.shopID, LocationID: &f.l1, Limit: 100})
+	if err != nil {
+		t.Fatalf("ListMovements: %v", err)
+	}
+	assertMovementIDs(t, rows, f.mvA.ID, f.mvC.ID)
+}
+
+func TestListMovements_filterByKind(t *testing.T) {
+	f := newMovementFixture(t)
+	kind := db.StockMovementKindPurchaseIn
+	rows, err := f.q.ListMovements(context.Background(), db.ListMovementsParams{ShopID: f.shopID, Kind: &kind, Limit: 100})
+	if err != nil {
+		t.Fatalf("ListMovements: %v", err)
+	}
+	assertMovementIDs(t, rows, f.mvA.ID, f.mvB.ID)
+}
+
+func TestListMovements_filterByFrom(t *testing.T) {
+	f := newMovementFixture(t)
+	from := f.mvC.CreatedAt
+	rows, err := f.q.ListMovements(context.Background(), db.ListMovementsParams{ShopID: f.shopID, From: &from, Limit: 100})
+	if err != nil {
+		t.Fatalf("ListMovements: %v", err)
+	}
+	assertMovementIDs(t, rows, f.mvC.ID, f.mvD.ID)
+}
+
+func TestListMovements_filterByTo(t *testing.T) {
+	f := newMovementFixture(t)
+	to := f.mvB.CreatedAt
+	rows, err := f.q.ListMovements(context.Background(), db.ListMovementsParams{ShopID: f.shopID, To: &to, Limit: 100})
+	if err != nil {
+		t.Fatalf("ListMovements: %v", err)
+	}
+	assertMovementIDs(t, rows, f.mvA.ID, f.mvB.ID)
 }
