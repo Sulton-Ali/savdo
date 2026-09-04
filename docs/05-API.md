@@ -80,6 +80,7 @@ Phase numbers refer to `06-ROADMAP.md`.
 | ------ | ----------------------------------- | --------------- |
 | GET    | `/units`                            | any             |
 | GET/POST | `/attribute-definitions`          | manager+        |
+| PATCH  | `/attribute-definitions/{id}`       | manager+        |
 | GET/POST | `/categories`                     | any / manager+  |
 | GET/PATCH/DELETE | `/categories/{id}`        | any / manager+  |
 | GET/POST | `/products`                       | any / manager+  |
@@ -87,7 +88,8 @@ Phase numbers refer to `06-ROADMAP.md`.
 | GET/POST | `/products/{id}/variants`         | any / manager+  |
 | PATCH/DELETE | `/variants/{id}`              | manager+        |
 | POST   | `/media`                            | manager+ (multipart) |
-| POST/DELETE | `/products/{id}/images`        | manager+        |
+| POST    | `/products/{id}/images`            | manager+        |
+| DELETE | `/products/{id}/images/{imageId}`   | manager+        |
 | PATCH  | `/products/{id}/images/order`       | manager+        |
 
 ### Stock, purchases, suppliers (Phase 3)
