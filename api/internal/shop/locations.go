@@ -95,29 +95,42 @@ type LocationPatchInput struct {
 // UpdateLocation applies in to shopID's location id. Business rules
 // (docs/06-ROADMAP.md Phase 1 T5 spec): a shop must always have exactly
 // one default location, so unsetting the current default (isDefault:
-// false) or deactivating it (isActive: false) is refused with the same
-// `fields.isDefault: invalid` error; setting isDefault: true clears any
-// existing default first, in the same transaction as the write.
+// false) is refused with `fields.isDefault: invalid`, and deactivating
+// it (isActive: false) is refused with `fields.isActive: invalid` —
+// the same underlying rule, reported under whichever field the caller
+// actually sent. Setting isDefault: true clears any existing default
+// first, in the same transaction as the write.
+//
+// Whenever isDefault or isActive is part of the patch, the read that
+// decides those guards, the ClearDefaultLocation-if-needed, and the
+// write all run inside one transaction (reusing the plain
+// GetLocation/UpdateLocation queries via WithTx), instead of the read
+// happening before any transaction starts. That narrows, but does not
+// fully close, the race two concurrent "make this the default" requests
+// can hit: without a `SELECT … FOR UPDATE` variant of GetLocation — a
+// query change outside this package's scope (api/db) — two transactions
+// can still each decide "I should become the default" from their own
+// snapshot before either commits. The partial unique index
+// locations_shop_id_default_key is the backstop for that remaining
+// window: conflictField maps its 23505 to 409 CONFLICT
+// details.field=isDefault, so the loser of such a race gets a clean 409
+// instead of a 500, and the index itself guarantees at most one default
+// row ever exists no matter how the two transactions interleave.
 func (s *Service) UpdateLocation(ctx context.Context, shopID, id uuid.UUID, in LocationPatchInput) (db.Location, error) {
-	current, err := s.q.GetLocation(ctx, db.GetLocationParams{ShopID: shopID, ID: id})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return db.Location{}, apierr.NotFound("location")
+	if in.IsDefault == nil && in.IsActive == nil {
+		// Fast path: neither field that can violate the "exactly one
+		// default" invariant is being touched, so there is nothing to
+		// guard and no need for a transaction — just confirm the
+		// location belongs to this shop and apply the patch.
+		if _, err := s.q.GetLocation(ctx, db.GetLocationParams{ShopID: shopID, ID: id}); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return db.Location{}, apierr.NotFound("location")
+			}
+			return db.Location{}, fmt.Errorf("shop: get location: %w", err)
 		}
-		return db.Location{}, fmt.Errorf("shop: get location: %w", err)
-	}
 
-	unsettingDefault := current.IsDefault && in.IsDefault != nil && !*in.IsDefault
-	deactivatingDefault := current.IsDefault && in.IsActive != nil && !*in.IsActive
-	if unsettingDefault || deactivatingDefault {
-		return db.Location{}, apierr.Validation(map[string]string{"isDefault": "invalid"})
-	}
-
-	makingDefault := in.IsDefault != nil && *in.IsDefault && !current.IsDefault
-	if !makingDefault {
 		updated, err := s.q.UpdateLocation(ctx, db.UpdateLocationParams{
-			Name: in.Name, Kind: in.Kind, IsDefault: in.IsDefault, IsActive: in.IsActive,
-			ShopID: shopID, ID: id,
+			Name: in.Name, Kind: in.Kind, ShopID: shopID, ID: id,
 		})
 		if err != nil {
 			if field, ok := conflictField(err); ok {
@@ -135,9 +148,28 @@ func (s *Service) UpdateLocation(ctx context.Context, shopID, id uuid.UUID, in L
 	defer func() { _ = tx.Rollback(ctx) }()
 	qtx := s.q.WithTx(tx)
 
-	if err := qtx.ClearDefaultLocation(ctx, shopID); err != nil {
-		return db.Location{}, fmt.Errorf("shop: clear default location: %w", err)
+	current, err := qtx.GetLocation(ctx, db.GetLocationParams{ShopID: shopID, ID: id})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return db.Location{}, apierr.NotFound("location")
+		}
+		return db.Location{}, fmt.Errorf("shop: get location: %w", err)
 	}
+
+	if current.IsDefault && in.IsDefault != nil && !*in.IsDefault {
+		return db.Location{}, apierr.Validation(map[string]string{"isDefault": "invalid"})
+	}
+	if current.IsDefault && in.IsActive != nil && !*in.IsActive {
+		return db.Location{}, apierr.Validation(map[string]string{"isActive": "invalid"})
+	}
+
+	makingDefault := in.IsDefault != nil && *in.IsDefault && !current.IsDefault
+	if makingDefault {
+		if err := qtx.ClearDefaultLocation(ctx, shopID); err != nil {
+			return db.Location{}, fmt.Errorf("shop: clear default location: %w", err)
+		}
+	}
+
 	updated, err := qtx.UpdateLocation(ctx, db.UpdateLocationParams{
 		Name: in.Name, Kind: in.Kind, IsDefault: in.IsDefault, IsActive: in.IsActive,
 		ShopID: shopID, ID: id,
@@ -146,7 +178,7 @@ func (s *Service) UpdateLocation(ctx context.Context, shopID, id uuid.UUID, in L
 		if field, ok := conflictField(err); ok {
 			return db.Location{}, apierr.Conflict(field)
 		}
-		return db.Location{}, fmt.Errorf("shop: update location (make default): %w", err)
+		return db.Location{}, fmt.Errorf("shop: update location: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return db.Location{}, fmt.Errorf("shop: commit update location: %w", err)

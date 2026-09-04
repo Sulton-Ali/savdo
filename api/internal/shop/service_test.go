@@ -269,8 +269,11 @@ func TestUpdateLocationRefusesDeactivatingTheDefault(t *testing.T) {
 		t.Fatal("UpdateLocation(deactivate default) error = nil, want validation error")
 	}
 	apiErr, ok := err.(*apierr.Error)
-	if !ok || apiErr.Status != 400 || apiErr.Details["fields"].(map[string]string)["isDefault"] != "invalid" {
-		t.Fatalf("error = %+v, want 400 fields.isDefault=invalid", err)
+	// Deactivating the default reports fields.isActive (the field the
+	// caller actually sent), distinct from fields.isDefault, which is
+	// reserved for an attempt to unset isDefault itself.
+	if !ok || apiErr.Status != 400 || apiErr.Details["fields"].(map[string]string)["isActive"] != "invalid" {
+		t.Fatalf("error = %+v, want 400 fields.isActive=invalid", err)
 	}
 }
 

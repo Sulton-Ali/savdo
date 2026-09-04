@@ -70,6 +70,15 @@ func conflictField(err error) (string, bool) {
 		return "phone", true
 	case "locations_shop_id_name_key":
 		return "name", true
+	case "locations_shop_id_default_key":
+		// The partial unique index enforcing "at most one default
+		// location per shop" — the backstop for the race
+		// UpdateLocation/CreateLocation's own guards narrow but cannot
+		// fully close without a locking query change (see
+		// locations.go's UpdateLocation doc comment): a concurrent
+		// request that also ended up trying to set is_default=true
+		// loses here with a clean 409 instead of a 500.
+		return "isDefault", true
 	default:
 		return "", false
 	}
