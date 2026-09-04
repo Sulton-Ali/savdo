@@ -1,6 +1,6 @@
 # 02 — Tech stack
 
-Pinned versions and why. **Versions verified 2026-09-03** against official release pages
+Pinned versions and why. **Versions verified 2026-09-04** against official release pages
 by the scribe (sources in the notes column). Agents never bump a pin from memory; a bump
 is an owner decision, checked against the registry, in its own `chore(deps)` commit.
 
@@ -27,8 +27,10 @@ branch — with the reason.
 | golang.org/x/crypto   | v0.56.0  | **Direct** dependency: argon2id via `internal/auth` (`argon2.IDKey`, t=3, m=64 MiB, p=4, 32-byte hash, 16-byte salt)                                     |
 | google/uuid           | v1.6.0   | `uuid.NewV7()` for time-ordered ids                                                                            |
 | caarlos0/env          | v11.4.1  | Env → config struct. Stable; low churn is fine here                                                            |
-| shopspring/decimal    | pin in Phase 0 | Decimal math in services; verify latest at scaffold time                                                  |
-| WebP encoding         | decide in Phase 2 | `golang.org/x/image` has no WebP encoder; the Phase 2 task researches (`gen2brain/webp` or `libvips` via `bimg`) and records an ADR amendment |
+| shopspring/decimal    | v1.4.0 | Decimal math in services; verified 2026-09-04                                                            |
+| golang.org/x/image    | v0.45.0 | Image processing (resizing); verified 2026-09-04                                                         |
+| gen2brain/webp        | v0.6.4 | WebP encoding for media derivatives; verified 2026-09-04                                                 |
+| oapi-codegen/nullable | v1.1.0 | OpenAPI nullable type support (PATCH null semantics, D-35); verified 2026-09-04                           |
 | Not used              | —        | JWT (ADR-005 uses opaque sessions), Redis (no need for one shop; rate limits in-memory + Postgres), any ORM     |
 
 ## Contract and shared packages
@@ -64,7 +66,8 @@ pattern; revisit if bundle size becomes a landing performance issue.
 | Forms                    | —          | Ant `Form` in the admin; no react-hook-form, no zod (D-26)                              |
 | dayjs                    | 1.11.23    | Direct admin dependency for locale side effects (antd's own version; D-31 amendment) |
 | lucide-react             | 1.39.0     | Icon set shared with mobile (`lucide-react-native`); 1.40.0 blocked by the 24 h release age at install time |
-| Inter (font)             | —          | Covers Cyrillic and Uzbek Latin (Oʻ, Gʻ); self-hosted, no Google Fonts call at runtime   |
+| @fontsource-variable/inter | 5.3.0   | Inter font self-hosted; covers Cyrillic and Uzbek Latin (Oʻ, Gʻ); verified 2026-09-04                   |
+| react-easy-crop          | 6.2.3      | Image crop UI component for variant binding and media uploads; verified 2026-09-04                        |
 | Biome                    | v2.5.11    | Lint + format, replaces ESLint/Prettier (O-07)                                          |
 | Vitest                   | v4.1.11    | Unit tests (5.0.0 is published; a bump is an owner decision)                            |
 | Playwright               | v1.62.1    | e2e for admin and landing; also the `playwright` MCP for `/phase-done`                  |

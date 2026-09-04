@@ -71,6 +71,8 @@ Routine technical calls taken during bootstrap so work can start. Each is an ADR
 | O-12 | Validation vocabulary: `details.fields` values are exactly `required`, `invalid`, `too_short`, `too_long`; conflicts return 409 with `details.field` = `username`, `phone` or `name`. | Admin maps them to `errors.field.*` i18n keys; every new endpoint uses the same words |
 | O-13 | At most one testcontainers-heavy gate runs at a time on the dev machine; mergers are sequenced by the orchestrator. | Parallel gates caused timeouts and a container-start deadline on 2026-09-04 |
 | O-14 | Categories are soft-deleted (`deleted_at`), like products; a category with remaining products cannot be deleted (409 `CONFLICT` `details.field: products`). | Stable slugs for the landing and sales history; the T2 reviewer flagged the column as undocumented — doc fixed first |
+| O-15 | Bounded reference lists (units, attribute definitions, categories) are unpaginated. | Catalogs and enumerations are small; pagination overhead for 10–50 items is not justified; lists remain small by design (ADR-012 validation) |
+| O-16 | Media stores only WebP derivatives (`_thumb`, `_card`, `_full`); `storage_key` is a stem; originals are never kept or served. | Prevents accidental re-encoding; cuts storage cost; mobile bandwidth wins from smaller sizes; bot always uses `_thumb` |
 
 ## Open questions
 
@@ -91,6 +93,7 @@ Blocking questions are marked **[blocks Phase N]**. The orchestrator asks them v
 | Q-17 | Mobile test runner: add `jest-expo` (new dependency) so `mobile` has unit tests? | Phase 5 | Expo's default template ships no runner; hard rule 11 needs owner approval |
 | Q-18 | Android package id: keep placeholder `uz.savdo.app`? | Phase 5 | Must be final before the first EAS/APK build |
 | Q-19 | Login abuse horizon: today 10/min per IP and 5/min per username with no lockout or backoff (≈7 200 guesses per day per username). Add a longer-horizon limit or temporary lockout? | Phase 8 | Owner escalation from the T4 security review; rate limits are an owner decision (AGENTS.md § Escalate) |
+| Q-21 | Image retag needs `PATCH /products/{id}/images/{imageId}` with `{variantId?, isCover?}`; admin currently does remove→add→reorder. | Phase 2 | Review approach in T8 media scope and T9 variant binding; API endpoint shape to be confirmed |
 
 ## Post-MVP backlog (agreed out of scope for now)
 
