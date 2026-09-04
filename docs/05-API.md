@@ -118,7 +118,6 @@ Phase numbers refer to `06-ROADMAP.md`.
 | POST   | `/media`                            | manager+ (multipart; returns 429 `RATE_LIMITED` when admission queue is full) |
 | POST   | `/products/{id}/images`            | manager+ (max 8 per product; cap → `400 VALIDATION_FAILED`) |
 | DELETE | `/products/{id}/images/{imageId}`  | manager+        |
-| PATCH  | `/products/{id}/images/{imageId}`  | manager+ (bind variant, set cover; see Q-21) |
 | PATCH  | `/products/{id}/images/order`      | manager+ (reorder all)   |
 
 ### Stock, purchases, suppliers (Phase 3)
