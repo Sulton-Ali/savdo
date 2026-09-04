@@ -251,6 +251,11 @@ ON CONFLICT (product_id, locale) DO UPDATE
 SET name = EXCLUDED.name, description = EXCLUDED.description;
 
 -- name: ListProductTranslations :many
-SELECT * FROM product_translations
-WHERE product_id = $1
-ORDER BY locale;
+-- shop_id is joined through the parent product, not a column on
+-- product_translations itself: a translation row must not be readable
+-- through the wrong shop_id (hard rule 1 — every query filters by
+-- shop_id), even though the bare product_id FK would otherwise let it scan.
+SELECT t.* FROM product_translations t
+JOIN products p ON p.id = t.product_id AND p.shop_id = $2
+WHERE t.product_id = $1
+ORDER BY t.locale;

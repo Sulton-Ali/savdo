@@ -171,7 +171,7 @@ func (s *Service) buildFullProduct(ctx context.Context, shopID uuid.UUID, pc pro
 		return gen.Product{}, err
 	}
 
-	entries, err := s.productTranslationEntries(ctx, pc.ID)
+	entries, err := s.productTranslationEntries(ctx, shopID, pc.ID)
 	if err != nil {
 		return gen.Product{}, fmt.Errorf("catalog: list product translations: %w", err)
 	}
@@ -210,9 +210,11 @@ func (s *Service) buildFullProduct(ctx context.Context, shopID uuid.UUID, pc pro
 
 // productTranslationEntries loads every locale's name/description for
 // productID via ListProductTranslations — the only product query that
-// selects description at all.
-func (s *Service) productTranslationEntries(ctx context.Context, productID uuid.UUID) (map[string]translationEntry, error) {
-	rows, err := s.q.ListProductTranslations(ctx, productID)
+// selects description at all. shopID scopes the read to the caller's shop
+// (ListProductTranslations now joins through products on shop_id — hard
+// rule 1).
+func (s *Service) productTranslationEntries(ctx context.Context, shopID, productID uuid.UUID) (map[string]translationEntry, error) {
+	rows, err := s.q.ListProductTranslations(ctx, db.ListProductTranslationsParams{ProductID: productID, ShopID: shopID})
 	if err != nil {
 		return nil, err
 	}

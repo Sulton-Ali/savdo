@@ -3,11 +3,13 @@ package db_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/Sulton-Ali/savdo/api/internal/db"
@@ -119,10 +121,69 @@ func TestProductVariants_attributesUniquePerProduct(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("want a different attributes value to succeed on the same product, got: %v", err)
 	}
+	_, err := q.CreateVariant(ctx, db.CreateVariantParams{
+		ID: uuid.New(), ShopID: shop.ID, ProductID: product.ID, Attributes: large, IsActive: true,
+	})
+	if err == nil {
+		t.Fatal("want a uniqueness error inserting the same (product_id, attributes) twice, got none")
+	}
+	// The conflict must resolve to product_variants_product_id_attributes_key
+	// by name — catalog.conflictField (api/internal/catalog/errors.go) maps
+	// that exact constraint name to the "attributes" API field, and the
+	// migration 0008 rewrite (table constraint -> partial unique index) is
+	// only safe if the name survives unchanged.
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23505" {
+		t.Fatalf("want a pg unique_violation (23505), got: %v", err)
+	}
+	if pgErr.ConstraintName != "product_variants_product_id_attributes_key" {
+		t.Fatalf("ConstraintName = %q, want product_variants_product_id_attributes_key", pgErr.ConstraintName)
+	}
+}
+
+// TestProductVariants_softDeletedAttributesCanBeReused pins the reason
+// migration 0008 turned product_variants_product_id_attributes_key from a
+// plain table UNIQUE(product_id, attributes) into a partial unique index
+// WHERE deleted_at IS NULL: without the partial predicate, soft-deleting a
+// variant (e.g. the "L" size of a hoodie) would permanently block ever
+// recreating that same combination on the product, even though the
+// deleted row is no longer a live variant.
+func TestProductVariants_softDeletedAttributesCanBeReused(t *testing.T) {
+	pool := testdb.New(t)
+	testdb.Truncate(t, pool)
+	ctx := context.Background()
+	q := db.New(pool)
+
+	shop := catalogShop(ctx, t, q, "shop-variants-soft-delete")
+	unit := catalogUnit(ctx, t, q, shop.ID, "pcs")
+	product := catalogProduct(ctx, t, q, shop.ID, unit.ID, "hoodie-soft-delete")
+
+	large := json.RawMessage(`{"size":"L"}`)
+
+	v1, err := q.CreateVariant(ctx, db.CreateVariantParams{
+		ID: uuid.New(), ShopID: shop.ID, ProductID: product.ID, Attributes: large, IsActive: true,
+	})
+	if err != nil {
+		t.Fatalf("create first variant: %v", err)
+	}
+
+	// Two live variants with the same attributes must still conflict.
 	if _, err := q.CreateVariant(ctx, db.CreateVariantParams{
 		ID: uuid.New(), ShopID: shop.ID, ProductID: product.ID, Attributes: large, IsActive: true,
 	}); err == nil {
-		t.Fatal("want a uniqueness error inserting the same (product_id, attributes) twice, got none")
+		t.Fatal("want a uniqueness error inserting a second live variant with the same attributes, got none")
+	}
+
+	if err := q.SoftDeleteVariant(ctx, db.SoftDeleteVariantParams{ShopID: shop.ID, ID: v1.ID}); err != nil {
+		t.Fatalf("SoftDeleteVariant: %v", err)
+	}
+
+	// Now that the only variant with these attributes is soft-deleted, the
+	// same combination must be free to reuse on the same product.
+	if _, err := q.CreateVariant(ctx, db.CreateVariantParams{
+		ID: uuid.New(), ShopID: shop.ID, ProductID: product.ID, Attributes: large, IsActive: true,
+	}); err != nil {
+		t.Fatalf("want re-creating the same attributes after a soft delete to succeed, got: %v", err)
 	}
 }
 
@@ -608,7 +669,7 @@ func TestListCategoryTranslations_returnsAllLocalesOrdered(t *testing.T) {
 		t.Fatalf("upsert uz translation: %v", err)
 	}
 
-	rows, err := q.ListCategoryTranslations(ctx, cat.ID)
+	rows, err := q.ListCategoryTranslations(ctx, db.ListCategoryTranslationsParams{CategoryID: cat.ID, ShopID: shop.ID})
 	if err != nil {
 		t.Fatalf("ListCategoryTranslations: %v", err)
 	}

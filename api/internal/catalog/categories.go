@@ -45,9 +45,11 @@ func toGenCategory(id uuid.UUID, parentID *uuid.UUID, slug string, sortOrder int
 
 // categoryTranslationEntries loads every locale's name/description for
 // categoryID via ListCategoryTranslations, the same shape
-// productTranslationEntries builds from ListProductTranslations.
-func (s *Service) categoryTranslationEntries(ctx context.Context, categoryID uuid.UUID) (map[string]translationEntry, error) {
-	rows, err := s.q.ListCategoryTranslations(ctx, categoryID)
+// productTranslationEntries builds from ListProductTranslations. shopID
+// scopes the read to the caller's shop (ListCategoryTranslations now joins
+// through categories on shop_id — hard rule 1).
+func (s *Service) categoryTranslationEntries(ctx context.Context, shopID, categoryID uuid.UUID) (map[string]translationEntry, error) {
+	rows, err := s.q.ListCategoryTranslations(ctx, db.ListCategoryTranslationsParams{CategoryID: categoryID, ShopID: shopID})
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +116,7 @@ func (h *Handler) GetCategory(ctx context.Context, req gen.GetCategoryRequestObj
 
 	var translations *gen.Translations
 	if auth.Require(ctx, auth.PermCatalogWrite) == nil {
-		entries, err := h.svc.categoryTranslationEntries(ctx, row.ID)
+		entries, err := h.svc.categoryTranslationEntries(ctx, authCtx.ShopID, row.ID)
 		if err != nil {
 			return nil, fmt.Errorf("catalog: list category translations: %w", err)
 		}
@@ -461,7 +463,7 @@ func (h *Handler) UpdateCategory(ctx context.Context, req gen.UpdateCategoryRequ
 	}
 	// The caller reaching UpdateCategory already has catalog.write, so the
 	// full translations map is always included, same as CreateCategory.
-	entries, err := h.svc.categoryTranslationEntries(ctx, updated.ID)
+	entries, err := h.svc.categoryTranslationEntries(ctx, authCtx.ShopID, updated.ID)
 	if err != nil {
 		return nil, fmt.Errorf("catalog: list category translations: %w", err)
 	}

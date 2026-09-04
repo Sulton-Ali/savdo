@@ -59,7 +59,15 @@ LEFT JOIN LATERAL (
 WHERE c.shop_id = sqlc.arg('shop_id') AND c.id = sqlc.arg('id') AND c.deleted_at IS NULL;
 
 -- name: ListCategoryTranslations :many
-SELECT locale, name, description FROM category_translations WHERE category_id = $1 ORDER BY locale;
+-- shop_id is joined through the parent category, same reasoning as
+-- ListProductTranslations: a translation row must not be readable through
+-- the wrong shop_id (hard rule 1), even though the bare category_id FK
+-- would otherwise let it scan.
+SELECT t.locale, t.name, t.description
+FROM category_translations t
+JOIN categories c ON c.id = t.category_id AND c.shop_id = $2
+WHERE t.category_id = $1
+ORDER BY t.locale;
 
 -- name: CreateCategory :one
 INSERT INTO categories (id, shop_id, parent_id, slug, sort_order, is_active, image_id)

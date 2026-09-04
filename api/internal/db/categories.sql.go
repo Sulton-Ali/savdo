@@ -308,8 +308,17 @@ func (q *Queries) ListCategories(ctx context.Context, arg ListCategoriesParams) 
 }
 
 const listCategoryTranslations = `-- name: ListCategoryTranslations :many
-SELECT locale, name, description FROM category_translations WHERE category_id = $1 ORDER BY locale
+SELECT t.locale, t.name, t.description
+FROM category_translations t
+JOIN categories c ON c.id = t.category_id AND c.shop_id = $2
+WHERE t.category_id = $1
+ORDER BY t.locale
 `
+
+type ListCategoryTranslationsParams struct {
+	CategoryID uuid.UUID `json:"category_id"`
+	ShopID     uuid.UUID `json:"shop_id"`
+}
 
 type ListCategoryTranslationsRow struct {
 	Locale      string  `json:"locale"`
@@ -317,8 +326,12 @@ type ListCategoryTranslationsRow struct {
 	Description *string `json:"description"`
 }
 
-func (q *Queries) ListCategoryTranslations(ctx context.Context, categoryID uuid.UUID) ([]ListCategoryTranslationsRow, error) {
-	rows, err := q.db.Query(ctx, listCategoryTranslations, categoryID)
+// shop_id is joined through the parent category, same reasoning as
+// ListProductTranslations: a translation row must not be readable through
+// the wrong shop_id (hard rule 1), even though the bare category_id FK
+// would otherwise let it scan.
+func (q *Queries) ListCategoryTranslations(ctx context.Context, arg ListCategoryTranslationsParams) ([]ListCategoryTranslationsRow, error) {
+	rows, err := q.db.Query(ctx, listCategoryTranslations, arg.CategoryID, arg.ShopID)
 	if err != nil {
 		return nil, err
 	}
