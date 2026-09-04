@@ -686,7 +686,7 @@ func TestListCategoryTranslations_returnsAllLocalesOrdered(t *testing.T) {
 }
 
 // The LATERAL fallback's description column must come through as a real
-// NULL (*string == nil), not the '' sentinel used for name/locale_used —
+// NULL (*string == nil), not the ” sentinel used for name/locale_used —
 // description is nullable at the schema level, unlike name, so an absent
 // translation and a translation with no description must be
 // distinguishable from "has a description of the empty string".
