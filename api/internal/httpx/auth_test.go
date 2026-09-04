@@ -19,6 +19,7 @@ import (
 	"github.com/Sulton-Ali/savdo/api/internal/db/testdb"
 	mediamod "github.com/Sulton-Ali/savdo/api/internal/media"
 	shopmod "github.com/Sulton-Ali/savdo/api/internal/shop"
+	stockmod "github.com/Sulton-Ali/savdo/api/internal/stock"
 )
 
 // authTestFixture wires a full router against a real (testcontainers)
@@ -74,9 +75,10 @@ func newAuthTestFixture(t *testing.T, cfgOverrides func(*config.Config)) authTes
 	shopSvc := shopmod.NewService(pool, q)
 	mediaSvc := mediamod.NewService(q, nil, "/media", 10<<20, 2, 10)
 	catalogSvc := catalog.NewService(pool, q, "uz", "/media")
+	stockSvc := stockmod.NewService(pool, q)
 
 	return authTestFixture{
-		router:   NewRouter(testLogger(), pool, authSvc, shopSvc, mediaSvc, nil, catalogSvc),
+		router:   NewRouter(testLogger(), pool, authSvc, shopSvc, mediaSvc, nil, catalogSvc, stockSvc),
 		shopID:   shop.ID,
 		userID:   user.ID,
 		username: user.Username,

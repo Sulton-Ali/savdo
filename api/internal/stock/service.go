@@ -10,7 +10,12 @@
 package stock
 
 import (
+	"context"
+	"errors"
+	"fmt"
+
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Sulton-Ali/savdo/api/internal/db"
@@ -44,6 +49,30 @@ type Handler struct {
 // NewHandler wraps svc for the strict server interface.
 func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
+}
+
+// createdByName resolves userID's display name for a single-movement
+// response (CreateAdjustment, CreateStockTransfer) — the list endpoint
+// (ListStockMovements) gets it from ListMovementsWithCreatedByName's own
+// join instead, so as not to pay one extra query per row. Returns nil,
+// nil for a nil userID (a system-written movement — not expected from a
+// handler, which always sets ActorID to the authenticated caller, but
+// Move's own MoveParams allows it) or for a user that no longer exists
+// (mirrors the sqlc query's LEFT JOIN: "createdBy is set but the name is
+// unknown" is not an error, per the contract's own createdByName doc
+// comment).
+func (s *Service) createdByName(ctx context.Context, shopID uuid.UUID, userID *uuid.UUID) (*string, error) {
+	if userID == nil {
+		return nil, nil
+	}
+	user, err := s.q.GetUserByID(ctx, db.GetUserByIDParams{ShopID: shopID, ID: *userID})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("stock: get created-by user: %w", err)
+	}
+	return &user.FullName, nil
 }
 
 // newID mints a UUID v7 (time-ordered, docs/03-ARCHITECTURE.md §

@@ -19,6 +19,7 @@ import (
 	"github.com/Sulton-Ali/savdo/api/internal/db/testdb"
 	"github.com/Sulton-Ali/savdo/api/internal/media"
 	"github.com/Sulton-Ali/savdo/api/internal/shop"
+	"github.com/Sulton-Ali/savdo/api/internal/stock"
 )
 
 // shopTestFixture wires a full router (real auth middleware, real shop
@@ -70,9 +71,10 @@ func newShopTestFixture(t *testing.T) shopTestFixture {
 	shopSvc := shop.NewService(pool, q)
 	mediaSvc := media.NewService(q, nil, "/media", 10<<20, 2, 10)
 	catalogSvc := catalog.NewService(pool, q, "uz", "/media")
+	stockSvc := stock.NewService(pool, q)
 
 	return shopTestFixture{
-		router:        NewRouter(testLogger(), pool, authSvc, shopSvc, mediaSvc, nil, catalogSvc),
+		router:        NewRouter(testLogger(), pool, authSvc, shopSvc, mediaSvc, nil, catalogSvc, stockSvc),
 		q:             q,
 		shopID:        shopRow.ID,
 		ownerUsername: owner.Username,

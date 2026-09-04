@@ -19,6 +19,7 @@ import (
 	"github.com/Sulton-Ali/savdo/api/internal/catalog"
 	"github.com/Sulton-Ali/savdo/api/internal/media"
 	"github.com/Sulton-Ali/savdo/api/internal/shop"
+	"github.com/Sulton-Ali/savdo/api/internal/stock"
 )
 
 // NewRouter builds the API's http.Handler: routes registered by the
@@ -46,13 +47,18 @@ import (
 // (catalog.go); catalog.AcceptLanguageMiddleware runs alongside
 // authSvc.Middleware so those handlers can resolve `Accept-Language` (not
 // modelled as a per-operation parameter in the contract) off the context.
-func NewRouter(logger *slog.Logger, pool *pgxpool.Pool, authSvc *auth.Service, shopSvc *shop.Service, mediaSvc *media.Service, devMedia http.Handler, catalogSvc *catalog.Service) http.Handler {
+// stockSvc backs the five `/stock/*` operations via stock.NewHandler
+// (stock.go); CreateStockAdjustment additionally uses pool directly, for
+// httpx.Idempotent's Idempotency-Key bookkeeping (stock.go's own doc
+// comment).
+func NewRouter(logger *slog.Logger, pool *pgxpool.Pool, authSvc *auth.Service, shopSvc *shop.Service, mediaSvc *media.Service, devMedia http.Handler, catalogSvc *catalog.Service, stockSvc *stock.Service) http.Handler {
 	mux := http.NewServeMux()
 
 	strictHandler := gen.NewStrictHandlerWithOptions(
 		server{
 			pool: pool, Handler: auth.NewHandler(authSvc), shop: shop.NewHandler(shopSvc),
 			media: media.NewHandler(mediaSvc), catalog: catalog.NewHandler(catalogSvc),
+			stock: stock.NewHandler(stockSvc),
 		},
 		[]gen.StrictMiddlewareFunc{authSvc.Middleware, catalog.AcceptLanguageMiddleware},
 		gen.StrictHTTPServerOptions{

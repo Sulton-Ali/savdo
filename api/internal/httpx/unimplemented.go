@@ -15,11 +15,12 @@ import (
 // envelope (ADR-013) with code INTERNAL and `details.reason:
 // "not_implemented"` — same shape and same rationale as Phase 1's and
 // Phase 2's unimplemented.go (git history), which this file re-creates
-// for the 17 suppliers/purchases/stock/image-retag operations T1 adds to
-// the contract.
+// for the suppliers/purchases/image-retag operations T1 added to the
+// contract (originally 17, alongside the five stock operations T3's own
+// stock module has since replaced).
 //
 // Each method here corresponds to one contracts/openapi.yaml operationId.
-// Replaced as the supplier, purchase and stock handlers land in their own
+// Replaced as the supplier and purchase handlers land in their own
 // modules; delete the method here when its real handler lands.
 type notImplementedResponse struct{}
 
@@ -65,21 +66,6 @@ func (r notImplementedResponse) VisitReceivePurchaseResponse(w http.ResponseWrit
 	return r.write(w)
 }
 func (r notImplementedResponse) VisitCancelPurchaseResponse(w http.ResponseWriter) error {
-	return r.write(w)
-}
-func (r notImplementedResponse) VisitListStockLevelsResponse(w http.ResponseWriter) error {
-	return r.write(w)
-}
-func (r notImplementedResponse) VisitListStockMovementsResponse(w http.ResponseWriter) error {
-	return r.write(w)
-}
-func (r notImplementedResponse) VisitCreateStockAdjustmentResponse(w http.ResponseWriter) error {
-	return r.write(w)
-}
-func (r notImplementedResponse) VisitCreateStockTransferResponse(w http.ResponseWriter) error {
-	return r.write(w)
-}
-func (r notImplementedResponse) VisitListLowStockResponse(w http.ResponseWriter) error {
 	return r.write(w)
 }
 
@@ -147,35 +133,5 @@ func (server) ReceivePurchase(_ context.Context, _ gen.ReceivePurchaseRequestObj
 // already received. Phase 3 T1: replaced once the purchases/stock
 // modules land.
 func (server) CancelPurchase(_ context.Context, _ gen.CancelPurchaseRequestObject) (gen.CancelPurchaseResponseObject, error) {
-	return notImplementedResponse{}, nil
-}
-
-// ListStockLevels lists stock levels per variant and location.
-// Phase 3 T1: replaced once the stock module lands.
-func (server) ListStockLevels(_ context.Context, _ gen.ListStockLevelsRequestObject) (gen.ListStockLevelsResponseObject, error) {
-	return notImplementedResponse{}, nil
-}
-
-// ListStockMovements lists the append-only stock movement ledger.
-// Phase 3 T1: replaced once the stock module lands.
-func (server) ListStockMovements(_ context.Context, _ gen.ListStockMovementsRequestObject) (gen.ListStockMovementsResponseObject, error) {
-	return notImplementedResponse{}, nil
-}
-
-// CreateStockAdjustment records a manual stock adjustment.
-// Phase 3 T1: replaced once the stock module lands.
-func (server) CreateStockAdjustment(_ context.Context, _ gen.CreateStockAdjustmentRequestObject) (gen.CreateStockAdjustmentResponseObject, error) {
-	return notImplementedResponse{}, nil
-}
-
-// CreateStockTransfer transfers stock between two locations.
-// Phase 3 T1: replaced once the stock module lands.
-func (server) CreateStockTransfer(_ context.Context, _ gen.CreateStockTransferRequestObject) (gen.CreateStockTransferResponseObject, error) {
-	return notImplementedResponse{}, nil
-}
-
-// ListLowStock lists variants at or below their effective low-stock
-// threshold. Phase 3 T1: replaced once the stock module lands.
-func (server) ListLowStock(_ context.Context, _ gen.ListLowStockRequestObject) (gen.ListLowStockResponseObject, error) {
 	return notImplementedResponse{}, nil
 }

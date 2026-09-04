@@ -21,6 +21,7 @@ import (
 	"github.com/Sulton-Ali/savdo/api/internal/httpx"
 	"github.com/Sulton-Ali/savdo/api/internal/media"
 	"github.com/Sulton-Ali/savdo/api/internal/shop"
+	"github.com/Sulton-Ali/savdo/api/internal/stock"
 )
 
 func main() {
@@ -72,6 +73,7 @@ func run() error {
 	authSvc := auth.NewService(queries, cfg, shopRow.ID)
 	shopSvc := shop.NewService(pool, queries)
 	catalogSvc := catalog.NewService(pool, queries, shopRow.DefaultLocale, cfg.MediaBaseURL)
+	stockSvc := stock.NewService(pool, queries)
 
 	// LocalStorage writes under Config.MediaDir (ADR-008); mediaSvc caps
 	// an upload's file part at Config.MediaMaxBytes, bounds concurrent
@@ -104,7 +106,7 @@ func run() error {
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           httpx.NewRouter(logger, pool, authSvc, shopSvc, mediaSvc, devMedia, catalogSvc),
+		Handler:           httpx.NewRouter(logger, pool, authSvc, shopSvc, mediaSvc, devMedia, catalogSvc, stockSvc),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      15 * time.Second,
