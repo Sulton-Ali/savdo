@@ -60,9 +60,13 @@ Base path `/v1`. JSON only. Server: Go, `api/cmd/api`, port 8080 behind Caddy.
   `_full`), and details (O-16). The endpoint returns `429 RATE_LIMITED` when the upload
   admission queue is full (`MEDIA_QUEUE`). **Max 8 images per product** (`image_count >= 8`
   returns `400 VALIDATION_FAILED` with `details.fields.mediaId: invalid`).
-- **Inactive product visibility**: `GET /products/{id}` for a `deleted_at` product returns
-  `404 NOT_FOUND` when the requester is a cashier or lower; managers and above see the full
-  record including `deleted_at`. Listings via `GET /products` omit soft-deleted products for all roles.
+- **Soft-deleted vs inactive product visibility**: a soft-deleted product (`deleted_at`
+  set) is `404 NOT_FOUND` on `GET /products/{id}` for every role, and never appears in
+  `GET /products` for any role. A product with `isActive: false` (not deleted) is a
+  separate case: callers with `catalog.write` see it on `GET /products/{id}`, and on
+  `GET /products` only when the request passes `includeInactive=true`; a cashier gets
+  `404 NOT_FOUND` on `GET /products/{id}` for an inactive product and never sees it
+  listed, `includeInactive` or not.
 - **Versioning**: additive changes only within `/v1`. A breaking change is `/v2` and an
   owner decision.
 
