@@ -1656,7 +1656,9 @@ paths:
             `409 SAME_LOCATION` when `fromLocationId` equals
             `toLocationId`; `409 STOCK_INSUFFICIENT
             details.variantId/locationId/available` when the transfer
-            would take the source level below zero.
+            would take the source level below zero; `409 CONFLICT
+            details.reason: "deadlock"` when two concurrent transfers
+            could not be serialized — safe to retry.
           content:
             application/json:
               schema:
@@ -2953,12 +2955,19 @@ components:
 
     PurchaseItem:
       type: object
-      description: One line of a purchase (docs/04-DATA-MODEL.md § 3).
+      description: >
+        One line of a purchase (docs/04-DATA-MODEL.md § 3). `productName`,
+        `variantLabel` and `sku` are response-only (never accepted on
+        `PurchaseItemCreate`): resolved by the service from the variant and
+        product a client only supplies as `variantId`.
       required:
         - id
         - variantId
         - qty
         - unitCost
+        - productName
+        - variantLabel
+        - sku
       properties:
         id:
           type: string
@@ -2970,6 +2979,22 @@ components:
           $ref: "#/components/schemas/Decimal"
         unitCost:
           $ref: "#/components/schemas/Decimal"
+        productName:
+          type: string
+          description: >
+            The variant's product name, resolved in the caller's locale
+            (same `requested -> uz -> any` fallback as `Product.name`,
+            ADR-012). Read-only.
+        variantLabel:
+          type: string
+          description: >
+            A short, human label for the variant — its attribute values in
+            attribute-definition order (e.g. "L / Blue"), falling back to
+            its SKU, then its id (same rule as the admin's own variant
+            label). Read-only.
+        sku:
+          type: ["string", "null"]
+          description: The variant's own SKU, if it has one. Read-only.
 
     PurchaseItemCreate:
       type: object

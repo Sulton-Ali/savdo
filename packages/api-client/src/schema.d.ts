@@ -1351,7 +1351,7 @@ export interface components {
          * @enum {string}
          */
         PurchaseStatus: "draft" | "received" | "cancelled";
-        /** @description One line of a purchase (docs/04-DATA-MODEL.md § 3). */
+        /** @description One line of a purchase (docs/04-DATA-MODEL.md § 3). `productName`, `variantLabel` and `sku` are response-only (never accepted on `PurchaseItemCreate`): resolved by the service from the variant and product a client only supplies as `variantId`. */
         PurchaseItem: {
             /** Format: uuid */
             id: string;
@@ -1359,6 +1359,12 @@ export interface components {
             variantId: string;
             qty: components["schemas"]["Decimal"];
             unitCost: components["schemas"]["Decimal"];
+            /** @description The variant's product name, resolved in the caller's locale (same `requested -> uz -> any` fallback as `Product.name`, ADR-012). Read-only. */
+            productName: string;
+            /** @description A short, human label for the variant — its attribute values in attribute-definition order (e.g. "L / Blue"), falling back to its SKU, then its id (same rule as the admin's own variant label). Read-only. */
+            variantLabel: string;
+            /** @description The variant's own SKU, if it has one. Read-only. */
+            sku: string | null;
         };
         PurchaseItemCreate: {
             /** Format: uuid */
@@ -3076,7 +3082,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description `409 SAME_LOCATION` when `fromLocationId` equals `toLocationId`; `409 STOCK_INSUFFICIENT details.variantId/locationId/available` when the transfer would take the source level below zero. */
+            /** @description `409 SAME_LOCATION` when `fromLocationId` equals `toLocationId`; `409 STOCK_INSUFFICIENT details.variantId/locationId/available` when the transfer would take the source level below zero; `409 CONFLICT details.reason: "deadlock"` when two concurrent transfers could not be serialized — safe to retry. */
             409: {
                 headers: {
                     [name: string]: unknown;

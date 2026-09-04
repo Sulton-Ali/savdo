@@ -733,16 +733,25 @@ type PurchaseCreate struct {
 	SupplierInvoiceNo *string              `json:"supplierInvoiceNo,omitempty"`
 }
 
-// PurchaseItem One line of a purchase (docs/04-DATA-MODEL.md § 3).
+// PurchaseItem One line of a purchase (docs/04-DATA-MODEL.md § 3). `productName`, `variantLabel` and `sku` are response-only (never accepted on `PurchaseItemCreate`): resolved by the service from the variant and product a client only supplies as `variantId`.
 type PurchaseItem struct {
 	Id openapi_types.UUID `json:"id"`
+
+	// ProductName The variant's product name, resolved in the caller's locale (same `requested -> uz -> any` fallback as `Product.name`, ADR-012). Read-only.
+	ProductName string `json:"productName"`
 
 	// Qty money and quantities as decimal strings (ADR-007)
 	Qty Decimal `json:"qty"`
 
+	// Sku The variant's own SKU, if it has one. Read-only.
+	Sku nullable.Nullable[string] `json:"sku"`
+
 	// UnitCost money and quantities as decimal strings (ADR-007)
 	UnitCost  Decimal            `json:"unitCost"`
 	VariantId openapi_types.UUID `json:"variantId"`
+
+	// VariantLabel A short, human label for the variant — its attribute values in attribute-definition order (e.g. "L / Blue"), falling back to its SKU, then its id (same rule as the admin's own variant label). Read-only.
+	VariantLabel string `json:"variantLabel"`
 }
 
 // PurchaseItemCreate defines model for PurchaseItemCreate.
