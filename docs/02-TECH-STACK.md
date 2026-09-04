@@ -24,7 +24,7 @@ branch — with the reason.
 | anthropic-sdk-go      | v1.69.0  | First `internal/ai` provider (Claude). Tool use via Messages API                                              |
 | google.golang.org/genai | v1.71.0 | Second provider (Gemini), behind the same interface — only if Q-01 picks it                                    |
 | OpenAI-compatible     | stdlib   | `openai_compat` provider is a thin HTTP client for self-hosted (Ollama/vLLM) — no SDK, only if Q-01 picks it  |
-| golang.org/x/crypto   | v0.56.0  | argon2id (`argon2.IDKey`, t=3, m=64 MiB, p=4, 32-byte hash, 16-byte salt)                                     |
+| golang.org/x/crypto   | v0.56.0  | **Direct** dependency: argon2id via `internal/auth` (`argon2.IDKey`, t=3, m=64 MiB, p=4, 32-byte hash, 16-byte salt)                                     |
 | google/uuid           | v1.6.0   | `uuid.NewV7()` for time-ordered ids                                                                            |
 | caarlos0/env          | v11.4.1  | Env → config struct. Stable; low churn is fine here                                                            |
 | shopspring/decimal    | pin in Phase 0 | Decimal math in services; verify latest at scaffold time                                                  |
@@ -62,7 +62,8 @@ pattern; revisit if bundle size becomes a landing performance issue.
 | Ant Design (antd)        | v6.6.2     | **Admin UI kit** (D-25). React 19 native; `uz_UZ`/`ru_RU` locales verified 2026-09-03; theme via `ConfigProvider` from `packages/ui-tokens` |
 | shadcn                   | v4.13.1 (CLI) | **Landing** primitives only (dialog, menu, language switcher); the rest is hand-written Tailwind for a distinctive look |
 | Forms                    | —          | Ant `Form` in the admin; no react-hook-form, no zod (D-26)                              |
-| lucide-react             | pin at first use | Icon set shared with mobile (`lucide-react-native`); not yet installed (Phase 1 admin shell) |
+| dayjs                    | 1.11.23    | Direct admin dependency for locale side effects (antd's own version; D-31 amendment) |
+| lucide-react             | 1.39.0     | Icon set shared with mobile (`lucide-react-native`); 1.40.0 blocked by the 24 h release age at install time |
 | Inter (font)             | —          | Covers Cyrillic and Uzbek Latin (Oʻ, Gʻ); self-hosted, no Google Fonts call at runtime   |
 | Biome                    | v2.5.11    | Lint + format, replaces ESLint/Prettier (O-07)                                          |
 | Vitest                   | v4.1.11    | Unit tests (5.0.0 is published; a bump is an owner decision)                            |

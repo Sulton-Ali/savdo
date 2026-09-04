@@ -19,6 +19,12 @@ pnpm --filter web dev              # :3000 — SSR; API_URL (server-side only) d
 pnpm --filter mobile start         # Expo; EXPO_PUBLIC_API_URL (default http://10.0.2.2:8080/v1 for the emulator; LAN IP for a phone)
 ```
 
+Seeded development accounts (`make seed`, D-30 — **dev only**, the seed refuses `ENV=prod`
+without `--force`): shop `savdo-demo`; `owner` / `owner-dev-pass`, `manager` /
+`manager-dev-pass`, `cashier` / `cashier-dev-pass`. Reset the owner password with
+`printf 'new-password\n' | go run ./cmd/savdo reset-owner-password --password-stdin`
+(from `api/`); it revokes the owner's sessions (D-28).
+
 Media files in dev go to `infra/data/media/` (gitignored).
 
 ## Shared local services during parallel work
@@ -27,7 +33,7 @@ All worktrees share ONE Compose project (`infra-postgres-1`) and ONE API port (8
 Rules for parallel agents: never run `make dev-infra-down` while another agent may be
 running; reviewers and mergers leave Postgres up and never kill a :8080 process they did
 not start; verification dev servers use alternate ports (admin 5174, web 3001, Expo 8093).
-The orchestrator sequences any task that needs exclusive use of the stack.
+The orchestrator sequences any task that needs exclusive use of the stack. At most one testcontainers-heavy gate (`make verify`, `go test ./...`) runs at a time — parallel gates produced test timeouts and a container-start deadline on 2026-09-05 (O-13).
 
 ## The gate: `make verify`
 
@@ -147,6 +153,11 @@ gzip/zstd, `/api/*` → `api:8080`, `/media/*` → volume, `/admin/*` → static
 
 Secrets: `infra/.env` on the VPS only, never in git; CI holds `SSH_HOST`, `SSH_USER`,
 `SSH_KEY`, and the bot token/LLM key are set on the server.
+
+Required environment in production: `ENV=prod` (turns on `COOKIE_SECURE` by default and
+the seed guard), `SHOP_SLUG`, `DATABASE_URL`, `API_ADDR`. Caddy must declare
+`trusted_proxies` and forward the client address so the API can trust the **last**
+`X-Forwarded-For` hop (the login rate limit and `sessions.ip` depend on it).
 
 ## Backups and restore
 
