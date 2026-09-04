@@ -37,8 +37,9 @@ Media files in dev go to `infra/data/media/` (gitignored).
 ## Environment variables
 
 The API loads all of these via `config.Load()`. `savdo migrate` reads only
-`DATABASE_URL`; `savdo seed` reads `DATABASE_URL` and `ENV` directly, not via
-`config.Load()`. Defaults shown are from `api/internal/config/config.go`. `config.Load()`
+`DATABASE_URL`; `savdo seed` loads the full config via `config.Load()` (it needs
+`MEDIA_DIR` and `MEDIA_BASE_URL` for the catalogue images). Defaults shown are from
+`api/internal/config/config.go`. `config.Load()`
 also enforces that, in **production, `MEDIA_DIR` must be an absolute path**; the dev
 default is relative, and `config.Load()` fails fast when `ENV=prod` and it isn't
 absolute (config.go L120-129).
