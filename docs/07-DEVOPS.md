@@ -33,7 +33,7 @@ All worktrees share ONE Compose project (`infra-postgres-1`) and ONE API port (8
 Rules for parallel agents: never run `make dev-infra-down` while another agent may be
 running; reviewers and mergers leave Postgres up and never kill a :8080 process they did
 not start; verification dev servers use alternate ports (admin 5174, web 3001, Expo 8093).
-The orchestrator sequences any task that needs exclusive use of the stack. At most one testcontainers-heavy gate (`make verify`, `go test ./...`) runs at a time — parallel gates produced test timeouts and a container-start deadline on 2026-09-05 (O-13).
+The orchestrator sequences any task that needs exclusive use of the stack. At most one testcontainers-heavy gate (`make verify`, `go test ./...`) runs at a time — parallel gates produced test timeouts and a container-start deadline on 2026-09-04 (O-13).
 
 ## The gate: `make verify`
 
