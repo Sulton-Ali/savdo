@@ -1,0 +1,45 @@
+package crm
+
+import (
+	"github.com/oapi-codegen/nullable"
+
+	"github.com/Sulton-Ali/savdo/api/gen"
+	"github.com/Sulton-Ali/savdo/api/internal/db"
+)
+
+// nullableString converts a *string (nil = SQL NULL) to the tri-state
+// nullable.Nullable the generated schemas use for an optional string
+// field — mirrors catalog.nullableString/stock.nullableString.
+func nullableString(v *string) nullable.Nullable[string] {
+	if v == nil {
+		return nullable.NewNullNullable[string]()
+	}
+	return nullable.NewNullableWithValue(*v)
+}
+
+// optionalString reads a nullable.Nullable[string] patch field into the
+// three states a request can mean: nil (not specified — leave unchanged),
+// a pointer to nil (explicit `null` — clear), or a pointer to a value
+// (set) — mirrors catalog.optionalString/shop/staff.go's `**string` idiom.
+func optionalString(n nullable.Nullable[string]) **string {
+	if !n.IsSpecified() {
+		return nil
+	}
+	if n.IsNull() {
+		var nilPtr *string
+		return &nilPtr
+	}
+	v := n.MustGet()
+	return &[]*string{&v}[0]
+}
+
+// toGenSupplier maps a suppliers row onto the API schema.
+func toGenSupplier(s db.Supplier) gen.Supplier {
+	return gen.Supplier{
+		Id: s.ID, Name: s.Name,
+		ContactName:      nullableString(s.ContactName),
+		Phone:            nullableString(s.Phone),
+		TelegramUsername: nullableString(s.TelegramUsername),
+		Note:             nullableString(s.Note),
+	}
+}
