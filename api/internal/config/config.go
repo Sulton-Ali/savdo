@@ -5,6 +5,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/caarlos0/env/v11"
@@ -41,6 +42,56 @@ type Config struct {
 	// fails fast if no such shop exists. A future multi-tenant version
 	// replaces this with per-request host/slug resolution (ADR-004).
 	ShopSlug string `env:"SHOP_SLUG" envDefault:"savdo-demo"`
+
+	// MediaDir is the local-disk root media.LocalStorage writes under
+	// (ADR-008). In prod (docs/07-DEVOPS.md § Production) this is the
+	// Docker volume mounted at /data/media. The dev default is relative
+	// to cmd/api's working directory, which the documented dev
+	// entrypoint (`make api`, Makefile's `api:` target) sets to `api/`
+	// — so "../infra/data/media" lands at the repo-root
+	// infra/data/media/ docs/07-DEVOPS.md § Local development names.
+	MediaDir string `env:"MEDIA_DIR" envDefault:"../infra/data/media"`
+
+	// MediaBaseURL prefixes every media.Storage key to build the URLs
+	// MediaFile.urls returns. In dev the API itself serves this prefix
+	// (router.go); in prod Caddy does (docs/07-DEVOPS.md § Production).
+	MediaBaseURL string `env:"MEDIA_BASE_URL" envDefault:"/media"`
+
+	// MediaMaxBytes caps a single POST /media upload's file part, checked
+	// before any derivative is built (the uploaded bytes themselves are
+	// never stored — O-16). bodylimit.go's route-aware body limit applies
+	// only to /v1/media (a higher, separate cap covering the whole
+	// multipart envelope, not just the file part); everything else stays
+	// under maxRequestBodyBytes.
+	MediaMaxBytes int64 `env:"MEDIA_MAX_BYTES" envDefault:"10485760"`
+
+	// MediaConcurrency bounds how many uploads may be decoding/deriving
+	// WebP derivatives at once, process-wide (Review B MAJOR 4 — the
+	// CPU- and memory-heavy part of an upload, gated in
+	// internal/media/service.go by a semaphore this many slots deep).
+	MediaConcurrency int `env:"MEDIA_CONCURRENCY" envDefault:"2"`
+
+	// MediaQueue bounds how many uploads may be admitted (spooling,
+	// waiting for a decode slot, or decoding) at once, process-wide —
+	// the outer admission gate a Review B follow-up added in front of
+	// MediaConcurrency's inner one: without it, an unbounded number of
+	// requests could each spool up to MediaMaxBytes to disk and then
+	// queue up for a decode slot, filling MEDIA_DIR/.tmp under
+	// sustained load. Default 8 (MediaConcurrency's own default × 4);
+	// the two aren't derived from each other at parse time — sizing
+	// MediaQueue relative to a non-default MediaConcurrency is an
+	// operator concern, not this struct's (cmd/api logs a warning at
+	// startup if MediaQueue < MediaConcurrency, since that combination
+	// can never let every decode slot fill).
+	//
+	// This gate is process-wide, not per-shop: fine for the single-shop
+	// MVP this module ships for (docs/06-ROADMAP.md Phase 2), but a
+	// future multi-tenant deployment (ADR-004) sharing one process across
+	// shops would let one busy shop's uploads starve every other shop's
+	// out of the same queue. Splitting it per-shop is follow-up work for
+	// whenever ADR-004's tenant-ready design actually goes multi-process
+	// or multi-shop-per-process — not needed now.
+	MediaQueue int `env:"MEDIA_QUEUE" envDefault:"8"`
 }
 
 // Load parses the environment into a Config, applying defaults. It fails
@@ -56,6 +107,18 @@ func Load() (Config, error) {
 	// COOKIE_SECURE (either value) always wins over that default.
 	if _, explicit := os.LookupEnv("COOKIE_SECURE"); !explicit {
 		cfg.CookieSecure = cfg.Env == "prod"
+	}
+
+	// MediaDir's dev default is relative to cmd/api's working directory
+	// (see its doc comment above) — fine in dev, where that directory is
+	// fixed by convention, but a relative path in prod would resolve
+	// against whatever directory the process happened to start in
+	// (a systemd unit's WorkingDirectory, a container's WORKDIR, ...),
+	// silently writing media somewhere other than the mounted volume.
+	// Fail fast here, the same way a missing DATABASE_URL does, rather
+	// than let that surface later as files that vanish on redeploy.
+	if cfg.Env == "prod" && !filepath.IsAbs(cfg.MediaDir) {
+		return Config{}, fmt.Errorf("config: MEDIA_DIR must be an absolute path when ENV=prod (got %q)", cfg.MediaDir)
 	}
 
 	return cfg, nil

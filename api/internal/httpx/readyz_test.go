@@ -15,7 +15,7 @@ import (
 
 func TestReadyz_okWhenDatabaseIsReachable(t *testing.T) {
 	pool := testdb.New(t)
-	router := NewRouter(testLogger(), pool, testAuthService(), testShopService())
+	router := NewRouter(testLogger(), pool, testAuthService(), testShopService(), testMediaService(), nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/readyz", nil)
 	rec := httptest.NewRecorder()
@@ -49,7 +49,7 @@ func TestReadyz_degradedWhenDatabaseIsUnreachable(t *testing.T) {
 	}
 	defer pool.Close()
 
-	router := NewRouter(testLogger(), pool, testAuthService(), testShopService())
+	router := NewRouter(testLogger(), pool, testAuthService(), testShopService(), testMediaService(), nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/readyz", nil)
 	rec := httptest.NewRecorder()

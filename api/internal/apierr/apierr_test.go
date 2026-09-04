@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -143,6 +144,52 @@ func TestWrite_unknownErrorMapsToInternalWithoutLeakingMessage(t *testing.T) {
 	}
 	if strings.Contains(rec.Body.String(), secret) {
 		t.Fatalf("response body leaked the underlying error message: %s", rec.Body.String())
+	}
+}
+
+// TestWrite_maxBytesErrorMapsToBodyTooLarge is Review A MAJOR 1's test at
+// the apierr layer: a handler that reads its own request body past its
+// route's limit (internal/media, for POST /media's multipart body) gets
+// a bare *http.MaxBytesError back from that read, not something already
+// wrapped in *apierr.Error the way every other handler-raised error in
+// this codebase is — asError must still map it to the same 400
+// VALIDATION_FAILED / body_too_large shape router.go's writeRequestError
+// uses for the pre-handler decode case, not fall through to a bare 500.
+func TestWrite_maxBytesErrorMapsToBodyTooLarge(t *testing.T) {
+	maxBytesErr := &http.MaxBytesError{Limit: 12 << 20}
+
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{"bare", maxBytesErr},
+		{"wrapped", fmt.Errorf("media: spool upload: %w", maxBytesErr)},
+		{"doubly wrapped", fmt.Errorf("media: upload: %w", fmt.Errorf("media: spool upload: %w", maxBytesErr))},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			apierr.Write(rec, tt.err)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+			}
+
+			var body gen.Error
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode body: %v", err)
+			}
+			if body.Error.Code != gen.VALIDATIONFAILED {
+				t.Fatalf("error.code = %q, want %q", body.Error.Code, gen.VALIDATIONFAILED)
+			}
+			if body.Error.Details == nil {
+				t.Fatalf("error has no details: %+v", body)
+			}
+			if reason, _ := (*body.Error.Details)["reason"].(string); reason != "body_too_large" {
+				t.Fatalf("details.reason = %v, want body_too_large", reason)
+			}
+		})
 	}
 }
 

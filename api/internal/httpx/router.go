@@ -16,6 +16,7 @@ import (
 	"github.com/Sulton-Ali/savdo/api/gen"
 	"github.com/Sulton-Ali/savdo/api/internal/apierr"
 	"github.com/Sulton-Ali/savdo/api/internal/auth"
+	"github.com/Sulton-Ali/savdo/api/internal/media"
 	"github.com/Sulton-Ali/savdo/api/internal/shop"
 )
 
@@ -29,12 +30,22 @@ import (
 // listing only GetHealthz/GetReadyz/Login (internal/auth/middleware.go) —
 // and the five `/auth/*` operations via auth.NewHandler. shopSvc backs
 // the nine `/shop`, `/locations` and `/staff` operations via
-// shop.NewHandler, forwarded from server's own methods (shop.go).
-func NewRouter(logger *slog.Logger, pool *pgxpool.Pool, authSvc *auth.Service, shopSvc *shop.Service) http.Handler {
+// shop.NewHandler, forwarded from server's own methods (shop.go). mediaSvc
+// backs POST /media via media.NewHandler, forwarded from media.go.
+// devMedia, when non-nil, is additionally mounted at GET /media/ — cmd/api
+// passes media.DevHandler(mediaStorage) here only when Config.Env !=
+// "prod" (docs/07-DEVOPS.md § Local development; § Production: Caddy
+// serves the same volume there instead, so this stays nil and unmounted).
+// A caller-built http.Handler rather than a directory string: it lets
+// cmd/api hand over the exact same *media.LocalStorage instance mediaSvc
+// itself writes through, so DevHandler's path-confinement check
+// (LocalStorage.resolve) is guaranteed to agree with where files actually
+// are, not a second, independently-constructed root.
+func NewRouter(logger *slog.Logger, pool *pgxpool.Pool, authSvc *auth.Service, shopSvc *shop.Service, mediaSvc *media.Service, devMedia http.Handler) http.Handler {
 	mux := http.NewServeMux()
 
 	strictHandler := gen.NewStrictHandlerWithOptions(
-		server{pool: pool, Handler: auth.NewHandler(authSvc), shop: shop.NewHandler(shopSvc)},
+		server{pool: pool, Handler: auth.NewHandler(authSvc), shop: shop.NewHandler(shopSvc), media: media.NewHandler(mediaSvc)},
 		[]gen.StrictMiddlewareFunc{authSvc.Middleware},
 		gen.StrictHTTPServerOptions{
 			RequestErrorHandlerFunc:  writeRequestError,
@@ -47,6 +58,10 @@ func NewRouter(logger *slog.Logger, pool *pgxpool.Pool, authSvc *auth.Service, s
 		BaseRouter:       mux,
 		ErrorHandlerFunc: writeRequestError,
 	})
+
+	if devMedia != nil {
+		mux.Handle("/media/", http.StripPrefix("/media/", devMedia))
+	}
 
 	var handler http.Handler = mux
 	handler = requestLogger(logger)(handler)

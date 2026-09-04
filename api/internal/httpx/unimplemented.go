@@ -87,9 +87,6 @@ func (r notImplementedResponse) VisitUpdateVariantResponse(w http.ResponseWriter
 func (r notImplementedResponse) VisitDeleteVariantResponse(w http.ResponseWriter) error {
 	return r.write(w)
 }
-func (r notImplementedResponse) VisitUploadMediaResponse(w http.ResponseWriter) error {
-	return r.write(w)
-}
 func (r notImplementedResponse) VisitAddProductImageResponse(w http.ResponseWriter) error {
 	return r.write(w)
 }
@@ -205,12 +202,6 @@ func (server) UpdateVariant(_ context.Context, _ gen.UpdateVariantRequestObject)
 // DeleteVariant soft-deletes a variant.
 // Phase 2 T1: replaced once the catalog module lands.
 func (server) DeleteVariant(_ context.Context, _ gen.DeleteVariantRequestObject) (gen.DeleteVariantResponseObject, error) {
-	return notImplementedResponse{}, nil
-}
-
-// UploadMedia uploads an image.
-// Phase 2 T1: replaced once the media module lands.
-func (server) UploadMedia(_ context.Context, _ gen.UploadMediaRequestObject) (gen.UploadMediaResponseObject, error) {
 	return notImplementedResponse{}, nil
 }
 

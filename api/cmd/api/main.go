@@ -18,6 +18,7 @@ import (
 	"github.com/Sulton-Ali/savdo/api/internal/config"
 	"github.com/Sulton-Ali/savdo/api/internal/db"
 	"github.com/Sulton-Ali/savdo/api/internal/httpx"
+	"github.com/Sulton-Ali/savdo/api/internal/media"
 	"github.com/Sulton-Ali/savdo/api/internal/shop"
 )
 
@@ -70,9 +71,38 @@ func run() error {
 	authSvc := auth.NewService(queries, cfg, shopRow.ID)
 	shopSvc := shop.NewService(pool, queries)
 
+	// LocalStorage writes under Config.MediaDir (ADR-008); mediaSvc caps
+	// an upload's file part at Config.MediaMaxBytes, bounds concurrent
+	// decode/derive work at Config.MediaConcurrency, and builds derivative
+	// URLs under Config.MediaBaseURL. In dev the API also serves the same
+	// directory itself (devMedia below); in prod Caddy does
+	// (docs/07-DEVOPS.md § Production), so devMedia stays nil there.
+	mediaStorage, err := media.NewLocalStorage(cfg.MediaDir, cfg.MediaBaseURL)
+	if err != nil {
+		return fmt.Errorf("init media storage: %w", err)
+	}
+	// Best-effort startup housekeeping: remove any spool or atomic-write
+	// temp file an earlier crash left behind (Review B MINOR 10). Not a
+	// correctness requirement — SweepTemp logs and continues past any
+	// single file it can't remove — so it never blocks startup.
+	mediaStorage.SweepTemp(time.Hour)
+	// A queue smaller than the concurrency it's supposed to feed can
+	// never let every decode slot fill — not a config error worth
+	// failing startup over (the server still works, just under-uses its
+	// own concurrency budget), but worth a loud warning.
+	if cfg.MediaQueue < cfg.MediaConcurrency {
+		logger.Warn("MEDIA_QUEUE is smaller than MEDIA_CONCURRENCY; some decode slots will never be reachable",
+			"media_queue", cfg.MediaQueue, "media_concurrency", cfg.MediaConcurrency)
+	}
+	mediaSvc := media.NewService(queries, mediaStorage, cfg.MediaBaseURL, cfg.MediaMaxBytes, cfg.MediaConcurrency, cfg.MediaQueue)
+	var devMedia http.Handler
+	if cfg.Env != "prod" {
+		devMedia = media.DevHandler(mediaStorage)
+	}
+
 	srv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           httpx.NewRouter(logger, pool, authSvc, shopSvc),
+		Handler:           httpx.NewRouter(logger, pool, authSvc, shopSvc, mediaSvc, devMedia),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      15 * time.Second,

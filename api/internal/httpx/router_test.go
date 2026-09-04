@@ -14,6 +14,7 @@ import (
 	"github.com/Sulton-Ali/savdo/api/gen"
 	"github.com/Sulton-Ali/savdo/api/internal/auth"
 	"github.com/Sulton-Ali/savdo/api/internal/config"
+	"github.com/Sulton-Ali/savdo/api/internal/media"
 	"github.com/Sulton-Ali/savdo/api/internal/shop"
 )
 
@@ -36,6 +37,13 @@ func testAuthService() *auth.Service {
 // nil pool and nil *db.Queries are never dereferenced in that case.
 func testShopService() *shop.Service {
 	return shop.NewService(nil, nil)
+}
+
+// testMediaService builds a media.Service safe to wire into NewRouter for
+// tests that never exercise POST /media — a nil *db.Queries and a nil
+// Storage are never dereferenced in that case.
+func testMediaService() *media.Service {
+	return media.NewService(nil, nil, "/media", 10<<20, 2, 10)
 }
 
 func TestHealthz(t *testing.T) {
@@ -63,7 +71,7 @@ func TestHealthz(t *testing.T) {
 		},
 	}
 
-	router := NewRouter(testLogger(), nil, testAuthService(), testShopService())
+	router := NewRouter(testLogger(), nil, testAuthService(), testShopService(), testMediaService(), nil)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
