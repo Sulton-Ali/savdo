@@ -30,9 +30,10 @@ Media files in dev go to `infra/data/media/` (gitignored).
 ## Environment variables
 
 The API and `savdo` CLI (including `seed` and `migrate` subcommands) load these from the
-environment. Defaults shown are from `api/internal/config/config.go`. In **production,
-`MEDIA_DIR` must be an absolute path**; the dev default is relative and fails fast in
-prod.
+environment. Defaults shown are from `api/internal/config/config.go`. The API server
+loads its config via `config.Load()` and enforces that, in **production, `MEDIA_DIR`
+must be an absolute path**; the dev default is relative, and `config.Load()` fails fast
+when `ENV=prod` and it isn't absolute (config.go L120-129).
 
 | Variable            | Default        | Notes                                                                                 |
 | ------------------- | -------------- | ------------------------------------------------------------------------------------- |
@@ -45,7 +46,7 @@ prod.
 | `LOGIN_RATE_IP_PER_MIN` | `10`       | Per-IP login attempts per minute                                                      |
 | `LOGIN_RATE_USER_PER_MIN` | `5`      | Per-username login attempts per minute                                                |
 | `COOKIE_SECURE`     | dev: `false`, prod: `true` | Forces HTTPS-only session cookies; explicit env var overrides the default |
-| `MEDIA_DIR`         | `../infra/data/media` | Absolute path in prod; local-disk root for media.LocalStorage (ADR-008). **In prod this is a Docker volume mounted at `/data/media`.** `make seed` requires this directory to exist and be writable. |
+| `MEDIA_DIR`         | `../infra/data/media` | Absolute path in prod; local-disk root for media.LocalStorage (ADR-008). **In prod this is a Docker volume mounted at `/data/media`.** |
 | `MEDIA_BASE_URL`    | `/media`       | URL prefix for all media.Storage keys returned to clients                             |
 | `MEDIA_MAX_BYTES`   | `10485760`     | Single upload file part size cap (10 MB); checked before WebP encoding                |
 | `MEDIA_CONCURRENCY` | `2`            | Max WebP derivative encode tasks running concurrently (gated by a semaphore; Review B) |
@@ -182,10 +183,6 @@ file is spooled to disk, then derivative encoding happens in a semaphore-gated s
 `MEDIA_CONCURRENCY` is 2, so reserve ~250 MB per slot under sustained load (500 MB with
 defaults). `api` has `http.Server.WriteTimeout 15 s`; a slow client downloading a large
 derivative could block a write slot and eventually starve uploads if they saturate the queue.
-
-**Seed on the VPS:** `MEDIA_DIR` must be an absolute path (production check in `config.Load()`).
-`make seed` writes seed account avatars there; it will fail fast if the directory is missing or
-non-writable.
 
 Secrets: `infra/.env` on the VPS only, never in git; CI holds `SSH_HOST`, `SSH_USER`,
 `SSH_KEY`, and the bot token/LLM key are set on the server.
