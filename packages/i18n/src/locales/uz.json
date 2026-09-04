@@ -10,7 +10,9 @@
     "cancel": "Bekor qilish",
     "comingSoon": "Tez orada",
     "retry": "Qayta urinish",
-    "loadMore": "Yana yuklash"
+    "loadMore": "Yana yuklash",
+    "search": "Qidiruv",
+    "showInactive": "Nofaollarni ko‘rsatish"
   },
   "errors": {
     "serviceUnavailable": "Xizmat vaqtincha ishlamayapti. Qayta urinib ko‘ring.",
@@ -31,6 +33,9 @@
   },
   "nav": {
     "dashboard": "Boshqaruv paneli",
+    "products": "Mahsulotlar",
+    "categories": "Kategoriyalar",
+    "attributes": "Atributlar",
     "staff": "Xodimlar",
     "locations": "Filiallar",
     "settings": "Sozlamalar"
@@ -117,6 +122,84 @@
       "defaultLocale": "Standart til",
       "allowNegativeStock": "Manfiy qoldiqqa ruxsat berish",
       "updateCostOnPurchase": "Xaridda tannarxni yangilash"
+    }
+  },
+  "catalog": {
+    "products": {
+      "title": "Mahsulotlar",
+      "add": "Mahsulot qo‘shish",
+      "searchPlaceholder": "Mahsulotlarni qidirish",
+      "allCategories": "Barcha kategoriyalar",
+      "uncategorized": "Kategoriyasiz",
+      "createTitle": "Yangi mahsulot",
+      "editTitle": "Mahsulotni tahrirlash",
+      "saved": "Mahsulot saqlandi",
+      "columns": {
+        "image": "Rasm",
+        "name": "Nomi",
+        "sku": "SKU",
+        "category": "Kategoriya",
+        "basePrice": "Narx",
+        "costPrice": "Tannarx",
+        "promo": "Aksiya",
+        "featured": "Tavsiya etilgan",
+        "active": "Faol"
+      },
+      "tabs": {
+        "general": "Umumiy",
+        "prices": "Narxlar",
+        "variants": "Variantlar va rasmlar"
+      },
+      "fields": {
+        "name": "Nomi",
+        "description": "Tavsif",
+        "category": "Kategoriya",
+        "unit": "O‘lchov birligi",
+        "slug": "Slug",
+        "sku": "SKU",
+        "isActive": "Faol",
+        "isFeatured": "Tavsiya etilgan",
+        "basePrice": "Asosiy narx",
+        "costPrice": "Tannarx",
+        "promoPrice": "Aksiya narxi",
+        "promoRange": "Aksiya muddati"
+      }
+    },
+    "categories": {
+      "title": "Kategoriyalar",
+      "addRoot": "Kategoriya qo‘shish",
+      "addChild": "Kichik kategoriya qo‘shish",
+      "edit": "Kategoriyani tahrirlash",
+      "delete": "O‘chirish",
+      "confirmDelete": "Bu kategoriya o‘chirilsinmi?",
+      "inactive": "Nofaol",
+      "maxDepthReached": "Kategoriyalar faqat 3 darajagacha ichma-ich joylashishi mumkin",
+      "fields": {
+        "name": "Nomi",
+        "description": "Tavsif",
+        "slug": "Slug",
+        "sortOrder": "Tartib raqami",
+        "isActive": "Faol"
+      }
+    },
+    "attributes": {
+      "title": "Atribut turlari",
+      "add": "Atribut qo‘shish",
+      "edit": "Atributni tahrirlash",
+      "columns": {
+        "code": "Kod",
+        "name": "Nomi",
+        "sortOrder": "Tartib raqami"
+      },
+      "fields": {
+        "code": "Kod",
+        "name": "Nomi",
+        "sortOrder": "Tartib raqami"
+      }
+    },
+    "variantsPlaceholder": "Variantlar va rasmlar keyingi yangilanishda shu bo‘limda mavjud bo‘ladi.",
+    "errors": {
+      "categoryHasProducts": "Bu kategoriyada hali mahsulotlar bor, uni o‘chirib bo‘lmaydi."
     }
   }
 }

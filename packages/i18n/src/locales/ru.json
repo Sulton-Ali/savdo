@@ -10,7 +10,9 @@
     "cancel": "Отмена",
     "comingSoon": "Скоро появится",
     "retry": "Повторить",
-    "loadMore": "Загрузить ещё"
+    "loadMore": "Загрузить ещё",
+    "search": "Поиск",
+    "showInactive": "Показать неактивные"
   },
   "errors": {
     "serviceUnavailable": "Сервис недоступен. Попробуйте снова.",
@@ -31,6 +33,9 @@
   },
   "nav": {
     "dashboard": "Панель управления",
+    "products": "Товары",
+    "categories": "Категории",
+    "attributes": "Атрибуты",
     "staff": "Сотрудники",
     "locations": "Филиалы",
     "settings": "Настройки"
@@ -117,6 +122,84 @@
       "defaultLocale": "Язык по умолчанию",
       "allowNegativeStock": "Разрешить отрицательный остаток",
       "updateCostOnPurchase": "Обновлять себестоимость при закупке"
+    }
+  },
+  "catalog": {
+    "products": {
+      "title": "Товары",
+      "add": "Добавить товар",
+      "searchPlaceholder": "Поиск товаров",
+      "allCategories": "Все категории",
+      "uncategorized": "Без категории",
+      "createTitle": "Новый товар",
+      "editTitle": "Редактировать товар",
+      "saved": "Товар сохранён",
+      "columns": {
+        "image": "Фото",
+        "name": "Название",
+        "sku": "Артикул",
+        "category": "Категория",
+        "basePrice": "Цена",
+        "costPrice": "Себестоимость",
+        "promo": "Акция",
+        "featured": "Рекомендуемый",
+        "active": "Активен"
+      },
+      "tabs": {
+        "general": "Общее",
+        "prices": "Цены",
+        "variants": "Варианты и фото"
+      },
+      "fields": {
+        "name": "Название",
+        "description": "Описание",
+        "category": "Категория",
+        "unit": "Единица измерения",
+        "slug": "Слаг",
+        "sku": "Артикул",
+        "isActive": "Активен",
+        "isFeatured": "Рекомендуемый",
+        "basePrice": "Базовая цена",
+        "costPrice": "Себестоимость",
+        "promoPrice": "Акционная цена",
+        "promoRange": "Период акции"
+      }
+    },
+    "categories": {
+      "title": "Категории",
+      "addRoot": "Добавить категорию",
+      "addChild": "Добавить подкатегорию",
+      "edit": "Редактировать категорию",
+      "delete": "Удалить",
+      "confirmDelete": "Удалить эту категорию?",
+      "inactive": "Неактивна",
+      "maxDepthReached": "Категории можно вкладывать не более чем на 3 уровня",
+      "fields": {
+        "name": "Название",
+        "description": "Описание",
+        "slug": "Слаг",
+        "sortOrder": "Порядок сортировки",
+        "isActive": "Активна"
+      }
+    },
+    "attributes": {
+      "title": "Атрибуты товаров",
+      "add": "Добавить атрибут",
+      "edit": "Редактировать атрибут",
+      "columns": {
+        "code": "Код",
+        "name": "Название",
+        "sortOrder": "Порядок сортировки"
+      },
+      "fields": {
+        "code": "Код",
+        "name": "Название",
+        "sortOrder": "Порядок сортировки"
+      }
+    },
+    "variantsPlaceholder": "Варианты и фото товара появятся на следующей вкладке в одном из ближайших обновлений.",
+    "errors": {
+      "categoryHasProducts": "В этой категории ещё есть товары, удаление невозможно."
     }
   }
 }
