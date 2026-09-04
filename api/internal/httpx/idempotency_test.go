@@ -321,7 +321,9 @@ func TestRequestHash_sameLogicalBodySameHash(t *testing.T) {
 // second actor replay a response rendered for the first (RequestHash's
 // own doc comment).
 func TestRequestHash_differentActorSameBodyDifferentHash(t *testing.T) {
-	type body struct{ Qty string `json:"qty"` }
+	type body struct {
+		Qty string `json:"qty"`
+	}
 	b := body{Qty: "1.000"}
 
 	h1, err := RequestHash(http.MethodPost, "/stock/adjustments", uuid.New(), b)

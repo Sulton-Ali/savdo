@@ -18,7 +18,7 @@ import (
 // itself, so an auditor reading the row does not have to separately look
 // up the movement to see what the adjustment actually did to the level.
 type auditAfter struct {
-	Qty      string          `json:"qty"`
+	Qty      string           `json:"qty"`
 	Movement db.StockMovement `json:"movement"`
 }
 
