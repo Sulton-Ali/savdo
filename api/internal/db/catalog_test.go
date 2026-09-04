@@ -231,6 +231,233 @@ func TestListProductsForCashierAndPublic_haveNoCostFields(t *testing.T) {
 	}
 }
 
+func TestCountActiveVariants_scopedToShop(t *testing.T) {
+	pool := testdb.New(t)
+	testdb.Truncate(t, pool)
+	ctx := context.Background()
+	q := db.New(pool)
+
+	shopA := catalogShop(ctx, t, q, "shop-count-variants-a")
+	shopB := catalogShop(ctx, t, q, "shop-count-variants-b")
+	unitA := catalogUnit(ctx, t, q, shopA.ID, "pcs")
+	productA := catalogProduct(ctx, t, q, shopA.ID, unitA.ID, "count-variants-a")
+
+	if _, err := q.CreateVariant(ctx, db.CreateVariantParams{
+		ID: uuid.New(), ShopID: shopA.ID, ProductID: productA.ID, Attributes: json.RawMessage(`{}`), IsActive: true,
+	}); err != nil {
+		t.Fatalf("CreateVariant: %v", err)
+	}
+
+	count, err := q.CountActiveVariants(ctx, db.CountActiveVariantsParams{ShopID: shopA.ID, ProductID: productA.ID})
+	if err != nil {
+		t.Fatalf("CountActiveVariants(shop A): %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("CountActiveVariants(shop A) = %d, want 1", count)
+	}
+
+	// Same product_id, wrong shop_id: hard rule 1 says every query filters
+	// by shop_id, so this must count 0, not 1.
+	count, err = q.CountActiveVariants(ctx, db.CountActiveVariantsParams{ShopID: shopB.ID, ProductID: productA.ID})
+	if err != nil {
+		t.Fatalf("CountActiveVariants(shop B): %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("CountActiveVariants(shop B) = %d, want 0 — a variant must not count under the wrong shop_id", count)
+	}
+}
+
+func TestCountProductImages_scopedToShop(t *testing.T) {
+	pool := testdb.New(t)
+	testdb.Truncate(t, pool)
+	ctx := context.Background()
+	q := db.New(pool)
+
+	shopA := catalogShop(ctx, t, q, "shop-count-images-a")
+	shopB := catalogShop(ctx, t, q, "shop-count-images-b")
+	unitA := catalogUnit(ctx, t, q, shopA.ID, "pcs")
+	productA := catalogProduct(ctx, t, q, shopA.ID, unitA.ID, "count-images-a")
+	mediaA := catalogMedia(ctx, t, q, shopA.ID, "count-images-a.webp", [32]byte{7})
+
+	if _, err := q.AddProductImage(ctx, db.AddProductImageParams{
+		ID: uuid.New(), ShopID: shopA.ID, ProductID: productA.ID, MediaID: mediaA.ID,
+	}); err != nil {
+		t.Fatalf("AddProductImage: %v", err)
+	}
+
+	count, err := q.CountProductImages(ctx, db.CountProductImagesParams{ShopID: shopA.ID, ProductID: productA.ID})
+	if err != nil {
+		t.Fatalf("CountProductImages(shop A): %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("CountProductImages(shop A) = %d, want 1", count)
+	}
+
+	count, err = q.CountProductImages(ctx, db.CountProductImagesParams{ShopID: shopB.ID, ProductID: productA.ID})
+	if err != nil {
+		t.Fatalf("CountProductImages(shop B): %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("CountProductImages(shop B) = %d, want 0 — an image must not count under the wrong shop_id", count)
+	}
+}
+
+func TestGetCategoryDepth_missingCategoryReturnsZero(t *testing.T) {
+	pool := testdb.New(t)
+	testdb.Truncate(t, pool)
+	ctx := context.Background()
+	q := db.New(pool)
+
+	shop := catalogShop(ctx, t, q, "shop-depth-missing")
+
+	depth, err := q.GetCategoryDepth(ctx, db.GetCategoryDepthParams{ShopID: shop.ID, CategoryID: uuid.New()})
+	if err != nil {
+		t.Fatalf("GetCategoryDepth on a non-existent category must not fail (NULL from an empty aggregate): %v", err)
+	}
+	if depth != 0 {
+		t.Fatalf("GetCategoryDepth(missing) = %d, want 0", depth)
+	}
+}
+
+// Zero-translation rows must list/get with an empty locale_used/name instead
+// of failing to scan — LEFT JOIN LATERAL leaves t.locale/t.name NULL when no
+// translation matches, and sqlc does not infer that as nullable, so every
+// fallback query projects COALESCE(..., ''). One test per entity that has a
+// LATERAL fallback query, per the review that reproduced the crash.
+
+func TestCategories_zeroTranslations_listsAndGetsWithEmptyLocale(t *testing.T) {
+	pool := testdb.New(t)
+	testdb.Truncate(t, pool)
+	ctx := context.Background()
+	q := db.New(pool)
+
+	shop := catalogShop(ctx, t, q, "shop-cat-empty")
+	cat, err := q.CreateCategory(ctx, db.CreateCategoryParams{
+		ID: uuid.New(), ShopID: shop.ID, Slug: "no-translation-yet", IsActive: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateCategory: %v", err)
+	}
+
+	rows, err := q.ListCategories(ctx, db.ListCategoriesParams{ShopID: shop.ID, Locale: "uz", IncludeInactive: true})
+	if err != nil {
+		t.Fatalf("ListCategories on an untranslated category must not fail to scan: %v", err)
+	}
+	if len(rows) != 1 || rows[0].LocaleUsed != "" || rows[0].Name != "" {
+		t.Fatalf("want one row with empty locale_used/name, got %+v", rows)
+	}
+
+	got, err := q.GetCategory(ctx, db.GetCategoryParams{ShopID: shop.ID, ID: cat.ID, Locale: "uz"})
+	if err != nil {
+		t.Fatalf("GetCategory on an untranslated category must not fail to scan: %v", err)
+	}
+	if got.LocaleUsed != "" || got.Name != "" {
+		t.Fatalf("want empty locale_used/name, got locale_used=%q name=%q", got.LocaleUsed, got.Name)
+	}
+}
+
+func TestUnits_zeroTranslations_listsWithEmptyLocale(t *testing.T) {
+	pool := testdb.New(t)
+	testdb.Truncate(t, pool)
+	ctx := context.Background()
+	q := db.New(pool)
+
+	shop := catalogShop(ctx, t, q, "shop-unit-empty")
+	catalogUnit(ctx, t, q, shop.ID, "pcs")
+
+	rows, err := q.ListUnits(ctx, db.ListUnitsParams{ShopID: shop.ID, Locale: "uz"})
+	if err != nil {
+		t.Fatalf("ListUnits on an untranslated unit must not fail to scan: %v", err)
+	}
+	if len(rows) != 1 || rows[0].LocaleUsed != "" || rows[0].Name != "" {
+		t.Fatalf("want one row with empty locale_used/name, got %+v", rows)
+	}
+}
+
+func TestAttributeDefinitions_zeroTranslations_listsWithEmptyLocale(t *testing.T) {
+	pool := testdb.New(t)
+	testdb.Truncate(t, pool)
+	ctx := context.Background()
+	q := db.New(pool)
+
+	shop := catalogShop(ctx, t, q, "shop-attr-empty")
+	if _, err := q.CreateAttributeDefinition(ctx, db.CreateAttributeDefinitionParams{
+		ID: uuid.New(), ShopID: shop.ID, Code: "size",
+	}); err != nil {
+		t.Fatalf("CreateAttributeDefinition: %v", err)
+	}
+
+	rows, err := q.ListAttributeDefinitions(ctx, db.ListAttributeDefinitionsParams{ShopID: shop.ID, Locale: "uz"})
+	if err != nil {
+		t.Fatalf("ListAttributeDefinitions on an untranslated attribute must not fail to scan: %v", err)
+	}
+	if len(rows) != 1 || rows[0].LocaleUsed != "" || rows[0].Name != "" {
+		t.Fatalf("want one row with empty locale_used/name, got %+v", rows)
+	}
+	if string(rows[0].Translations) != "{}" {
+		t.Fatalf("Translations = %s, want {}", rows[0].Translations)
+	}
+}
+
+func TestProducts_zeroTranslations_listAndGetWithEmptyLocale(t *testing.T) {
+	pool := testdb.New(t)
+	testdb.Truncate(t, pool)
+	ctx := context.Background()
+	q := db.New(pool)
+
+	shop := catalogShop(ctx, t, q, "shop-product-empty")
+	unit := catalogUnit(ctx, t, q, shop.ID, "pcs")
+	product := catalogProduct(ctx, t, q, shop.ID, unit.ID, "no-translation-yet")
+
+	staffRows, err := q.ListProductsForStaff(ctx, db.ListProductsForStaffParams{ShopID: shop.ID, Locale: "uz", Limit: 10})
+	if err != nil {
+		t.Fatalf("ListProductsForStaff on an untranslated product must not fail to scan: %v", err)
+	}
+	if len(staffRows) != 1 || staffRows[0].LocaleUsed != "" || staffRows[0].Name != "" {
+		t.Fatalf("ListProductsForStaff: want one row with empty locale_used/name, got %+v", staffRows)
+	}
+
+	cashierRows, err := q.ListProductsForCashier(ctx, db.ListProductsForCashierParams{ShopID: shop.ID, Locale: "uz", Limit: 10})
+	if err != nil {
+		t.Fatalf("ListProductsForCashier on an untranslated product must not fail to scan: %v", err)
+	}
+	if len(cashierRows) != 1 || cashierRows[0].LocaleUsed != "" || cashierRows[0].Name != "" {
+		t.Fatalf("ListProductsForCashier: want one row with empty locale_used/name, got %+v", cashierRows)
+	}
+
+	publicRows, err := q.ListProductsPublic(ctx, db.ListProductsPublicParams{ShopID: shop.ID, Locale: "uz", Limit: 10})
+	if err != nil {
+		t.Fatalf("ListProductsPublic on an untranslated product must not fail to scan: %v", err)
+	}
+	if len(publicRows) != 1 || publicRows[0].LocaleUsed != "" || publicRows[0].Name != "" {
+		t.Fatalf("ListProductsPublic: want one row with empty locale_used/name, got %+v", publicRows)
+	}
+
+	staffGet, err := q.GetProductForStaff(ctx, db.GetProductForStaffParams{ShopID: shop.ID, ID: product.ID, Locale: "uz"})
+	if err != nil {
+		t.Fatalf("GetProductForStaff on an untranslated product must not fail to scan: %v", err)
+	}
+	if staffGet.LocaleUsed != "" || staffGet.Name != "" {
+		t.Fatalf("GetProductForStaff: want empty locale_used/name, got locale_used=%q name=%q", staffGet.LocaleUsed, staffGet.Name)
+	}
+
+	cashierGet, err := q.GetProductForCashier(ctx, db.GetProductForCashierParams{ShopID: shop.ID, ID: product.ID, Locale: "uz"})
+	if err != nil {
+		t.Fatalf("GetProductForCashier on an untranslated product must not fail to scan: %v", err)
+	}
+	if cashierGet.LocaleUsed != "" || cashierGet.Name != "" {
+		t.Fatalf("GetProductForCashier: want empty locale_used/name, got locale_used=%q name=%q", cashierGet.LocaleUsed, cashierGet.Name)
+	}
+
+	publicGet, err := q.GetProductPublic(ctx, db.GetProductPublicParams{ShopID: shop.ID, ID: product.ID, Locale: "uz"})
+	if err != nil {
+		t.Fatalf("GetProductPublic on an untranslated product must not fail to scan: %v", err)
+	}
+	if publicGet.LocaleUsed != "" || publicGet.Name != "" {
+		t.Fatalf("GetProductPublic: want empty locale_used/name, got locale_used=%q name=%q", publicGet.LocaleUsed, publicGet.Name)
+	}
+}
+
 func TestListUnits_localeFallback_returnsLocaleUsed(t *testing.T) {
 	pool := testdb.New(t)
 	testdb.Truncate(t, pool)
