@@ -383,7 +383,7 @@ export interface paths {
         };
         /**
          * List products.
-         * @description Cursor-paginated. Response shape depends on role (§ Conventions): `ProductStaff` for owner/manager, `ProductCashier` for cashier — never `costPrice` or `translations` (ADR-010).
+         * @description Cursor-paginated. `Product`'s `costPrice`/`translations` are present only for owner/manager, never for a cashier (§ Conventions, ADR-010).
          */
         get: operations["listProducts"];
         put?: never;
@@ -407,7 +407,7 @@ export interface paths {
         };
         /**
          * Get a product, including its variants and images.
-         * @description Response shape depends on role, like `GET /products` (`ProductStaff`/`ProductCashier`).
+         * @description `costPrice`/`translations` are present only for owner/manager, like `GET /products` (§ Conventions).
          */
         get: operations["getProduct"];
         put?: never;
@@ -435,7 +435,7 @@ export interface paths {
         };
         /**
          * List a product's variants.
-         * @description Not cursor-paginated — a product has at most a handful of variants. Response shape depends on role (`VariantStaff`/`VariantCashier`).
+         * @description Not cursor-paginated — a product has at most a handful of variants. `Variant`'s `costOverride` is present only for owner/manager (§ Conventions).
          */
         get: operations["listVariants"];
         put?: never;
@@ -505,7 +505,7 @@ export interface paths {
         put?: never;
         /**
          * Attach an uploaded image to a product.
-         * @description Requires `catalog.write` (manager+). `400 fields.mediaId: invalid` once the product already has 8 images (D-34).
+         * @description Requires `catalog.write` (manager+). `400 fields.mediaId: invalid` once the product already has 8 images (D-34); `409 CONFLICT details.field: mediaId` when this media file is already attached to the product (`product_images` unique `(product_id, media_id)`, docs/04-DATA-MODEL.md § 2).
          */
         post: operations["addProductImage"];
         delete?: never;
@@ -741,7 +741,7 @@ export interface components {
             name: string;
             description?: string;
         };
-        /** @description Per-locale name/description (ADR-012), keyed by `Locale`. On create, an entry for the shop's own default locale is required — expressible only as a service-level rule, since the JSON Schema can't know a given shop's `defaultLocale` value. Response fields outside this object (`name`/`description`/`locale`/ `translationFallback`) are the entity resolved for the caller's `Accept-Language`, fallback order `requested → uz → any`. */
+        /** @description Per-locale name/description (ADR-012), keyed by `Locale`. On create, an entry for the shop's own default locale is required — expressible only as a service-level rule, since the JSON Schema can't know a given shop's `defaultLocale` value. On PATCH, each provided locale entry fully replaces the stored entry for that locale; omitted locales are left unchanged. Response fields outside this object (`name`/`description`/`locale`/ `translationFallback`) are the entity resolved for the caller's `Accept-Language`, fallback order `requested → uz → any`. */
         Translations: {
             uz?: components["schemas"]["TranslationEntry"];
             ru?: components["schemas"]["TranslationEntry"];
@@ -757,6 +757,8 @@ export interface components {
             precision: number;
             /** @description Resolved for the caller's `Accept-Language`. */
             name: string;
+            locale: components["schemas"]["Locale"];
+            translationFallback: boolean;
         };
         /** @description Flat envelope for `GET /units` (not cursor-paginated). */
         UnitList: {
@@ -771,6 +773,8 @@ export interface components {
             sortOrder: number;
             /** @description Resolved for the caller's `Accept-Language`. */
             name: string;
+            locale: components["schemas"]["Locale"];
+            translationFallback: boolean;
             translations?: components["schemas"]["Translations"];
         };
         AttributeDefinitionCreate: {
@@ -844,7 +848,8 @@ export interface components {
          * @enum {string}
          */
         Availability: "in_stock" | "low" | "out_of_stock";
-        VariantStaff: {
+        /** @description `costOverride` is present only when the caller has the `cost.read` permission; absent (not null) otherwise (ADR-010). */
+        Variant: {
             /** Format: uuid */
             id: string;
             sku: string | null;
@@ -852,19 +857,11 @@ export interface components {
             attributes: components["schemas"]["AttributeValues"];
             /** Format: decimal */
             priceOverride: string | null;
-            /** Format: decimal */
-            costOverride: string | null;
-            isActive: boolean;
-        };
-        /** @description Like `VariantStaff` but without `costOverride` (ADR-010) — absent, not null. */
-        VariantCashier: {
-            /** Format: uuid */
-            id: string;
-            sku: string | null;
-            barcode: string | null;
-            attributes: components["schemas"]["AttributeValues"];
-            /** Format: decimal */
-            priceOverride: string | null;
+            /**
+             * Format: decimal
+             * @description Present only when the caller has the `cost.read` permission; absent (not null) otherwise (ADR-010).
+             */
+            costOverride?: string | null;
             isActive: boolean;
         };
         /** @description Defined now for Phase 6's public catalogue (D-32/D-34); no path references it yet. No cost, no `isActive` (only active variants are ever returned publicly); `availability` replaces any quantity (hard rule 4/5). */
@@ -899,10 +896,10 @@ export interface components {
         };
         /** @description Flat envelope for `GET /products/{id}/variants` (not cursor-paginated). */
         VariantList: {
-            items: components["schemas"]["VariantStaff"][];
+            items: components["schemas"]["Variant"][];
         };
-        /** @description Owner/manager product shape — includes `costPrice` and `translations` (ADR-010). */
-        ProductStaff: {
+        /** @description `costPrice` and `translations` are present only when the caller has the `cost.read` / `catalog.write` permission; absent (not null) otherwise (ADR-010). */
+        Product: {
             /** Format: uuid */
             id: string;
             /** Format: uuid */
@@ -912,7 +909,11 @@ export interface components {
             /** Format: uuid */
             unitId: string;
             basePrice: components["schemas"]["Decimal"];
-            costPrice: components["schemas"]["Decimal"];
+            /**
+             * Format: decimal
+             * @description Present only when the caller has the `cost.read` permission; absent (not null) otherwise (ADR-010).
+             */
+            costPrice?: string;
             /** Format: decimal */
             promoPrice: string | null;
             /** Format: date-time */
@@ -926,35 +927,9 @@ export interface components {
             description: string | null;
             locale: components["schemas"]["Locale"];
             translationFallback: boolean;
+            /** @description Present only when the caller has the `catalog.write` permission; absent otherwise (ADR-010). */
             translations?: components["schemas"]["Translations"];
-            variants?: components["schemas"]["VariantStaff"][];
-            images?: components["schemas"]["ProductImage"][];
-        };
-        /** @description Like `ProductStaff` but without `costPrice` or `translations` (ADR-010) — absent, not null. */
-        ProductCashier: {
-            /** Format: uuid */
-            id: string;
-            /** Format: uuid */
-            categoryId: string | null;
-            slug: string;
-            sku: string | null;
-            /** Format: uuid */
-            unitId: string;
-            basePrice: components["schemas"]["Decimal"];
-            /** Format: decimal */
-            promoPrice: string | null;
-            /** Format: date-time */
-            promoFrom: string | null;
-            /** Format: date-time */
-            promoTo: string | null;
-            isActive: boolean;
-            isFeatured: boolean;
-            /** @description Resolved for the caller's `Accept-Language`. */
-            name: string;
-            description: string | null;
-            locale: components["schemas"]["Locale"];
-            translationFallback: boolean;
-            variants?: components["schemas"]["VariantCashier"][];
+            variants?: components["schemas"]["Variant"][];
             images?: components["schemas"]["ProductImage"][];
         };
         /** @description Defined now for Phase 6's public catalogue (D-32/D-34); no path references it yet. Only active products/variants are ever returned this way; variants carry `availability`, never cost or quantity (hard rule 4/5). */
@@ -1026,7 +1001,7 @@ export interface components {
         };
         /** @description Cursor-paginated envelope for `GET /products`. */
         ProductList: {
-            items: components["schemas"]["ProductStaff"][];
+            items: components["schemas"]["Product"][];
             nextCursor: string | null;
         };
         /** @description Request body for `POST /media` (`multipart/form-data`). */
@@ -1856,7 +1831,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProductStaff"];
+                    "application/json": components["schemas"]["Product"];
                 };
             };
             400: components["responses"]["ValidationFailed"];
@@ -1882,7 +1857,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProductStaff"];
+                    "application/json": components["schemas"]["Product"];
                 };
             };
             401: components["responses"]["Unauthenticated"];
@@ -1933,7 +1908,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProductStaff"];
+                    "application/json": components["schemas"]["Product"];
                 };
             };
             400: components["responses"]["ValidationFailed"];
@@ -1988,7 +1963,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["VariantStaff"];
+                    "application/json": components["schemas"]["Variant"];
                 };
             };
             400: components["responses"]["ValidationFailed"];
@@ -2043,7 +2018,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["VariantStaff"];
+                    "application/json": components["schemas"]["Variant"];
                 };
             };
             400: components["responses"]["ValidationFailed"];
@@ -2108,6 +2083,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     removeProductImage: {

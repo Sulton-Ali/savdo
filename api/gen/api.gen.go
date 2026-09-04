@@ -248,11 +248,15 @@ type AttributeDefinition struct {
 	Code string             `json:"code"`
 	Id   openapi_types.UUID `json:"id"`
 
-	// Name Resolved for the caller's `Accept-Language`.
-	Name      string `json:"name"`
-	SortOrder int    `json:"sortOrder"`
+	// Locale A UI/data locale (ADR-012).
+	Locale Locale `json:"locale"`
 
-	// Translations Per-locale name/description (ADR-012), keyed by `Locale`. On create, an entry for the shop's own default locale is required — expressible only as a service-level rule, since the JSON Schema can't know a given shop's `defaultLocale` value. Response fields outside this object (`name`/`description`/`locale`/ `translationFallback`) are the entity resolved for the caller's `Accept-Language`, fallback order `requested → uz → any`.
+	// Name Resolved for the caller's `Accept-Language`.
+	Name                string `json:"name"`
+	SortOrder           int    `json:"sortOrder"`
+	TranslationFallback bool   `json:"translationFallback"`
+
+	// Translations Per-locale name/description (ADR-012), keyed by `Locale`. On create, an entry for the shop's own default locale is required — expressible only as a service-level rule, since the JSON Schema can't know a given shop's `defaultLocale` value. On PATCH, each provided locale entry fully replaces the stored entry for that locale; omitted locales are left unchanged. Response fields outside this object (`name`/`description`/`locale`/ `translationFallback`) are the entity resolved for the caller's `Accept-Language`, fallback order `requested → uz → any`.
 	Translations *Translations `json:"translations,omitempty"`
 }
 
@@ -261,7 +265,7 @@ type AttributeDefinitionCreate struct {
 	Code      string `json:"code"`
 	SortOrder *int   `json:"sortOrder,omitempty"`
 
-	// Translations Per-locale name/description (ADR-012), keyed by `Locale`. On create, an entry for the shop's own default locale is required — expressible only as a service-level rule, since the JSON Schema can't know a given shop's `defaultLocale` value. Response fields outside this object (`name`/`description`/`locale`/ `translationFallback`) are the entity resolved for the caller's `Accept-Language`, fallback order `requested → uz → any`.
+	// Translations Per-locale name/description (ADR-012), keyed by `Locale`. On create, an entry for the shop's own default locale is required — expressible only as a service-level rule, since the JSON Schema can't know a given shop's `defaultLocale` value. On PATCH, each provided locale entry fully replaces the stored entry for that locale; omitted locales are left unchanged. Response fields outside this object (`name`/`description`/`locale`/ `translationFallback`) are the entity resolved for the caller's `Accept-Language`, fallback order `requested → uz → any`.
 	Translations Translations `json:"translations"`
 }
 
@@ -274,7 +278,7 @@ type AttributeDefinitionList struct {
 type AttributeDefinitionPatch struct {
 	SortOrder *int `json:"sortOrder,omitempty"`
 
-	// Translations Per-locale name/description (ADR-012), keyed by `Locale`. On create, an entry for the shop's own default locale is required — expressible only as a service-level rule, since the JSON Schema can't know a given shop's `defaultLocale` value. Response fields outside this object (`name`/`description`/`locale`/ `translationFallback`) are the entity resolved for the caller's `Accept-Language`, fallback order `requested → uz → any`.
+	// Translations Per-locale name/description (ADR-012), keyed by `Locale`. On create, an entry for the shop's own default locale is required — expressible only as a service-level rule, since the JSON Schema can't know a given shop's `defaultLocale` value. On PATCH, each provided locale entry fully replaces the stored entry for that locale; omitted locales are left unchanged. Response fields outside this object (`name`/`description`/`locale`/ `translationFallback`) are the entity resolved for the caller's `Accept-Language`, fallback order `requested → uz → any`.
 	Translations *Translations `json:"translations,omitempty"`
 }
 
@@ -301,7 +305,7 @@ type Category struct {
 	SortOrder           int                                   `json:"sortOrder"`
 	TranslationFallback bool                                  `json:"translationFallback"`
 
-	// Translations Per-locale name/description (ADR-012), keyed by `Locale`. On create, an entry for the shop's own default locale is required — expressible only as a service-level rule, since the JSON Schema can't know a given shop's `defaultLocale` value. Response fields outside this object (`name`/`description`/`locale`/ `translationFallback`) are the entity resolved for the caller's `Accept-Language`, fallback order `requested → uz → any`.
+	// Translations Per-locale name/description (ADR-012), keyed by `Locale`. On create, an entry for the shop's own default locale is required — expressible only as a service-level rule, since the JSON Schema can't know a given shop's `defaultLocale` value. On PATCH, each provided locale entry fully replaces the stored entry for that locale; omitted locales are left unchanged. Response fields outside this object (`name`/`description`/`locale`/ `translationFallback`) are the entity resolved for the caller's `Accept-Language`, fallback order `requested → uz → any`.
 	Translations *Translations `json:"translations,omitempty"`
 }
 
@@ -313,7 +317,7 @@ type CategoryCreate struct {
 	Slug      *string             `json:"slug,omitempty"`
 	SortOrder *int                `json:"sortOrder,omitempty"`
 
-	// Translations Per-locale name/description (ADR-012), keyed by `Locale`. On create, an entry for the shop's own default locale is required — expressible only as a service-level rule, since the JSON Schema can't know a given shop's `defaultLocale` value. Response fields outside this object (`name`/`description`/`locale`/ `translationFallback`) are the entity resolved for the caller's `Accept-Language`, fallback order `requested → uz → any`.
+	// Translations Per-locale name/description (ADR-012), keyed by `Locale`. On create, an entry for the shop's own default locale is required — expressible only as a service-level rule, since the JSON Schema can't know a given shop's `defaultLocale` value. On PATCH, each provided locale entry fully replaces the stored entry for that locale; omitted locales are left unchanged. Response fields outside this object (`name`/`description`/`locale`/ `translationFallback`) are the entity resolved for the caller's `Accept-Language`, fallback order `requested → uz → any`.
 	Translations Translations `json:"translations"`
 }
 
@@ -333,7 +337,7 @@ type CategoryPatch struct {
 	Slug      *string                               `json:"slug,omitempty"`
 	SortOrder *int                                  `json:"sortOrder,omitempty"`
 
-	// Translations Per-locale name/description (ADR-012), keyed by `Locale`. On create, an entry for the shop's own default locale is required — expressible only as a service-level rule, since the JSON Schema can't know a given shop's `defaultLocale` value. Response fields outside this object (`name`/`description`/`locale`/ `translationFallback`) are the entity resolved for the caller's `Accept-Language`, fallback order `requested → uz → any`.
+	// Translations Per-locale name/description (ADR-012), keyed by `Locale`. On create, an entry for the shop's own default locale is required — expressible only as a service-level rule, since the JSON Schema can't know a given shop's `defaultLocale` value. On PATCH, each provided locale entry fully replaces the stored entry for that locale; omitted locales are left unchanged. Response fields outside this object (`name`/`description`/`locale`/ `translationFallback`) are the entity resolved for the caller's `Accept-Language`, fallback order `requested → uz → any`.
 	Translations *Translations `json:"translations,omitempty"`
 }
 
@@ -445,16 +449,19 @@ type MediaUrls struct {
 	Thumb string `json:"thumb"`
 }
 
-// ProductCashier Like `ProductStaff` but without `costPrice` or `translations` (ADR-010) — absent, not null.
-type ProductCashier struct {
+// Product `costPrice` and `translations` are present only when the caller has the `cost.read` / `catalog.write` permission; absent (not null) otherwise (ADR-010).
+type Product struct {
 	// BasePrice money and quantities as decimal strings (ADR-007)
-	BasePrice   Decimal                               `json:"basePrice"`
-	CategoryId  nullable.Nullable[openapi_types.UUID] `json:"categoryId"`
-	Description nullable.Nullable[string]             `json:"description"`
-	Id          openapi_types.UUID                    `json:"id"`
-	Images      *[]ProductImage                       `json:"images,omitempty"`
-	IsActive    bool                                  `json:"isActive"`
-	IsFeatured  bool                                  `json:"isFeatured"`
+	BasePrice  Decimal                               `json:"basePrice"`
+	CategoryId nullable.Nullable[openapi_types.UUID] `json:"categoryId"`
+
+	// CostPrice Present only when the caller has the `cost.read` permission; absent (not null) otherwise (ADR-010).
+	CostPrice   *string                   `json:"costPrice,omitempty"`
+	Description nullable.Nullable[string] `json:"description"`
+	Id          openapi_types.UUID        `json:"id"`
+	Images      *[]ProductImage           `json:"images,omitempty"`
+	IsActive    bool                      `json:"isActive"`
+	IsFeatured  bool                      `json:"isFeatured"`
 
 	// Locale A UI/data locale (ADR-012).
 	Locale Locale `json:"locale"`
@@ -467,8 +474,11 @@ type ProductCashier struct {
 	Sku                 nullable.Nullable[string]    `json:"sku"`
 	Slug                string                       `json:"slug"`
 	TranslationFallback bool                         `json:"translationFallback"`
-	UnitId              openapi_types.UUID           `json:"unitId"`
-	Variants            *[]VariantCashier            `json:"variants,omitempty"`
+
+	// Translations Present only when the caller has the `catalog.write` permission; absent otherwise (ADR-010).
+	Translations *Translations      `json:"translations,omitempty"`
+	UnitId       openapi_types.UUID `json:"unitId"`
+	Variants     *[]Variant         `json:"variants,omitempty"`
 }
 
 // ProductCreate defines model for ProductCreate.
@@ -489,7 +499,7 @@ type ProductCreate struct {
 	Sku        *string    `json:"sku,omitempty"`
 	Slug       *string    `json:"slug,omitempty"`
 
-	// Translations Per-locale name/description (ADR-012), keyed by `Locale`. On create, an entry for the shop's own default locale is required — expressible only as a service-level rule, since the JSON Schema can't know a given shop's `defaultLocale` value. Response fields outside this object (`name`/`description`/`locale`/ `translationFallback`) are the entity resolved for the caller's `Accept-Language`, fallback order `requested → uz → any`.
+	// Translations Per-locale name/description (ADR-012), keyed by `Locale`. On create, an entry for the shop's own default locale is required — expressible only as a service-level rule, since the JSON Schema can't know a given shop's `defaultLocale` value. On PATCH, each provided locale entry fully replaces the stored entry for that locale; omitted locales are left unchanged. Response fields outside this object (`name`/`description`/`locale`/ `translationFallback`) are the entity resolved for the caller's `Accept-Language`, fallback order `requested → uz → any`.
 	Translations Translations       `json:"translations"`
 	UnitId       openapi_types.UUID `json:"unitId"`
 	Variants     *[]VariantCreate   `json:"variants,omitempty"`
@@ -529,7 +539,7 @@ type ProductImageOrder struct {
 
 // ProductList Cursor-paginated envelope for `GET /products`.
 type ProductList struct {
-	Items      []ProductStaff            `json:"items"`
+	Items      []Product                 `json:"items"`
 	NextCursor nullable.Nullable[string] `json:"nextCursor"`
 }
 
@@ -547,7 +557,7 @@ type ProductPatch struct {
 	Sku        nullable.Nullable[string]             `json:"sku,omitempty"`
 	Slug       *string                               `json:"slug,omitempty"`
 
-	// Translations Per-locale name/description (ADR-012), keyed by `Locale`. On create, an entry for the shop's own default locale is required — expressible only as a service-level rule, since the JSON Schema can't know a given shop's `defaultLocale` value. Response fields outside this object (`name`/`description`/`locale`/ `translationFallback`) are the entity resolved for the caller's `Accept-Language`, fallback order `requested → uz → any`.
+	// Translations Per-locale name/description (ADR-012), keyed by `Locale`. On create, an entry for the shop's own default locale is required — expressible only as a service-level rule, since the JSON Schema can't know a given shop's `defaultLocale` value. On PATCH, each provided locale entry fully replaces the stored entry for that locale; omitted locales are left unchanged. Response fields outside this object (`name`/`description`/`locale`/ `translationFallback`) are the entity resolved for the caller's `Accept-Language`, fallback order `requested → uz → any`.
 	Translations *Translations       `json:"translations,omitempty"`
 	UnitId       *openapi_types.UUID `json:"unitId,omitempty"`
 }
@@ -576,38 +586,6 @@ type ProductPublic struct {
 	TranslationFallback bool                         `json:"translationFallback"`
 	UnitId              openapi_types.UUID           `json:"unitId"`
 	Variants            *[]VariantPublic             `json:"variants,omitempty"`
-}
-
-// ProductStaff Owner/manager product shape — includes `costPrice` and `translations` (ADR-010).
-type ProductStaff struct {
-	// BasePrice money and quantities as decimal strings (ADR-007)
-	BasePrice  Decimal                               `json:"basePrice"`
-	CategoryId nullable.Nullable[openapi_types.UUID] `json:"categoryId"`
-
-	// CostPrice money and quantities as decimal strings (ADR-007)
-	CostPrice   Decimal                   `json:"costPrice"`
-	Description nullable.Nullable[string] `json:"description"`
-	Id          openapi_types.UUID        `json:"id"`
-	Images      *[]ProductImage           `json:"images,omitempty"`
-	IsActive    bool                      `json:"isActive"`
-	IsFeatured  bool                      `json:"isFeatured"`
-
-	// Locale A UI/data locale (ADR-012).
-	Locale Locale `json:"locale"`
-
-	// Name Resolved for the caller's `Accept-Language`.
-	Name                string                       `json:"name"`
-	PromoFrom           nullable.Nullable[time.Time] `json:"promoFrom"`
-	PromoPrice          nullable.Nullable[string]    `json:"promoPrice"`
-	PromoTo             nullable.Nullable[time.Time] `json:"promoTo"`
-	Sku                 nullable.Nullable[string]    `json:"sku"`
-	Slug                string                       `json:"slug"`
-	TranslationFallback bool                         `json:"translationFallback"`
-
-	// Translations Per-locale name/description (ADR-012), keyed by `Locale`. On create, an entry for the shop's own default locale is required — expressible only as a service-level rule, since the JSON Schema can't know a given shop's `defaultLocale` value. Response fields outside this object (`name`/`description`/`locale`/ `translationFallback`) are the entity resolved for the caller's `Accept-Language`, fallback order `requested → uz → any`.
-	Translations *Translations      `json:"translations,omitempty"`
-	UnitId       openapi_types.UUID `json:"unitId"`
-	Variants     *[]VariantStaff    `json:"variants,omitempty"`
 }
 
 // Readiness Response body for `GET /readyz` (200 and 503 share this shape).
@@ -723,7 +701,7 @@ type TranslationEntry struct {
 	Name        string  `json:"name"`
 }
 
-// Translations Per-locale name/description (ADR-012), keyed by `Locale`. On create, an entry for the shop's own default locale is required — expressible only as a service-level rule, since the JSON Schema can't know a given shop's `defaultLocale` value. Response fields outside this object (`name`/`description`/`locale`/ `translationFallback`) are the entity resolved for the caller's `Accept-Language`, fallback order `requested → uz → any`.
+// Translations Per-locale name/description (ADR-012), keyed by `Locale`. On create, an entry for the shop's own default locale is required — expressible only as a service-level rule, since the JSON Schema can't know a given shop's `defaultLocale` value. On PATCH, each provided locale entry fully replaces the stored entry for that locale; omitted locales are left unchanged. Response fields outside this object (`name`/`description`/`locale`/ `translationFallback`) are the entity resolved for the caller's `Accept-Language`, fallback order `requested → uz → any`.
 type Translations struct {
 	// En One locale's name/description for a translatable entity.
 	En *TranslationEntry `json:"en,omitempty"`
@@ -741,11 +719,15 @@ type Unit struct {
 	Code string             `json:"code"`
 	Id   openapi_types.UUID `json:"id"`
 
+	// Locale A UI/data locale (ADR-012).
+	Locale Locale `json:"locale"`
+
 	// Name Resolved for the caller's `Accept-Language`.
 	Name string `json:"name"`
 
 	// Precision Decimal places a quantity in this unit is stored/displayed with (0 for `pcs`, 3 for `kg`).
-	Precision int `json:"precision"`
+	Precision           int  `json:"precision"`
+	TranslationFallback bool `json:"translationFallback"`
 }
 
 // UnitList Flat envelope for `GET /units` (not cursor-paginated).
@@ -776,11 +758,14 @@ type UserList struct {
 	NextCursor nullable.Nullable[string] `json:"nextCursor"`
 }
 
-// VariantCashier Like `VariantStaff` but without `costOverride` (ADR-010) — absent, not null.
-type VariantCashier struct {
+// Variant `costOverride` is present only when the caller has the `cost.read` permission; absent (not null) otherwise (ADR-010).
+type Variant struct {
 	// Attributes A variant's attribute values, keyed by `attribute_definitions.code` (e.g. `{"size": "L", "color": "blue"}`, D-32).
-	Attributes    AttributeValues           `json:"attributes"`
-	Barcode       nullable.Nullable[string] `json:"barcode"`
+	Attributes AttributeValues           `json:"attributes"`
+	Barcode    nullable.Nullable[string] `json:"barcode"`
+
+	// CostOverride Present only when the caller has the `cost.read` permission; absent (not null) otherwise (ADR-010).
+	CostOverride  nullable.Nullable[string] `json:"costOverride,omitempty"`
 	Id            openapi_types.UUID        `json:"id"`
 	IsActive      bool                      `json:"isActive"`
 	PriceOverride nullable.Nullable[string] `json:"priceOverride"`
@@ -804,7 +789,7 @@ type VariantCreate struct {
 
 // VariantList Flat envelope for `GET /products/{id}/variants` (not cursor-paginated).
 type VariantList struct {
-	Items []VariantStaff `json:"items"`
+	Items []Variant `json:"items"`
 }
 
 // VariantPatch Partial update — only provided fields change.
@@ -827,18 +812,6 @@ type VariantPublic struct {
 	Availability  Availability              `json:"availability"`
 	Barcode       nullable.Nullable[string] `json:"barcode"`
 	Id            openapi_types.UUID        `json:"id"`
-	PriceOverride nullable.Nullable[string] `json:"priceOverride"`
-	Sku           nullable.Nullable[string] `json:"sku"`
-}
-
-// VariantStaff defines model for VariantStaff.
-type VariantStaff struct {
-	// Attributes A variant's attribute values, keyed by `attribute_definitions.code` (e.g. `{"size": "L", "color": "blue"}`, D-32).
-	Attributes    AttributeValues           `json:"attributes"`
-	Barcode       nullable.Nullable[string] `json:"barcode"`
-	CostOverride  nullable.Nullable[string] `json:"costOverride"`
-	Id            openapi_types.UUID        `json:"id"`
-	IsActive      bool                      `json:"isActive"`
 	PriceOverride nullable.Nullable[string] `json:"priceOverride"`
 	Sku           nullable.Nullable[string] `json:"sku"`
 }
@@ -3312,7 +3285,7 @@ type CreateProductResponseObject interface {
 	VisitCreateProductResponse(w http.ResponseWriter) error
 }
 
-type CreateProduct201JSONResponse ProductStaff
+type CreateProduct201JSONResponse Product
 
 func (response CreateProduct201JSONResponse) VisitCreateProductResponse(w http.ResponseWriter) error {
 
@@ -3448,7 +3421,7 @@ type GetProductResponseObject interface {
 	VisitGetProductResponse(w http.ResponseWriter) error
 }
 
-type GetProduct200JSONResponse ProductStaff
+type GetProduct200JSONResponse Product
 
 func (response GetProduct200JSONResponse) VisitGetProductResponse(w http.ResponseWriter) error {
 
@@ -3499,7 +3472,7 @@ type UpdateProductResponseObject interface {
 	VisitUpdateProductResponse(w http.ResponseWriter) error
 }
 
-type UpdateProduct200JSONResponse ProductStaff
+type UpdateProduct200JSONResponse Product
 
 func (response UpdateProduct200JSONResponse) VisitUpdateProductResponse(w http.ResponseWriter) error {
 
@@ -3658,6 +3631,20 @@ func (response AddProductImage404JSONResponse) VisitAddProductImageResponse(w ht
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddProductImage409JSONResponse struct{ ConflictJSONResponse }
+
+func (response AddProductImage409JSONResponse) VisitAddProductImageResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -3859,7 +3846,7 @@ type CreateVariantResponseObject interface {
 	VisitCreateVariantResponse(w http.ResponseWriter) error
 }
 
-type CreateVariant201JSONResponse VariantStaff
+type CreateVariant201JSONResponse Variant
 
 func (response CreateVariant201JSONResponse) VisitCreateVariantResponse(w http.ResponseWriter) error {
 
@@ -4487,7 +4474,7 @@ type UpdateVariantResponseObject interface {
 	VisitUpdateVariantResponse(w http.ResponseWriter) error
 }
 
-type UpdateVariant200JSONResponse VariantStaff
+type UpdateVariant200JSONResponse Variant
 
 func (response UpdateVariant200JSONResponse) VisitUpdateVariantResponse(w http.ResponseWriter) error {
 
