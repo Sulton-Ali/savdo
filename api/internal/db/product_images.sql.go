@@ -240,3 +240,38 @@ func (q *Queries) UpdateImageOrder(ctx context.Context, arg UpdateImageOrderPara
 	_, err := q.db.Exec(ctx, updateImageOrder, arg.ShopID, arg.ID, arg.SortOrder)
 	return err
 }
+
+const updateProductImage = `-- name: UpdateProductImage :exec
+UPDATE product_images
+SET
+    variant_id = CASE WHEN $1::bool THEN NULL ELSE COALESCE($2, variant_id) END,
+    is_cover = COALESCE($3, is_cover),
+    updated_at = now()
+WHERE shop_id = $4 AND id = $5
+`
+
+type UpdateProductImageParams struct {
+	ClearVariant bool       `json:"clear_variant"`
+	VariantID    *uuid.UUID `json:"variant_id"`
+	IsCover      *bool      `json:"is_cover"`
+	ShopID       uuid.UUID  `json:"shop_id"`
+	ID           uuid.UUID  `json:"id"`
+}
+
+// ProductImagePatch (D-43): patch with an explicit clear flag for
+// variant_id (COALESCE cannot express "set to NULL"), same pattern as
+// UpdateCategory/UpdateProduct/UpdateVariant. is_cover is a plain
+// optional: when the caller sets it true, the service runs ClearCover
+// first in the same transaction so this statement's is_cover = true never
+// collides with product_images_one_cover_key; when false, this statement
+// clears only this row's flag, no promotion.
+func (q *Queries) UpdateProductImage(ctx context.Context, arg UpdateProductImageParams) error {
+	_, err := q.db.Exec(ctx, updateProductImage,
+		arg.ClearVariant,
+		arg.VariantID,
+		arg.IsCover,
+		arg.ShopID,
+		arg.ID,
+	)
+	return err
+}

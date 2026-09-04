@@ -109,6 +109,11 @@ func (s server) AddProductImage(ctx context.Context, req gen.AddProductImageRequ
 	return s.catalog.AddProductImage(ctx, req)
 }
 
+// UpdateProductImage retags an image's variant and/or cover status.
+func (s server) UpdateProductImage(ctx context.Context, req gen.UpdateProductImageRequestObject) (gen.UpdateProductImageResponseObject, error) {
+	return s.catalog.UpdateProductImage(ctx, req)
+}
+
 // RemoveProductImage removes an image from a product.
 func (s server) RemoveProductImage(ctx context.Context, req gen.RemoveProductImageRequestObject) (gen.RemoveProductImageResponseObject, error) {
 	return s.catalog.RemoveProductImage(ctx, req)

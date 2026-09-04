@@ -147,6 +147,105 @@ func (h *Handler) AddProductImage(ctx context.Context, req gen.AddProductImageRe
 	return gen.AddProductImage201JSONResponse(resp), nil
 }
 
+// UpdateProductImage retags an image's variant and/or changes its cover
+// status. Requires catalog.write (manager+, D-43). Partial update (D-35):
+// `variantId` absent leaves the tie unchanged, explicit `null` unties the
+// image to product-level, a uuid must name a variant of this product in
+// this shop (else 400 fields.variantId: invalid, the same check and
+// vocabulary AddProductImage uses). `isCover` absent leaves the flag
+// unchanged; `true` makes this image the cover and clears the previous
+// one in the same transaction (ClearCover then the patch, same ordering
+// AddProductImage/ReorderProductImages use so the partial unique index
+// product_images_one_cover_key is never hit); `false` clears only this
+// image's flag — AddProductImage already allows a caller to leave a
+// product with zero cover images by passing isCover:false on its first
+// upload, so this mirrors that existing permissiveness rather than
+// promoting a replacement.
+func (h *Handler) UpdateProductImage(ctx context.Context, req gen.UpdateProductImageRequestObject) (gen.UpdateProductImageResponseObject, error) {
+	if _, ok := auth.FromContext(ctx); !ok {
+		return nil, apierr.Unauthenticated()
+	}
+	if err := auth.Require(ctx, auth.PermCatalogWrite); err != nil {
+		return nil, err
+	}
+	authCtx, _ := auth.FromContext(ctx)
+
+	rows, err := h.svc.q.ListProductImages(ctx, db.ListProductImagesParams{ShopID: authCtx.ShopID, ProductID: req.Id})
+	if err != nil {
+		return nil, fmt.Errorf("catalog: list product images: %w", err)
+	}
+	var target *db.ListProductImagesRow
+	for i := range rows {
+		if rows[i].ID == req.ImageId {
+			r := rows[i]
+			target = &r
+			break
+		}
+	}
+	if target == nil {
+		return nil, apierr.NotFound("image")
+	}
+
+	body := req.Body
+
+	var clearVariant bool
+	var variantID *uuid.UUID
+	if vp := optionalUUID(body.VariantId); vp != nil {
+		if *vp == nil {
+			clearVariant = true // explicit null: untie from the variant
+		} else {
+			v, err := h.svc.q.GetVariantForStaff(ctx, db.GetVariantForStaffParams{ShopID: authCtx.ShopID, ID: **vp})
+			if err != nil {
+				if errors.Is(err, pgx.ErrNoRows) {
+					return nil, apierr.Validation(map[string]string{"variantId": "invalid"})
+				}
+				return nil, fmt.Errorf("catalog: get variant: %w", err)
+			}
+			if v.ProductID != req.Id {
+				return nil, apierr.Validation(map[string]string{"variantId": "invalid"})
+			}
+			variantID = *vp
+		}
+	}
+
+	tx, err := h.svc.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("catalog: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	qtx := h.svc.q.WithTx(tx)
+
+	if body.IsCover != nil && *body.IsCover {
+		if err := qtx.ClearCover(ctx, db.ClearCoverParams{ShopID: authCtx.ShopID, ProductID: req.Id}); err != nil {
+			return nil, fmt.Errorf("catalog: clear cover: %w", err)
+		}
+	}
+	if err := qtx.UpdateProductImage(ctx, db.UpdateProductImageParams{
+		ClearVariant: clearVariant, VariantID: variantID, IsCover: body.IsCover,
+		ShopID: authCtx.ShopID, ID: req.ImageId,
+	}); err != nil {
+		if apiErr, ok := mapWriteError(err); ok {
+			return nil, apiErr
+		}
+		return nil, fmt.Errorf("catalog: update product image: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("catalog: commit update product image: %w", err)
+	}
+
+	updated := *target
+	if clearVariant {
+		updated.VariantID = nil
+	} else if variantID != nil {
+		updated.VariantID = variantID
+	}
+	if body.IsCover != nil {
+		updated.IsCover = *body.IsCover
+	}
+	return gen.UpdateProductImage200JSONResponse(h.svc.toGenProductImage(updated)), nil
+}
+
 // RemoveProductImage removes an image from a product. Requires
 // catalog.write (manager+). Hard delete (join row); promotes the next
 // image by sort order to cover if the removed one was the cover.

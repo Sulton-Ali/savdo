@@ -48,3 +48,18 @@ WHERE shop_id = $1 AND id = $2;
 -- product's current image set before applying UpdateImageOrder per id.
 SELECT id FROM product_images
 WHERE shop_id = $1 AND product_id = $2;
+
+-- name: UpdateProductImage :exec
+-- ProductImagePatch (D-43): patch with an explicit clear flag for
+-- variant_id (COALESCE cannot express "set to NULL"), same pattern as
+-- UpdateCategory/UpdateProduct/UpdateVariant. is_cover is a plain
+-- optional: when the caller sets it true, the service runs ClearCover
+-- first in the same transaction so this statement's is_cover = true never
+-- collides with product_images_one_cover_key; when false, this statement
+-- clears only this row's flag, no promotion.
+UPDATE product_images
+SET
+    variant_id = CASE WHEN sqlc.arg('clear_variant')::bool THEN NULL ELSE COALESCE(sqlc.narg('variant_id'), variant_id) END,
+    is_cover = COALESCE(sqlc.narg('is_cover'), is_cover),
+    updated_at = now()
+WHERE shop_id = sqlc.arg('shop_id') AND id = sqlc.arg('id');
