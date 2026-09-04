@@ -937,7 +937,7 @@ type StockMovement struct {
 	CreatedBy nullable.Nullable[openapi_types.UUID] `json:"createdBy"`
 
 	// CreatedByName The creating user's display name, resolved server-side for the admin UI (avoids a second lookup by `createdBy`); `null` when `createdBy` is `null` or the user no longer exists.
-	CreatedByName nullable.Nullable[string] `json:"createdByName"`
+	CreatedByName nullable.Nullable[string] `json:"createdByName,omitempty"`
 	Id            openapi_types.UUID        `json:"id"`
 
 	// Kind docs/04-DATA-MODEL.md § 3.

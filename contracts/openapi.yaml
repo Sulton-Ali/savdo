@@ -3164,7 +3164,6 @@ components:
         - reason
         - note
         - createdBy
-        - createdByName
         - createdAt
       properties:
         id:

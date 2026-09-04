@@ -1453,7 +1453,7 @@ export interface components {
             /** Format: uuid */
             createdBy: string | null;
             /** @description The creating user's display name, resolved server-side for the admin UI (avoids a second lookup by `createdBy`); `null` when `createdBy` is `null` or the user no longer exists. */
-            createdByName: string | null;
+            createdByName?: string | null;
             /** Format: date-time */
             createdAt: string;
         };
