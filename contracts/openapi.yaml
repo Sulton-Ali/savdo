@@ -1181,15 +1181,7 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
         "409":
-          description: >
-            A supplier with this name already exists in the shop.
-            `409 CONFLICT details.field: name` (docs/05-API.md §
-            Conventions, same vocabulary as the staff `username`/`phone`
-            conflict).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/Conflict"
 
   /suppliers/{id}:
     get:
@@ -1254,13 +1246,7 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
-          description: >
-            A supplier with this name already exists in the shop.
-            `409 CONFLICT details.field: name`.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/Conflict"
     delete:
       operationId: deleteSupplier
       tags: [suppliers]

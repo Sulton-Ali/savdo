@@ -6495,7 +6495,7 @@ func (response CreateSupplier403JSONResponse) VisitCreateSupplierResponse(w http
 	return err
 }
 
-type CreateSupplier409JSONResponse Error
+type CreateSupplier409JSONResponse struct{ ConflictJSONResponse }
 
 func (response CreateSupplier409JSONResponse) VisitCreateSupplierResponse(w http.ResponseWriter) error {
 
@@ -6710,7 +6710,7 @@ func (response UpdateSupplier404JSONResponse) VisitUpdateSupplierResponse(w http
 	return err
 }
 
-type UpdateSupplier409JSONResponse Error
+type UpdateSupplier409JSONResponse struct{ ConflictJSONResponse }
 
 func (response UpdateSupplier409JSONResponse) VisitUpdateSupplierResponse(w http.ResponseWriter) error {
 

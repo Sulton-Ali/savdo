@@ -2674,15 +2674,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
-            /** @description A supplier with this name already exists in the shop. `409 CONFLICT details.field: name` (docs/05-API.md § Conventions, same vocabulary as the staff `username`/`phone` conflict). */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
+            409: components["responses"]["Conflict"];
         };
     };
     getSupplier: {
@@ -2761,15 +2753,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description A supplier with this name already exists in the shop. `409 CONFLICT details.field: name`. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
+            409: components["responses"]["Conflict"];
         };
     };
     listPurchases: {
