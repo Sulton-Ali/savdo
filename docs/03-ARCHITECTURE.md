@@ -113,7 +113,7 @@ Password login → argon2id verify → new `sessions` row (random 32-byte token,
 SHA-256) → token returned as `Set-Cookie` (HttpOnly, Secure, SameSite=Lax) for web and
 in the body for mobile (stored in SecureStore, sent as `Authorization: Bearer`). Every
 request resolves `shop_id`, `user_id`, `role` from the session into the context; every
-service takes them from there.
+service takes them from there. The shop is resolved once at startup from `SHOP_SLUG` (O-11) and injected into the auth service; login looks the user up in that shop only. Behind the production proxy the client IP is the last `X-Forwarded-For` hop.
 
 ## Architecture Decision Records
 

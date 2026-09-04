@@ -40,7 +40,7 @@ orchestrator (Fable 5.1).
 | D-28 | 2026-09-04 | **Password reset before Phase 7:** the owner resets any staff password from the admin; the owner's own password is reset with `savdo reset-owner-password` on the server. No email, no SMS. Telegram OTP self-service arrives in Phase 7 (ADR-005). Closes Q-11. | Phase 1: `POST /staff/{id}/password` (owner), CLI subcommand; no forgot-password screen until Phase 7 |
 | D-29 | 2026-09-04 | **Session lifetime:** mobile 30 days sliding, web 7 days sliding; every authenticated request extends the session; the owner can revoke any session from the admin. | `sessions.expires_at` recomputed on use per `client`; `GET/DELETE /auth/sessions` in Phase 1 |
 | D-30 | 2026-09-04 | **Seed data:** placeholder shop "Savdo Demo", locations "Doʻkon" (store) and "Ombor" (warehouse), users owner/manager/cashier with documented dev-only passwords. The family shop's real name and locations are entered at Phase 8 onboarding. | `savdo seed` in Phase 1; real data import task in Phase 8 |
-| D-31 | 2026-09-04 | **Phase 1 dependencies approved:** `i18next` + `react-i18next` and `lucide-react` in `admin`; `testcontainers-go` in `api`; Ant Design built-in locale packs (uz_UZ, ru_RU, en_US). | Pins per `02-TECH-STACK.md`; anything else still needs approval (hard rule 11) |
+| D-31 | 2026-09-04 | **Phase 1 dependencies approved:** `i18next` + `react-i18next` and `lucide-react` in `admin`; `testcontainers-go` in `api`; Ant Design built-in locale packs (uz_UZ, ru_RU, en_US). Amended 2026-09-04: `dayjs` is a direct admin dependency at antd's already-resolved version (locale side effects); `lucide-react` pinned 1.39.0 (1.40.0 blocked by the 24 h release age). | Pins per `02-TECH-STACK.md`; anything else still needs approval (hard rule 11) |
 | D-24 | 2026-09-03 | **MCP: context7 + playwright only; no postgres MCP** (upstream deprecated, read-only bypass CVE). DB inspection via `docker compose exec postgres psql`. **Go tools pinned with the `go tool` directive** in `go.mod` (sqlc, goose, oapi-codegen); golangci-lint pinned by the Makefile; TS tools as pnpm dev deps. No global installs. | `.mcp.json`, `settings.json`, `02-TECH-STACK.md`, Phase 0 scaffold |
 | D-23 | 2026-09-03 | **Develop locally until the MVP is complete.** Remote `github.com/Sulton-Ali/savdo` (private) is for sync and CI only. Production deployment happens once, after the owner confirms everything is ready (Phase 8). Q-14/Q-15 closed: Go 1.27 and `gh` installed natively. | No deploy workflow, no VPS, no real users before Phase 8; pushes to `main` are a sync, not a release |
 
@@ -61,6 +61,9 @@ Routine technical calls taken during bootstrap so work can start. Each is an ADR
 | O-08 | pnpm `minimumReleaseAge` 1440 minutes (24 h) in `pnpm-workspace.yaml` | Supply-chain hygiene: hours-old releases cannot be resolved; pnpm 11 otherwise auto-writes ad-hoc excludes |
 | O-09 | goose is a library inside the `savdo` CLI, not a `go tool` binary | Avoids compiling every goose DB driver; migrations run through one code path locally and in prod |
 | O-10 | TypeScript pinned per package: 7.0.2 where the toolchain supports it, 6.0.3 for `packages/api-client` and `mobile` | openapi-typescript 7.13 and Expo SDK 57 do not support TS 7 yet; generated types check clean under both |
+| O-11 | Single-shop MVP resolves the tenant at startup from `SHOP_SLUG` (default `savdo-demo`); the API fails fast if the shop is missing ("run savdo seed"). Multi-tenant later replaces this with host/slug resolution (ADR-004). | No shop field in the login form; every request is scoped by the session's shop_id |
+| O-12 | Validation vocabulary: `details.fields` values are exactly `required`, `invalid`, `too_short`, `too_long`; conflicts return 409 with `details.field` = `username`, `phone` or `name`. | Admin maps them to `errors.field.*` i18n keys; every new endpoint uses the same words |
+| O-13 | At most one testcontainers-heavy gate runs at a time on the dev machine; mergers are sequenced by the orchestrator. | Parallel gates caused timeouts and a container-start deadline on 2026-09-04 |
 
 ## Open questions
 
@@ -84,6 +87,8 @@ Blocking questions are marked **[blocks Phase N]**. The orchestrator asks them v
 | Q-16 | Brand colour and font for `packages/ui-tokens` (placeholder teal `#0f766e`, Inter)? | Phase 2 | Owner picks; tokens drive Ant Design theme, landing CSS and NativeWind |
 | Q-17 | Mobile test runner: add `jest-expo` (new dependency) so `mobile` has unit tests? | Phase 5 | Expo's default template ships no runner; hard rule 11 needs owner approval |
 | Q-18 | Android package id: keep placeholder `uz.savdo.app`? | Phase 5 | Must be final before the first EAS/APK build |
+| Q-19 | Login abuse horizon: today 10/min per IP and 5/min per username with no lockout or backoff (≈7 200 guesses per day per username). Add a longer-horizon limit or temporary lockout? | Phase 8 | Owner escalation from the T4 security review; rate limits are an owner decision (AGENTS.md § Escalate) |
+| Q-20 | Clearing nullable fields through PATCH: OpenAPI `["string","null"]` generates a Go `*string`, so "absent" and "null" are indistinguishable and e.g. a staff phone cannot be cleared. Adopt a nullable wrapper (oapi-codegen `nullable`) or explicit clear flags? | Phase 2 | Affects product/customer fields in Phase 2; contract-level decision |
 
 ## Post-MVP backlog (agreed out of scope for now)
 
