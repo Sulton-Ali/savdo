@@ -270,8 +270,8 @@ func (h *Handler) CreateVariant(ctx context.Context, req gen.CreateVariantReques
 		Attributes: canonical, PriceOverride: priceOverride, CostOverride: costOverride, IsActive: isActive,
 	})
 	if err != nil {
-		if field, ok := conflictField(err); ok {
-			return nil, apierr.Conflict(field)
+		if apiErr, ok := mapWriteError(err); ok {
+			return nil, apiErr
 		}
 		return nil, fmt.Errorf("catalog: create variant: %w", err)
 	}
@@ -406,8 +406,8 @@ func (h *Handler) UpdateVariant(ctx context.Context, req gen.UpdateVariantReques
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, apierr.NotFound("variant")
 		}
-		if field, ok := conflictField(err); ok {
-			return nil, apierr.Conflict(field)
+		if apiErr, ok := mapWriteError(err); ok {
+			return nil, apiErr
 		}
 		return nil, fmt.Errorf("catalog: update variant: %w", err)
 	}
@@ -420,8 +420,8 @@ func (h *Handler) UpdateVariant(ctx context.Context, req gen.UpdateVariantReques
 			if errors.Is(err, pgx.ErrNoRows) {
 				return nil, apierr.NotFound("variant")
 			}
-			if field, ok := conflictField(err); ok {
-				return nil, apierr.Conflict(field)
+			if apiErr, ok := mapWriteError(err); ok {
+				return nil, apiErr
 			}
 			return nil, fmt.Errorf("catalog: update variant attributes: %w", err)
 		}
@@ -440,8 +440,15 @@ func (h *Handler) UpdateVariant(ctx context.Context, req gen.UpdateVariantReques
 
 // DeleteVariant soft-deletes a variant. Requires catalog.write
 // (manager+). 400 fields.id: invalid when this is the product's only
-// active variant (docs/04-DATA-MODEL.md § 2: every product keeps at least
-// one).
+// non-deleted variant, active or not (docs/04-DATA-MODEL.md § 2: every
+// product keeps at least one) — guarding only on is_active would let the
+// last variant be removed as long as it happened to be inactive, which
+// still violates the invariant. The count-then-delete runs inside one
+// transaction after LockShop(shopID), the same per-tenant serialization
+// point CreateLocation/UpdateLocation use, so two concurrent deletes of a
+// product's last two variants cannot both read "2 remain" and both
+// proceed. has_variants is recomputed afterwards: false only when exactly
+// one non-deleted variant remains and it is the implicit `{}` one.
 func (h *Handler) DeleteVariant(ctx context.Context, req gen.DeleteVariantRequestObject) (gen.DeleteVariantResponseObject, error) {
 	if _, ok := auth.FromContext(ctx); !ok {
 		return nil, apierr.Unauthenticated()
@@ -459,18 +466,45 @@ func (h *Handler) DeleteVariant(ctx context.Context, req gen.DeleteVariantReques
 		return nil, fmt.Errorf("catalog: get variant: %w", err)
 	}
 
-	if variant.IsActive {
-		count, err := h.svc.q.CountActiveVariants(ctx, db.CountActiveVariantsParams{ShopID: authCtx.ShopID, ProductID: variant.ProductID})
-		if err != nil {
-			return nil, fmt.Errorf("catalog: count active variants: %w", err)
-		}
-		if count <= 1 {
-			return nil, apierr.Validation(map[string]string{"id": "invalid"})
-		}
+	tx, err := h.svc.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("catalog: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	qtx := h.svc.q.WithTx(tx)
+
+	if _, err := qtx.LockShop(ctx, authCtx.ShopID); err != nil {
+		return nil, fmt.Errorf("catalog: lock shop: %w", err)
 	}
 
-	if err := h.svc.q.SoftDeleteVariant(ctx, db.SoftDeleteVariantParams{ShopID: authCtx.ShopID, ID: req.Id}); err != nil {
+	remaining, err := qtx.ListVariantsForStaff(ctx, db.ListVariantsForStaffParams{ShopID: authCtx.ShopID, ProductID: variant.ProductID})
+	if err != nil {
+		return nil, fmt.Errorf("catalog: list variants: %w", err)
+	}
+	if len(remaining) <= 1 {
+		return nil, apierr.Validation(map[string]string{"id": "invalid"})
+	}
+
+	if err := qtx.SoftDeleteVariant(ctx, db.SoftDeleteVariantParams{ShopID: authCtx.ShopID, ID: req.Id}); err != nil {
 		return nil, fmt.Errorf("catalog: soft delete variant: %w", err)
+	}
+
+	afterCount := 0
+	var soleRemaining db.ProductVariant
+	for _, v := range remaining {
+		if v.ID == req.Id {
+			continue
+		}
+		afterCount++
+		soleRemaining = v
+	}
+	hasVariants := afterCount != 1 || string(soleRemaining.Attributes) != implicitAttributes
+	if err := qtx.SetProductHasVariants(ctx, db.SetProductHasVariantsParams{ShopID: authCtx.ShopID, ID: variant.ProductID, HasVariants: hasVariants}); err != nil {
+		return nil, fmt.Errorf("catalog: set has_variants: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("catalog: commit delete variant: %w", err)
 	}
 	return gen.DeleteVariant204Response{}, nil
 }
