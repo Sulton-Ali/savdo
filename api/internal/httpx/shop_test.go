@@ -445,3 +445,135 @@ func TestOwnerCannotDeactivateOrChangeOwnRole(t *testing.T) {
 		t.Fatalf("fields = %+v, want isActive=invalid", fields)
 	}
 }
+
+// TestDeactivatingTheDefaultLocationReportsIsActiveField is Review A's
+// MINOR-1: deactivating the shop's default location must report
+// fields.isActive (the field the caller actually sent), distinct from
+// fields.isDefault (reserved for an attempt to unset isDefault itself —
+// see TestUnsettingTheOnlyDefaultLocationReportsIsDefaultField).
+func TestDeactivatingTheDefaultLocationReportsIsActiveField(t *testing.T) {
+	f := newShopTestFixture(t)
+	cookies := f.login(t, f.ownerUsername, f.ownerPassword, "web").Result().Cookies()
+
+	locRec := f.do(t, http.MethodPost, "/v1/locations", cookies, map[string]any{"name": "Only Store", "kind": "store"})
+	var loc gen.Location
+	if err := json.Unmarshal(locRec.Body.Bytes(), &loc); err != nil {
+		t.Fatalf("decode location: %v", err)
+	}
+	if !loc.IsDefault {
+		t.Fatal("setup: first location is not the default")
+	}
+
+	rec := f.do(t, http.MethodPatch, "/v1/locations/"+loc.Id.String(), cookies, map[string]any{"isActive": false})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body = %s", rec.Code, rec.Body.String())
+	}
+	fields := fieldsOf(t, decodeError(t, rec))
+	if fields["isActive"] != "invalid" {
+		t.Fatalf("fields = %+v, want isActive=invalid", fields)
+	}
+}
+
+// TestUnsettingTheOnlyDefaultLocationReportsIsDefaultField is the
+// isDefault-field counterpart of the test above.
+func TestUnsettingTheOnlyDefaultLocationReportsIsDefaultField(t *testing.T) {
+	f := newShopTestFixture(t)
+	cookies := f.login(t, f.ownerUsername, f.ownerPassword, "web").Result().Cookies()
+
+	locRec := f.do(t, http.MethodPost, "/v1/locations", cookies, map[string]any{"name": "Only Store", "kind": "store"})
+	var loc gen.Location
+	if err := json.Unmarshal(locRec.Body.Bytes(), &loc); err != nil {
+		t.Fatalf("decode location: %v", err)
+	}
+
+	rec := f.do(t, http.MethodPatch, "/v1/locations/"+loc.Id.String(), cookies, map[string]any{"isDefault": false})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body = %s", rec.Code, rec.Body.String())
+	}
+	fields := fieldsOf(t, decodeError(t, rec))
+	if fields["isDefault"] != "invalid" {
+		t.Fatalf("fields = %+v, want isDefault=invalid", fields)
+	}
+}
+
+// TestListLocationsBadLimitParamIs400 is Review A's MINOR-3: a limit
+// query parameter that doesn't even parse as an integer is rejected by
+// the generated param binder (writeRequestError, httpx/router.go) before
+// clampLimit ever sees it — a 400 VALIDATION_FAILED, not a 500 and not a
+// silently-defaulted limit. The numeric clamp cases (0, negative, > 200)
+// are pinned directly against clampLimit in
+// internal/shop/service_test.go's TestClampLimit; this is the one
+// aspect only observable through the actual HTTP binding layer.
+func TestListLocationsBadLimitParamIs400(t *testing.T) {
+	f := newShopTestFixture(t)
+	cookies := f.login(t, f.ownerUsername, f.ownerPassword, "web").Result().Cookies()
+
+	rec := f.do(t, http.MethodGet, "/v1/locations?limit=abc", cookies, nil)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body = %s", rec.Code, rec.Body.String())
+	}
+	if decodeError(t, rec).Error.Code != gen.VALIDATIONFAILED {
+		t.Fatalf("error.code = %q, want VALIDATION_FAILED", decodeError(t, rec).Error.Code)
+	}
+}
+
+// TestCreateStaffWithBlankPhoneTwiceBothSucceed is MAJOR-2: `phone: ""`
+// must be normalized to SQL NULL on create, not stored as a literal
+// empty string — otherwise a second staff member also sent `phone: ""`
+// would collide on the partial unique index (shop_id, phone) where
+// phone is not null, since an empty string, unlike NULL, is not "no
+// phone" as far as that index is concerned.
+func TestCreateStaffWithBlankPhoneTwiceBothSucceed(t *testing.T) {
+	f := newShopTestFixture(t)
+	cookies := f.login(t, f.ownerUsername, f.ownerPassword, "web").Result().Cookies()
+
+	for _, username := range []string{"blankphone1", "blankphone2"} {
+		rec := f.do(t, http.MethodPost, "/v1/staff", cookies, map[string]any{
+			"username": username, "password": "a-fine-password-1", "fullName": "Blank Phone", "role": "cashier", "phone": "",
+		})
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("create %q with phone=\"\" status = %d, want 201, body = %s", username, rec.Code, rec.Body.String())
+		}
+		var user gen.User
+		if err := json.Unmarshal(rec.Body.Bytes(), &user); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if user.Phone != nil {
+			t.Fatalf("created user Phone = %v, want nil (normalized from \"\")", *user.Phone)
+		}
+	}
+}
+
+// TestPatchStaffBlankPhoneClearsIt is MAJOR-2's PATCH case: a staff
+// member created with a real phone number, then PATCHed with
+// `phone: ""`, must show phone: null afterward.
+func TestPatchStaffBlankPhoneClearsIt(t *testing.T) {
+	f := newShopTestFixture(t)
+	cookies := f.login(t, f.ownerUsername, f.ownerPassword, "web").Result().Cookies()
+
+	createRec := f.do(t, http.MethodPost, "/v1/staff", cookies, map[string]any{
+		"username": "hasphone1", "password": "a-fine-password-1", "fullName": "Has Phone", "role": "cashier", "phone": "+998901112233",
+	})
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, body = %s", createRec.Code, createRec.Body.String())
+	}
+	var created gen.User
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if created.Phone == nil {
+		t.Fatal("setup: created user has no phone")
+	}
+
+	patchRec := f.do(t, http.MethodPatch, "/v1/staff/"+created.Id.String(), cookies, map[string]any{"phone": ""})
+	if patchRec.Code != http.StatusOK {
+		t.Fatalf("PATCH phone=\"\" status = %d, want 200, body = %s", patchRec.Code, patchRec.Body.String())
+	}
+	var patched gen.User
+	if err := json.Unmarshal(patchRec.Body.Bytes(), &patched); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if patched.Phone != nil {
+		t.Fatalf("patched user Phone = %v, want nil after clearing", *patched.Phone)
+	}
+}

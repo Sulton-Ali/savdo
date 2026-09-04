@@ -2,6 +2,7 @@ package shop
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -470,3 +471,135 @@ func TestSetStaffPasswordOtherShopIs404(t *testing.T) {
 		t.Fatalf("err = %v, want 404", err)
 	}
 }
+
+// TestUpdateLocationTakeoverClearsOldDefault is MAJOR-1's sequential
+// "PATCH takeover" case: PATCHing a non-default location to
+// isDefault:true must succeed and clear the previous default, the same
+// invariant TestCreateLocationSecondIsNotDefaultUnlessRequested checks
+// through CreateLocation rather than UpdateLocation.
+func TestUpdateLocationTakeoverClearsOldDefault(t *testing.T) {
+	svc, q, ctx := newTestService(t)
+	shopRow := seedShop(ctx, t, q, "shop-a")
+
+	first, err := svc.CreateLocation(ctx, shopRow.ID, "First", db.LocationKindStore, false)
+	if err != nil {
+		t.Fatalf("CreateLocation(first): %v", err)
+	}
+	second, err := svc.CreateLocation(ctx, shopRow.ID, "Second", db.LocationKindWarehouse, false)
+	if err != nil {
+		t.Fatalf("CreateLocation(second): %v", err)
+	}
+	if !first.IsDefault || second.IsDefault {
+		t.Fatalf("setup: first.IsDefault=%v second.IsDefault=%v, want true/false", first.IsDefault, second.IsDefault)
+	}
+
+	wantDefault := true
+	updated, err := svc.UpdateLocation(ctx, shopRow.ID, second.ID, LocationPatchInput{IsDefault: &wantDefault})
+	if err != nil {
+		t.Fatalf("UpdateLocation(takeover): %v", err)
+	}
+	if !updated.IsDefault {
+		t.Fatal("updated.IsDefault = false, want true after taking over as default")
+	}
+
+	refetchedFirst, err := q.GetLocation(ctx, db.GetLocationParams{ShopID: shopRow.ID, ID: first.ID})
+	if err != nil {
+		t.Fatalf("GetLocation(first): %v", err)
+	}
+	if refetchedFirst.IsDefault {
+		t.Fatal("first location is still IsDefault=true after second took over — ClearDefaultLocation did not run")
+	}
+}
+
+// TestUpdateLocationConcurrentTakeoverExactlyOneDefaultRemains is
+// MAJOR-1's concurrency check: two goroutines each try to make a
+// different (currently non-default) location the shop's default at the
+// same time. Per the review, both outcomes below are acceptable — what
+// is never acceptable is a 500 or more than one default surviving:
+// locations_shop_id_default_key (mapped to 409 CONFLICT
+// details.field=isDefault by conflictField) is the backstop for
+// whichever request loses the race.
+func TestUpdateLocationConcurrentTakeoverExactlyOneDefaultRemains(t *testing.T) {
+	svc, q, ctx := newTestService(t)
+	shopRow := seedShop(ctx, t, q, "shop-a")
+
+	first, err := svc.CreateLocation(ctx, shopRow.ID, "First", db.LocationKindStore, false)
+	if err != nil {
+		t.Fatalf("CreateLocation(first): %v", err)
+	}
+	second, err := svc.CreateLocation(ctx, shopRow.ID, "Second", db.LocationKindWarehouse, false)
+	if err != nil {
+		t.Fatalf("CreateLocation(second): %v", err)
+	}
+	third, err := svc.CreateLocation(ctx, shopRow.ID, "Third", db.LocationKindWarehouse, false)
+	if err != nil {
+		t.Fatalf("CreateLocation(third): %v", err)
+	}
+	if !first.IsDefault {
+		t.Fatal("setup: first location is not the default")
+	}
+
+	wantDefault := true
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	targets := []uuid.UUID{second.ID, third.ID}
+	for i := range targets {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, errs[i] = svc.UpdateLocation(ctx, shopRow.ID, targets[i], LocationPatchInput{IsDefault: &wantDefault})
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err == nil {
+			continue
+		}
+		apiErr, ok := err.(*apierr.Error)
+		if !ok || apiErr.Status != 409 || apiErr.Details["field"] != "isDefault" {
+			t.Fatalf("goroutine %d: err = %v (%T), want nil or 409 CONFLICT details.field=isDefault", i, err, err)
+		}
+	}
+
+	all, err := q.ListLocations(ctx, db.ListLocationsParams{ShopID: shopRow.ID, Limit: 10})
+	if err != nil {
+		t.Fatalf("ListLocations: %v", err)
+	}
+	defaults := 0
+	for _, l := range all {
+		if l.IsDefault {
+			defaults++
+		}
+	}
+	if defaults != 1 {
+		t.Fatalf("locations with IsDefault=true = %d, want exactly 1 (all locations: %+v)", defaults, all)
+	}
+}
+
+// TestClampLimit locks the pagination limit-clamping behaviour Review A
+// asked to be pinned: 0, negative and > maxLimit all clamp; maxLimit
+// itself and an in-range value pass through unchanged.
+func TestClampLimit(t *testing.T) {
+	tests := []struct {
+		name string
+		in   *int
+		want int32
+	}{
+		{"nil uses default", nil, defaultLimit},
+		{"zero uses default", intPtr(0), defaultLimit},
+		{"negative uses default", intPtr(-5), defaultLimit},
+		{"over max clamps to max", intPtr(maxLimit + 1), maxLimit},
+		{"exactly max passes through", intPtr(maxLimit), maxLimit},
+		{"in range passes through", intPtr(1), 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := clampLimit(tt.in); got != tt.want {
+				t.Fatalf("clampLimit(%v) = %d, want %d", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func intPtr(n int) *int { return &n }
