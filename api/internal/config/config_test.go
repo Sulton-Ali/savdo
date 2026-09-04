@@ -28,6 +28,9 @@ func TestLoad(t *testing.T) {
 				LoginRateUserPerMin: 5,
 				CookieSecure:        false,
 				ShopSlug:            "savdo-demo",
+				MediaDir:            "../infra/data/media",
+				MediaBaseURL:        "/media",
+				MediaMaxBytes:       10485760,
 			},
 		},
 		{
@@ -60,8 +63,11 @@ func TestLoad(t *testing.T) {
 				LoginRateUserPerMin: 3,
 				// COOKIE_SECURE explicitly "false" must win over the prod
 				// default of true.
-				CookieSecure: false,
-				ShopSlug:     "acme-shop",
+				CookieSecure:  false,
+				ShopSlug:      "acme-shop",
+				MediaDir:      "../infra/data/media",
+				MediaBaseURL:  "/media",
+				MediaMaxBytes: 10485760,
 			},
 		},
 		{
@@ -81,6 +87,9 @@ func TestLoad(t *testing.T) {
 				LoginRateUserPerMin: 5,
 				CookieSecure:        true,
 				ShopSlug:            "savdo-demo",
+				MediaDir:            "../infra/data/media",
+				MediaBaseURL:        "/media",
+				MediaMaxBytes:       10485760,
 			},
 		},
 	}

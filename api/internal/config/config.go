@@ -41,6 +41,25 @@ type Config struct {
 	// fails fast if no such shop exists. A future multi-tenant version
 	// replaces this with per-request host/slug resolution (ADR-004).
 	ShopSlug string `env:"SHOP_SLUG" envDefault:"savdo-demo"`
+
+	// MediaDir is the local-disk root media.LocalStorage writes under
+	// (ADR-008). In prod (docs/07-DEVOPS.md § Production) this is the
+	// Docker volume mounted at /data/media. The dev default is relative
+	// to cmd/api's working directory, which the documented dev
+	// entrypoint (`make api`, Makefile's `api:` target) sets to `api/`
+	// — so "../infra/data/media" lands at the repo-root
+	// infra/data/media/ docs/07-DEVOPS.md § Local development names.
+	MediaDir string `env:"MEDIA_DIR" envDefault:"../infra/data/media"`
+
+	// MediaBaseURL prefixes every media.Storage key to build the URLs
+	// MediaFile.urls returns. In dev the API itself serves this prefix
+	// (router.go); in prod Caddy does (docs/07-DEVOPS.md § Production).
+	MediaBaseURL string `env:"MEDIA_BASE_URL" envDefault:"/media"`
+
+	// MediaMaxBytes caps a single POST /media upload (the original file,
+	// before derivatives). bodylimit.go applies it only to that route;
+	// everything else stays under maxRequestBodyBytes.
+	MediaMaxBytes int64 `env:"MEDIA_MAX_BYTES" envDefault:"10485760"`
 }
 
 // Load parses the environment into a Config, applying defaults. It fails
