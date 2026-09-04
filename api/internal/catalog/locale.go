@@ -28,25 +28,38 @@ func AcceptLanguageMiddleware(f gen.StrictHandlerFunc, _ string) gen.StrictHandl
 	}
 }
 
-func acceptLanguageFromContext(ctx context.Context) string {
+// AcceptLanguageFromContext returns the raw `Accept-Language` header value
+// AcceptLanguageMiddleware stashed on ctx ("" if the middleware never ran
+// or the client sent none). Exported (T4) so another module whose own
+// response resolves a translated field by the caller's locale — e.g.
+// stock.PurchaseItem.productName — can read the same header this package
+// already stashes, without a second, duplicate middleware: prefer
+// ResolveLocale below, which also applies the uz/ru/en fallback; this is
+// the lower-level piece ResolveLocale itself is built from.
+func AcceptLanguageFromContext(ctx context.Context) string {
 	v, _ := ctx.Value(acceptLanguageCtxKey{}).(string)
 	return v
 }
 
 // supportedLocales is the uz/ru/en vocabulary docs/05-API.md §
 // Conventions and ADR-012 define. Order does not matter here — request
-// order is what resolveLocale honours.
+// order is what resolveLocale/ResolveLocale honours.
 var supportedLocales = map[string]bool{"uz": true, "ru": true, "en": true}
 
-// resolveLocale parses ctx's `Accept-Language` header (stashed by
+// ResolveLocale parses ctx's `Accept-Language` header (stashed by
 // AcceptLanguageMiddleware) for the first supported locale (uz/ru/en),
 // trying each comma-separated entry in the order the client listed them
 // and ignoring any `;q=` weight — a full RFC 4647 weighted match is more
-// than three fixed locales need. Falls back to the shop's own default
-// locale when the header is absent or names nothing supported
-// (docs/05-API.md § Conventions).
-func (s *Service) resolveLocale(ctx context.Context) string {
-	header := acceptLanguageFromContext(ctx)
+// than three fixed locales need. Falls back to defaultLocale when the
+// header is absent or names nothing supported (docs/05-API.md §
+// Conventions). Exported (T4) alongside AcceptLanguageFromContext for the
+// same reason — (*Service).resolveLocale below is now a thin wrapper
+// passing the catalog shop's own defaultLocale, kept for its existing
+// unexported call sites in this package; a caller from another module
+// passes its own shop row's default_locale explicitly, the same value
+// stock.defaultLocaleFor already reads.
+func ResolveLocale(ctx context.Context, defaultLocale string) string {
+	header := AcceptLanguageFromContext(ctx)
 	for _, part := range strings.Split(header, ",") {
 		tag, _, _ := strings.Cut(strings.TrimSpace(part), ";")
 		tag, _, _ = strings.Cut(tag, "-")
@@ -58,7 +71,14 @@ func (s *Service) resolveLocale(ctx context.Context) string {
 			return tag
 		}
 	}
-	return s.defaultLocale
+	return defaultLocale
+}
+
+// resolveLocale is ResolveLocale bound to this Service's own defaultLocale
+// — every existing call site in this package keeps using the short,
+// receiver form.
+func (s *Service) resolveLocale(ctx context.Context) string {
+	return ResolveLocale(ctx, s.defaultLocale)
 }
 
 // translationFallback reports whether the resolved row's locale differs
