@@ -38,13 +38,26 @@ CREATE TABLE stock_movements (
 -- (created_at, id) cursor tiebreaker, shop_id leading (hard rule 1 and 10).
 CREATE INDEX stock_movements_shop_variant_location_created_idx
     ON stock_movements (shop_id, variant_id, location_id, created_at, id);
+-- Default movement-history listing (no variant/location filter): every
+-- ListMovements call still orders by (created_at, id) DESC, so this
+-- narrower index serves the common "just show recent movements" case
+-- without the variant_id/location_id columns in between.
+CREATE INDEX stock_movements_shop_created_idx
+    ON stock_movements (shop_id, created_at DESC, id DESC);
+CREATE INDEX stock_movements_location_id_idx ON stock_movements (location_id);
 CREATE INDEX stock_movements_created_by_idx ON stock_movements (created_by);
 
 -- Nothing may ever UPDATE or DELETE a movement (ADR-006, § 04-DATA-MODEL.md
 -- rule 2): stock_levels and every rebuild (`savdo stock rebuild`) trust
 -- this table completely, and that trust only holds if it is genuinely
 -- append-only. Seeds and services insert through stock.Service.Move, never
--- raw SQL.
+-- raw SQL. Deliberately NOT covered: TRUNCATE — Postgres row-level
+-- triggers (BEFORE UPDATE OR DELETE) never fire on it, so `TRUNCATE
+-- stock_movements` would bypass this trigger entirely. testdb.Truncate
+-- relies on exactly that (it truncates every table between tests,
+-- including this one). The application's database role having TRUNCATE
+-- privilege at all is a gap for a least-privilege role to close as a
+-- Phase 8 hardening item, not something a trigger can prevent.
 -- +goose StatementBegin
 CREATE FUNCTION stock_movements_no_update_delete() RETURNS trigger AS $$
 BEGIN
