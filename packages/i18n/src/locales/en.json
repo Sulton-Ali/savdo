@@ -40,6 +40,8 @@
     "attributes": "Attributes",
     "staff": "Staff",
     "locations": "Locations",
+    "suppliers": "Suppliers",
+    "purchases": "Purchases",
     "settings": "Settings"
   },
   "auth": {
@@ -124,6 +126,92 @@
       "defaultLocale": "Default language",
       "allowNegativeStock": "Allow negative stock",
       "updateCostOnPurchase": "Update cost on purchase"
+    }
+  },
+  "suppliers": {
+    "title": "Suppliers",
+    "add": "Add supplier",
+    "edit": "Edit supplier",
+    "delete": "Delete",
+    "confirmDelete": "Delete this supplier?",
+    "searchPlaceholder": "Search suppliers",
+    "columns": {
+      "name": "Name",
+      "contactName": "Contact",
+      "phone": "Phone",
+      "telegramUsername": "Telegram"
+    },
+    "fields": {
+      "name": "Name",
+      "contactName": "Contact name",
+      "phone": "Phone",
+      "telegramUsername": "Telegram username",
+      "note": "Note"
+    }
+  },
+  "purchases": {
+    "title": "Purchases",
+    "add": "New purchase",
+    "createTitle": "New purchase",
+    "editTitle": "Edit purchase",
+    "saved": "Purchase saved",
+    "allStatuses": "All statuses",
+    "allSuppliers": "All suppliers",
+    "columns": {
+      "number": "Number",
+      "supplier": "Supplier",
+      "location": "Location",
+      "status": "Status",
+      "totalCost": "Total",
+      "receivedAt": "Received"
+    },
+    "status": {
+      "draft": "Draft",
+      "received": "Received",
+      "cancelled": "Cancelled"
+    },
+    "fields": {
+      "supplier": "Supplier",
+      "location": "Location",
+      "supplierInvoiceNo": "Supplier invoice no.",
+      "note": "Note"
+    },
+    "form": {
+      "items": {
+        "title": "Items",
+        "add": "Add item",
+        "remove": "Remove",
+        "productPlaceholder": "Search by product name or SKU",
+        "variantPlaceholder": "Select variant",
+        "qty": "Qty",
+        "unitCost": "Unit cost",
+        "noLabel": "Default variant",
+        "empty": "No items yet — search for a product above to add one.",
+        "required": "Add at least one item before saving.",
+        "unresolvedVariant": "Variant {{id}}",
+        "columns": {
+          "product": "Product",
+          "variant": "Variant",
+          "qty": "Qty",
+          "unitCost": "Unit cost",
+          "lineTotal": "Line total"
+        }
+      }
+    },
+    "receive": {
+      "action": "Receive",
+      "title": "Receive purchase",
+      "confirm": "Receiving writes stock for every item below and sets each variant's cost to its unit cost.",
+      "total": "Total: {{total}}",
+      "success": "Purchase received"
+    },
+    "cancel": {
+      "action": "Cancel purchase",
+      "confirm": "Cancel this purchase? Cancelling a received purchase reverses its stock movements.",
+      "success": "Purchase cancelled"
+    },
+    "errors": {
+      "stockInsufficient": "Not enough stock to cancel: only {{available}} available for {{variant}}."
     }
   },
   "catalog": {

@@ -9,8 +9,12 @@ import { locationsRoute } from "./routes/app/locationsRoute";
 import { productEditRoute } from "./routes/app/productEditRoute";
 import { productNewRoute } from "./routes/app/productNewRoute";
 import { productsRoute } from "./routes/app/productsRoute";
+import { purchaseEditRoute } from "./routes/app/purchaseEditRoute";
+import { purchaseNewRoute } from "./routes/app/purchaseNewRoute";
+import { purchasesRoute } from "./routes/app/purchasesRoute";
 import { settingsRoute } from "./routes/app/settingsRoute";
 import { staffRoute } from "./routes/app/staffRoute";
+import { suppliersRoute } from "./routes/app/suppliersRoute";
 import { loginRoute } from "./routes/login/loginRoute";
 import { rootRoute } from "./routes/root";
 
@@ -25,6 +29,12 @@ const routeTree = rootRoute.addChildren([
     attributesRoute,
     staffRoute,
     locationsRoute,
+    // Phase 3 T6a: suppliers (manager+).
+    suppliersRoute,
+    // Phase 3 T6a: purchases (manager+).
+    purchasesRoute,
+    purchaseNewRoute,
+    purchaseEditRoute,
     settingsRoute,
   ]),
 ]);

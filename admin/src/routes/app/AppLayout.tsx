@@ -7,7 +7,9 @@ import {
   MapPin,
   Package,
   Settings,
+  ShoppingCart,
   Tags,
+  Truck,
   Users,
 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -80,6 +82,20 @@ function AppShell() {
       icon: <MapPin size={16} />,
       label: <Link to="/locations">{t("nav.locations")}</Link>,
       permission: "locations.manage",
+    },
+    // Phase 3 T6a: suppliers (manager+).
+    {
+      key: "/suppliers",
+      icon: <Truck size={16} />,
+      label: <Link to="/suppliers">{t("nav.suppliers")}</Link>,
+      permission: "suppliers.manage",
+    },
+    // Phase 3 T6a: purchases (manager+).
+    {
+      key: "/purchases",
+      icon: <ShoppingCart size={16} />,
+      label: <Link to="/purchases">{t("nav.purchases")}</Link>,
+      permission: "stock.write",
     },
     {
       key: "/settings",

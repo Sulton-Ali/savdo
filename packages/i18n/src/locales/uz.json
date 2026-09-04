@@ -40,6 +40,8 @@
     "attributes": "Atributlar",
     "staff": "Xodimlar",
     "locations": "Filiallar",
+    "suppliers": "Yetkazib beruvchilar",
+    "purchases": "Xaridlar",
     "settings": "Sozlamalar"
   },
   "auth": {
@@ -124,6 +126,92 @@
       "defaultLocale": "Standart til",
       "allowNegativeStock": "Manfiy qoldiqqa ruxsat berish",
       "updateCostOnPurchase": "Xaridda tannarxni yangilash"
+    }
+  },
+  "suppliers": {
+    "title": "Yetkazib beruvchilar",
+    "add": "Yetkazib beruvchi qo‘shish",
+    "edit": "Yetkazib beruvchini tahrirlash",
+    "delete": "O‘chirish",
+    "confirmDelete": "Bu yetkazib beruvchi o‘chirilsinmi?",
+    "searchPlaceholder": "Yetkazib beruvchilarni qidirish",
+    "columns": {
+      "name": "Nomi",
+      "contactName": "Aloqa shaxsi",
+      "phone": "Telefon",
+      "telegramUsername": "Telegram"
+    },
+    "fields": {
+      "name": "Nomi",
+      "contactName": "Aloqa shaxsi",
+      "phone": "Telefon",
+      "telegramUsername": "Telegram foydalanuvchi nomi",
+      "note": "Izoh"
+    }
+  },
+  "purchases": {
+    "title": "Xaridlar",
+    "add": "Yangi xarid",
+    "createTitle": "Yangi xarid",
+    "editTitle": "Xaridni tahrirlash",
+    "saved": "Xarid saqlandi",
+    "allStatuses": "Barcha holatlar",
+    "allSuppliers": "Barcha yetkazib beruvchilar",
+    "columns": {
+      "number": "Raqami",
+      "supplier": "Yetkazib beruvchi",
+      "location": "Filial",
+      "status": "Holati",
+      "totalCost": "Jami",
+      "receivedAt": "Qabul qilingan"
+    },
+    "status": {
+      "draft": "Qoralama",
+      "received": "Qabul qilingan",
+      "cancelled": "Bekor qilingan"
+    },
+    "fields": {
+      "supplier": "Yetkazib beruvchi",
+      "location": "Filial",
+      "supplierInvoiceNo": "Yetkazib beruvchi hujjat raqami",
+      "note": "Izoh"
+    },
+    "form": {
+      "items": {
+        "title": "Qatorlar",
+        "add": "Qator qo‘shish",
+        "remove": "O‘chirish",
+        "productPlaceholder": "Mahsulot nomi yoki SKU bo‘yicha qidirish",
+        "variantPlaceholder": "Variantni tanlang",
+        "qty": "Miqdor",
+        "unitCost": "Birlik tannarxi",
+        "noLabel": "Standart variant",
+        "empty": "Hali qator yo‘q — qo‘shish uchun yuqorida mahsulot qidiring.",
+        "required": "Saqlashdan oldin kamida bitta qator qo‘shing.",
+        "unresolvedVariant": "Variant {{id}}",
+        "columns": {
+          "product": "Mahsulot",
+          "variant": "Variant",
+          "qty": "Miqdor",
+          "unitCost": "Birlik tannarxi",
+          "lineTotal": "Qator summasi"
+        }
+      }
+    },
+    "receive": {
+      "action": "Qabul qilish",
+      "title": "Xaridni qabul qilish",
+      "confirm": "Qabul qilish quyidagi har bir qator uchun ombordagi qoldiqni yozadi va har bir variant tannarxini xarid narxiga yangilaydi.",
+      "total": "Jami: {{total}}",
+      "success": "Xarid qabul qilindi"
+    },
+    "cancel": {
+      "action": "Xaridni bekor qilish",
+      "confirm": "Bu xarid bekor qilinsinmi? Qabul qilingan xaridni bekor qilish ombor harakatlarini teskari qaytaradi.",
+      "success": "Xarid bekor qilindi"
+    },
+    "errors": {
+      "stockInsufficient": "Bekor qilish uchun ombor yetarli emas: {{variant}} uchun faqat {{available}} mavjud."
     }
   },
   "catalog": {
