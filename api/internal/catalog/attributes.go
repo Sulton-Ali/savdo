@@ -110,8 +110,8 @@ func (h *Handler) CreateAttributeDefinition(ctx context.Context, req gen.CreateA
 	}
 
 	entries := translationsToMap(body.Translations)
-	if !validateTranslationNames(entries) {
-		fields["translations"] = "invalid"
+	if reason := translationsFieldReason(entries); reason != "" {
+		fields["translations"] = reason
 	} else if !hasNonEmptyName(entries, h.svc.defaultLocale) {
 		fields["translations"] = "required"
 	}
@@ -188,8 +188,8 @@ func (h *Handler) UpdateAttributeDefinition(ctx context.Context, req gen.UpdateA
 
 	if body.Translations != nil {
 		patch := translationsToMap(*body.Translations)
-		if !validateTranslationNames(patch) {
-			return nil, apierr.Validation(map[string]string{"translations": "invalid"})
+		if reason := translationsFieldReason(patch); reason != "" {
+			return nil, apierr.Validation(map[string]string{"translations": reason})
 		}
 		for locale, e := range patch {
 			entries[locale] = e

@@ -46,7 +46,11 @@ func (s *Service) productImagesFor(ctx context.Context, shopID, productID uuid.U
 }
 
 // AddProductImage attaches an uploaded image to a product. Requires
-// catalog.write (manager+).
+// catalog.write (manager+). The 8-image cap is checked and the row
+// inserted inside one transaction, after LockShop(shopID) — the same
+// per-tenant serialization point CreateLocation/UpdateLocation use — so
+// two concurrent attaches at count 7 cannot both read "7, under the cap"
+// and both insert, landing the product at 9 images.
 func (h *Handler) AddProductImage(ctx context.Context, req gen.AddProductImageRequestObject) (gen.AddProductImageResponseObject, error) {
 	if _, ok := auth.FromContext(ctx); !ok {
 		return nil, apierr.Unauthenticated()
@@ -86,14 +90,23 @@ func (h *Handler) AddProductImage(ctx context.Context, req gen.AddProductImageRe
 		}
 	}
 
-	count, err := h.svc.q.CountProductImages(ctx, db.CountProductImagesParams{ShopID: authCtx.ShopID, ProductID: req.Id})
+	tx, err := h.svc.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("catalog: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	qtx := h.svc.q.WithTx(tx)
+
+	if _, err := qtx.LockShop(ctx, authCtx.ShopID); err != nil {
+		return nil, fmt.Errorf("catalog: lock shop: %w", err)
+	}
+
+	count, err := qtx.CountProductImages(ctx, db.CountProductImagesParams{ShopID: authCtx.ShopID, ProductID: req.Id})
 	if err != nil {
 		return nil, fmt.Errorf("catalog: count product images: %w", err)
 	}
 	if count >= maxProductImages {
-		err := apierr.Validation(map[string]string{"mediaId": "invalid"})
-		err.Details["reason"] = "limit"
-		return nil, err
+		return nil, apierr.Validation(map[string]string{"images": "too_long"})
 	}
 
 	isCover := count == 0
@@ -103,42 +116,24 @@ func (h *Handler) AddProductImage(ctx context.Context, req gen.AddProductImageRe
 	// count < maxProductImages (checked above), so this always fits int32.
 	sortOrder := int32(count) // #nosec G115 -- bounded by maxProductImages above
 
-	var created db.ProductImage
 	if isCover {
-		tx, err := h.svc.pool.Begin(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("catalog: begin tx: %w", err)
-		}
-		defer func() { _ = tx.Rollback(ctx) }()
-		qtx := h.svc.q.WithTx(tx)
-
 		if err := qtx.ClearCover(ctx, db.ClearCoverParams{ShopID: authCtx.ShopID, ProductID: req.Id}); err != nil {
 			return nil, fmt.Errorf("catalog: clear cover: %w", err)
 		}
-		created, err = qtx.AddProductImage(ctx, db.AddProductImageParams{
-			ID: newID(), ShopID: authCtx.ShopID, ProductID: req.Id, VariantID: body.VariantId,
-			MediaID: body.MediaId, SortOrder: sortOrder, IsCover: true,
-		})
-		if err != nil {
-			if field, ok := conflictField(err); ok {
-				return nil, apierr.Conflict(field)
-			}
-			return nil, fmt.Errorf("catalog: add product image: %w", err)
+	}
+	created, err := qtx.AddProductImage(ctx, db.AddProductImageParams{
+		ID: newID(), ShopID: authCtx.ShopID, ProductID: req.Id, VariantID: body.VariantId,
+		MediaID: body.MediaId, SortOrder: sortOrder, IsCover: isCover,
+	})
+	if err != nil {
+		if apiErr, ok := mapWriteError(err); ok {
+			return nil, apiErr
 		}
-		if err := tx.Commit(ctx); err != nil {
-			return nil, fmt.Errorf("catalog: commit add product image: %w", err)
-		}
-	} else {
-		created, err = h.svc.q.AddProductImage(ctx, db.AddProductImageParams{
-			ID: newID(), ShopID: authCtx.ShopID, ProductID: req.Id, VariantID: body.VariantId,
-			MediaID: body.MediaId, SortOrder: sortOrder, IsCover: false,
-		})
-		if err != nil {
-			if field, ok := conflictField(err); ok {
-				return nil, apierr.Conflict(field)
-			}
-			return nil, fmt.Errorf("catalog: add product image: %w", err)
-		}
+		return nil, fmt.Errorf("catalog: add product image: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("catalog: commit add product image: %w", err)
 	}
 
 	resp := gen.ProductImage{
