@@ -271,7 +271,11 @@ export function ProductFormPage({ productId }: { productId?: string }) {
         items={[
           {
             title: t("catalog.products.title"),
-            onClick: () => navigate({ to: "/products" }),
+            href: "/products",
+            onClick: (event) => {
+              event.preventDefault();
+              navigate({ to: "/products" });
+            },
           },
           { title: breadcrumbLabel },
         ]}

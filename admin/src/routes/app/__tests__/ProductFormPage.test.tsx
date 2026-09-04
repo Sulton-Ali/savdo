@@ -369,8 +369,14 @@ describe("ProductFormPage", () => {
     renderForm("p1");
 
     expect(await screen.findByText("Existing product")).toBeTruthy();
-    expect(screen.getByText("Products")).toBeTruthy();
 
+    // The "Products" crumb must render as a link (an `href`, review MINOR)
+    // so it's Tab-reachable and Enter-activatable, not a plain `<span>`.
+    const productsCrumb = screen.getByRole("link", { name: "Products" });
+    fireEvent.click(productsCrumb);
+    expect(mockNavigate).toHaveBeenCalledWith({ to: "/products" });
+
+    mockNavigate.mockClear();
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
 
     expect(mockNavigate).toHaveBeenCalledWith({ to: "/products" });
@@ -385,7 +391,7 @@ describe("ProductFormPage", () => {
     renderForm(undefined);
 
     expect(await screen.findByText("New product")).toBeTruthy();
-    expect(screen.getByText("Products")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Products" })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
 
