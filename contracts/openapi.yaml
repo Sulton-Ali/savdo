@@ -36,8 +36,23 @@ tags:
       (manager+).
   - name: media
     description: >
-      Image upload and product image management (Phase 2, D-34).
+      Image upload and product image management (Phase 2, D-34); also the
+      Phase 3 image retag operation (D-43), same permission.
       `catalog.write` (manager+).
+  - name: suppliers
+    description: Suppliers for purchases (Phase 3). `manager+`.
+  - name: purchases
+    description: >
+      Stock purchases from suppliers (Phase 3). `manager+`. `number` is
+      server-generated (D-45); `totalCost` is server-computed, never
+      client-supplied (hard rule 8).
+  - name: stock
+    description: >
+      Stock levels, movements, adjustments and transfers (Phase 3,
+      correctness-critical, ADR-006). `GET /stock/levels` is open to any
+      authenticated role (D-40); every other stock operation is
+      `manager+`. Quantities are signed decimal strings (ADR-007); a
+      movement never takes a level below zero (D-41).
 
 paths:
   /healthz:
@@ -1010,6 +1025,48 @@ paths:
           $ref: "#/components/responses/Conflict"
 
   /products/{id}/images/{imageId}:
+    patch:
+      operationId: updateProductImage
+      tags: [media]
+      summary: Retag an image's variant and/or cover status.
+      description: >
+        Requires `catalog.write` (manager+, D-43). Partial update — only
+        provided fields change; `variantId` is nullable (D-35): explicit
+        `null` unties the image from its variant, leaving it product-level.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: imageId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductImagePatch"
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductImage"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
     delete:
       operationId: removeProductImage
       tags: [media]
@@ -1072,6 +1129,563 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+
+  /suppliers:
+    get:
+      operationId: listSuppliers
+      tags: [suppliers]
+      summary: List the shop's suppliers.
+      description: Requires `manager+`. Cursor-paginated.
+      parameters:
+        - name: q
+          in: query
+          description: Free-text search over supplier name (Postgres ILIKE/trigram).
+          required: false
+          schema:
+            type: string
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SupplierList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      operationId: createSupplier
+      tags: [suppliers]
+      summary: Create a supplier.
+      description: Requires `manager+`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SupplierCreate"
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Supplier"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /suppliers/{id}:
+    get:
+      operationId: getSupplier
+      tags: [suppliers]
+      summary: Get a supplier.
+      description: Requires `manager+`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Supplier"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: updateSupplier
+      tags: [suppliers]
+      summary: Update a supplier.
+      description: >
+        Requires `manager+`. Partial update — only provided fields
+        change; `contactName`, `phone`, `telegramUsername` and `note`
+        are nullable (D-35): explicit `null` clears the field.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SupplierPatch"
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Supplier"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+    delete:
+      operationId: deleteSupplier
+      tags: [suppliers]
+      summary: Soft-delete a supplier.
+      description: Requires `manager+`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Deleted.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /purchases:
+    get:
+      operationId: listPurchases
+      tags: [purchases]
+      summary: List the shop's purchases.
+      description: Requires `manager+`. Cursor-paginated.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/PurchaseStatus"
+        - name: supplierId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PurchaseList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      operationId: createPurchase
+      tags: [purchases]
+      summary: Create a draft purchase.
+      description: >
+        Requires `manager+`. `number` is server-generated (`P-000001`
+        style, D-45) and `totalCost` is computed server-side from
+        `items` (hard rule 8) — neither is accepted in the request.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PurchaseCreate"
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Purchase"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /purchases/{id}:
+    get:
+      operationId: getPurchase
+      tags: [purchases]
+      summary: Get a purchase.
+      description: Requires `manager+`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Purchase"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: updatePurchase
+      tags: [purchases]
+      summary: Update a draft purchase.
+      description: >
+        Requires `manager+`. Only while `status: draft` — `409
+        PURCHASE_NOT_DRAFT` otherwise. Partial update — only provided
+        fields change; `supplierInvoiceNo` and `note` are nullable
+        (D-35): explicit `null` clears the field. `items`, when
+        provided, replaces the full item list.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PurchasePatch"
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Purchase"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: The purchase is not in `draft` status. `409 PURCHASE_NOT_DRAFT`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /purchases/{id}/receive:
+    post:
+      operationId: receivePurchase
+      tags: [purchases]
+      summary: Receive a draft purchase.
+      description: >
+        Requires `manager+`. Writes one `purchase_in` stock movement per
+        item in the same transaction and sets each received variant's
+        `costOverride` to that line's `unitCost` (D-42, last purchase
+        cost, no weighted average). Accepts `Idempotency-Key` (docs/05-API.md
+        § Conventions): a replay with the same key returns the original
+        result.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Purchase"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: >
+            `409 PURCHASE_ALREADY_RECEIVED` or `409
+            PURCHASE_ALREADY_CANCELLED` when the purchase is not
+            `draft`; `409 IDEMPOTENCY_KEY_REUSED` when the same key was
+            already used for a different request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /purchases/{id}/cancel:
+    post:
+      operationId: cancelPurchase
+      tags: [purchases]
+      summary: Cancel a purchase.
+      description: >
+        Requires `manager+`. Cancelling a `draft` purchase is a plain
+        status change; cancelling a `received` purchase writes reversing
+        stock movements, which fail with `409 STOCK_INSUFFICIENT` if the
+        received stock has already been sold or moved below what the
+        reversal needs (D-41).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Purchase"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: >
+            `409 PURCHASE_ALREADY_CANCELLED` when already cancelled;
+            `409 STOCK_INSUFFICIENT details.variantId/locationId/available`
+            when reversing would take a level below zero.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /stock/levels:
+    get:
+      operationId: listStockLevels
+      tags: [stock]
+      summary: List stock levels per variant and location.
+      description: >
+        Any authenticated role (D-40) — cashiers see exact quantities,
+        never cost. Cursor-paginated.
+      parameters:
+        - name: variantId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: productId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: locationId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StockLevelList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+
+  /stock/movements:
+    get:
+      operationId: listStockMovements
+      tags: [stock]
+      summary: List stock movements (the append-only ledger).
+      description: Requires `manager+`. Cursor-paginated.
+      parameters:
+        - name: variantId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: locationId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: kind
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/StockMovementKind"
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StockMovementList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /stock/adjustments:
+    post:
+      operationId: createStockAdjustment
+      tags: [stock]
+      summary: Record a manual stock adjustment.
+      description: >
+        Requires `manager+` (D-46). Writes one `adjustment` stock
+        movement through `stock.Service.Move`; a negative `qty` that
+        would take the level below zero fails with `409
+        STOCK_INSUFFICIENT` (D-41). Accepts `Idempotency-Key`
+        (docs/05-API.md § Conventions): a replay with the same key
+        returns the original result.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StockAdjustmentCreate"
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StockMovement"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: >
+            `409 STOCK_INSUFFICIENT details.variantId/locationId/available`
+            when the adjustment would take a level below zero; `409
+            IDEMPOTENCY_KEY_REUSED` when the same key was already used
+            for a different request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /stock/transfers:
+    post:
+      operationId: createStockTransfer
+      tags: [stock]
+      summary: Transfer stock between two locations.
+      description: >
+        Requires `manager+`. Writes a `transfer_out` movement at
+        `fromLocationId` and a `transfer_in` movement at `toLocationId`
+        in the same transaction (`stock.Service.Move`, ADR-006); the
+        `transfer_out` side fails with `409 STOCK_INSUFFICIENT` if it
+        would take the source level below zero (D-41).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StockTransferCreate"
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StockTransferResult"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: >
+            `409 SAME_LOCATION` when `fromLocationId` equals
+            `toLocationId`; `409 STOCK_INSUFFICIENT
+            details.variantId/locationId/available` when the transfer
+            would take the source level below zero.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /stock/low:
+    get:
+      operationId: listLowStock
+      tags: [stock]
+      summary: List variants at or below their effective low-stock threshold.
+      description: >
+        Requires `manager+`. A variant's total quantity across all
+        locations is compared against the effective threshold — its
+        product's `lowStockThreshold` override, falling back to the
+        shop's default (D-44). Cursor-paginated.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StockLowList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
 components:
   securitySchemes:
@@ -1136,6 +1750,12 @@ components:
         - CONFLICT
         - RATE_LIMITED
         - INTERNAL
+        - STOCK_INSUFFICIENT
+        - PURCHASE_NOT_DRAFT
+        - PURCHASE_ALREADY_RECEIVED
+        - PURCHASE_ALREADY_CANCELLED
+        - SAME_LOCATION
+        - IDEMPOTENCY_KEY_REUSED
 
     Error:
       type: object
@@ -1250,6 +1870,7 @@ components:
         - defaultLocale
         - allowNegativeStock
         - updateCostOnPurchase
+        - lowStockThreshold
       properties:
         id:
           type: string
@@ -1270,6 +1891,11 @@ components:
           type: boolean
         updateCostOnPurchase:
           type: boolean
+        lowStockThreshold:
+          type: integer
+          description: >
+            Shop-wide default low-stock threshold (D-44); a product may
+            override it with its own `lowStockThreshold`.
 
     ShopPatch:
       type: object
@@ -1285,6 +1911,8 @@ components:
           type: boolean
         updateCostOnPurchase:
           type: boolean
+        lowStockThreshold:
+          type: integer
 
     Location:
       type: object
@@ -1877,6 +2505,7 @@ components:
         - description
         - locale
         - translationFallback
+        - lowStockThreshold
       properties:
         id:
           type: string
@@ -1928,6 +2557,11 @@ components:
           description: >
             Present only when the caller has the `catalog.write`
             permission; absent otherwise (ADR-010).
+        lowStockThreshold:
+          type: ["integer", "null"]
+          description: >
+            Per-product override of the shop's default low-stock
+            threshold (D-44); `null` means "use the shop default".
         variants:
           type: array
           items:
@@ -2041,6 +2675,8 @@ components:
           type: boolean
         isFeatured:
           type: boolean
+        lowStockThreshold:
+          type: integer
         translations:
           $ref: "#/components/schemas/Translations"
         variants:
@@ -2052,10 +2688,10 @@ components:
       type: object
       description: >
         Partial update — only provided fields change. `sku`,
-        `promoPrice`, `promoFrom`, `promoTo`, `categoryId` and
-        `costPrice` are nullable (D-35): explicit `null` clears the
-        field. Variants are managed through `/products/{id}/variants`
-        and `/variants/{id}`, not here.
+        `promoPrice`, `promoFrom`, `promoTo`, `categoryId`, `costPrice`
+        and `lowStockThreshold` are nullable (D-35): explicit `null`
+        clears the field. Variants are managed through
+        `/products/{id}/variants` and `/variants/{id}`, not here.
       properties:
         categoryId:
           type: ["string", "null"]
@@ -2087,6 +2723,8 @@ components:
           type: boolean
         isFeatured:
           type: boolean
+        lowStockThreshold:
+          type: ["integer", "null"]
         translations:
           $ref: "#/components/schemas/Translations"
 
@@ -2197,6 +2835,20 @@ components:
         isCover:
           type: boolean
 
+    ProductImagePatch:
+      type: object
+      description: >
+        Request body for `PATCH /products/{id}/images/{imageId}` (D-43).
+        Partial update — only provided fields change. `variantId` is
+        nullable (D-35): explicit `null` unties the image from its
+        variant.
+      properties:
+        variantId:
+          type: ["string", "null"]
+          format: uuid
+        isCover:
+          type: boolean
+
     ProductImageOrder:
       type: object
       description: Request body for `PATCH /products/{id}/images/order`.
@@ -2223,6 +2875,445 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ProductImage"
+
+    Supplier:
+      type: object
+      description: docs/04-DATA-MODEL.md § 5.
+      required:
+        - id
+        - name
+        - contactName
+        - phone
+        - telegramUsername
+        - note
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        contactName:
+          type: ["string", "null"]
+        phone:
+          type: ["string", "null"]
+        telegramUsername:
+          type: ["string", "null"]
+        note:
+          type: ["string", "null"]
+
+    SupplierCreate:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+        contactName:
+          type: string
+        phone:
+          type: string
+        telegramUsername:
+          type: string
+        note:
+          type: string
+
+    SupplierPatch:
+      type: object
+      description: >
+        Partial update — only provided fields change. `contactName`,
+        `phone`, `telegramUsername` and `note` are nullable (D-35):
+        explicit `null` clears the field.
+      properties:
+        name:
+          type: string
+        contactName:
+          type: ["string", "null"]
+        phone:
+          type: ["string", "null"]
+        telegramUsername:
+          type: ["string", "null"]
+        note:
+          type: ["string", "null"]
+
+    SupplierList:
+      type: object
+      description: Cursor-paginated envelope for `GET /suppliers`.
+      required:
+        - items
+        - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Supplier"
+        nextCursor:
+          type: ["string", "null"]
+
+    PurchaseStatus:
+      type: string
+      description: docs/04-DATA-MODEL.md § 3.
+      enum: [draft, received, cancelled]
+
+    PurchaseItem:
+      type: object
+      description: One line of a purchase (docs/04-DATA-MODEL.md § 3).
+      required:
+        - id
+        - variantId
+        - qty
+        - unitCost
+      properties:
+        id:
+          type: string
+          format: uuid
+        variantId:
+          type: string
+          format: uuid
+        qty:
+          $ref: "#/components/schemas/Decimal"
+        unitCost:
+          $ref: "#/components/schemas/Decimal"
+
+    PurchaseItemCreate:
+      type: object
+      required:
+        - variantId
+        - qty
+        - unitCost
+      properties:
+        variantId:
+          type: string
+          format: uuid
+        qty:
+          $ref: "#/components/schemas/Decimal"
+        unitCost:
+          $ref: "#/components/schemas/Decimal"
+
+    Purchase:
+      type: object
+      description: >
+        `number` and `totalCost` are server-computed, never
+        client-supplied (D-45, hard rule 8).
+      required:
+        - id
+        - number
+        - supplierId
+        - locationId
+        - status
+        - supplierInvoiceNo
+        - receivedAt
+        - note
+        - totalCost
+        - items
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+          description: Server-generated, e.g. `P-000001` (D-45). Read-only.
+        supplierId:
+          type: string
+          format: uuid
+        locationId:
+          type: string
+          format: uuid
+        status:
+          $ref: "#/components/schemas/PurchaseStatus"
+        supplierInvoiceNo:
+          type: ["string", "null"]
+          description: The supplier's own document number, free text (D-45).
+        receivedAt:
+          type: ["string", "null"]
+          format: date-time
+        note:
+          type: ["string", "null"]
+        totalCost:
+          $ref: "#/components/schemas/Decimal"
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PurchaseItem"
+        createdAt:
+          type: string
+          format: date-time
+
+    PurchaseCreate:
+      type: object
+      required:
+        - supplierId
+        - locationId
+        - items
+      properties:
+        supplierId:
+          type: string
+          format: uuid
+        locationId:
+          type: string
+          format: uuid
+        supplierInvoiceNo:
+          type: string
+        note:
+          type: string
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/PurchaseItemCreate"
+
+    PurchasePatch:
+      type: object
+      description: >
+        Partial update — only provided fields change; allowed only
+        while `status: draft` (409 PURCHASE_NOT_DRAFT otherwise).
+        `supplierInvoiceNo` and `note` are nullable (D-35): explicit
+        `null` clears the field. `items`, when provided, replaces the
+        full item list.
+      properties:
+        supplierId:
+          type: string
+          format: uuid
+        locationId:
+          type: string
+          format: uuid
+        supplierInvoiceNo:
+          type: ["string", "null"]
+        note:
+          type: ["string", "null"]
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/PurchaseItemCreate"
+
+    PurchaseList:
+      type: object
+      description: Cursor-paginated envelope for `GET /purchases`.
+      required:
+        - items
+        - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Purchase"
+        nextCursor:
+          type: ["string", "null"]
+
+    StockLevel:
+      type: object
+      description: >
+        docs/04-DATA-MODEL.md § 3. No cost anywhere on this shape — open
+        to any authenticated role (D-40).
+      required:
+        - variantId
+        - productId
+        - locationId
+        - qty
+      properties:
+        variantId:
+          type: string
+          format: uuid
+        productId:
+          type: string
+          format: uuid
+        locationId:
+          type: string
+          format: uuid
+        qty:
+          $ref: "#/components/schemas/Decimal"
+
+    StockLevelList:
+      type: object
+      description: Cursor-paginated envelope for `GET /stock/levels`.
+      required:
+        - items
+        - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/StockLevel"
+        nextCursor:
+          type: ["string", "null"]
+
+    StockMovementKind:
+      type: string
+      description: docs/04-DATA-MODEL.md § 3.
+      enum:
+        - purchase_in
+        - sale_out
+        - sale_void_in
+        - return_in
+        - adjustment
+        - transfer_out
+        - transfer_in
+
+    StockMovement:
+      type: object
+      description: >
+        One row of the append-only stock ledger (docs/04-DATA-MODEL.md §
+        3, ADR-006). `qty` is signed: positive in, negative out.
+      required:
+        - id
+        - variantId
+        - locationId
+        - kind
+        - qty
+        - unitCost
+        - refType
+        - refId
+        - reason
+        - note
+        - createdBy
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        variantId:
+          type: string
+          format: uuid
+        locationId:
+          type: string
+          format: uuid
+        kind:
+          $ref: "#/components/schemas/StockMovementKind"
+        qty:
+          $ref: "#/components/schemas/Decimal"
+        unitCost:
+          type: ["string", "null"]
+          format: decimal
+          pattern: '^-?\d+(\.\d+)?$'
+        refType:
+          type: ["string", "null"]
+          description: e.g. `purchase`, `sale`, `transfer` — the kind of record `refId` points to.
+        refId:
+          type: ["string", "null"]
+          format: uuid
+        reason:
+          type: ["string", "null"]
+          description: Set for `adjustment` movements (D-46); the fixed reason enum value as text.
+        note:
+          type: ["string", "null"]
+        createdBy:
+          type: ["string", "null"]
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+
+    StockMovementList:
+      type: object
+      description: Cursor-paginated envelope for `GET /stock/movements`.
+      required:
+        - items
+        - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/StockMovement"
+        nextCursor:
+          type: ["string", "null"]
+
+    AdjustmentReason:
+      type: string
+      description: Fixed adjustment reason enum (D-46).
+      enum: [count_correction, damaged, lost, found, other]
+
+    StockAdjustmentCreate:
+      type: object
+      required:
+        - variantId
+        - locationId
+        - qty
+        - reason
+      properties:
+        variantId:
+          type: string
+          format: uuid
+        locationId:
+          type: string
+          format: uuid
+        qty:
+          $ref: "#/components/schemas/Decimal"
+          description: Signed; positive increases the level, negative decreases it.
+        reason:
+          $ref: "#/components/schemas/AdjustmentReason"
+        note:
+          type: string
+
+    StockTransferCreate:
+      type: object
+      required:
+        - variantId
+        - fromLocationId
+        - toLocationId
+        - qty
+      properties:
+        variantId:
+          type: string
+          format: uuid
+        fromLocationId:
+          type: string
+          format: uuid
+        toLocationId:
+          type: string
+          format: uuid
+        qty:
+          $ref: "#/components/schemas/Decimal"
+          description: Positive quantity to move.
+
+    StockTransferResult:
+      type: object
+      description: >
+        The two movements a transfer writes: `transfer_out` at
+        `fromLocationId` then `transfer_in` at `toLocationId`.
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/StockMovement"
+
+    StockLowItem:
+      type: object
+      description: docs/04-DATA-MODEL.md § 3 (D-44).
+      required:
+        - variantId
+        - productId
+        - qty
+        - threshold
+      properties:
+        variantId:
+          type: string
+          format: uuid
+        productId:
+          type: string
+          format: uuid
+        qty:
+          $ref: "#/components/schemas/Decimal"
+          description: Total quantity across all locations.
+        threshold:
+          type: integer
+          description: The effective threshold (product override, else the shop default).
+
+    StockLowList:
+      type: object
+      description: Cursor-paginated envelope for `GET /stock/low`.
+      required:
+        - items
+        - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/StockLowItem"
+        nextCursor:
+          type: ["string", "null"]
 
   parameters:
     Limit:
@@ -2252,6 +3343,18 @@ components:
       schema:
         type: string
         enum: [uz, ru, en]
+
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      description: >
+        Client-generated key (docs/05-API.md § Conventions); a replay
+        with the same key returns the original result instead of
+        repeating the operation.
+      required: false
+      schema:
+        type: string
+        maxLength: 128
 
   responses:
     Unauthenticated:

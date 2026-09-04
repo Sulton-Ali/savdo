@@ -45,6 +45,7 @@ function buildMe(permissions: string[]): Me {
       defaultLocale: "en",
       allowNegativeStock: false,
       updateCostOnPurchase: true,
+      lowStockThreshold: 2,
     },
     permissions,
   };
@@ -67,6 +68,7 @@ function product(overrides: Partial<Product>): Product {
     description: null,
     locale: "en",
     translationFallback: false,
+    lowStockThreshold: null,
     ...overrides,
   };
 }

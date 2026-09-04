@@ -48,6 +48,7 @@ function buildMe(): Me {
       defaultLocale: "uz",
       allowNegativeStock: false,
       updateCostOnPurchase: true,
+      lowStockThreshold: 2,
     },
     permissions: ["catalog.write"],
   };
@@ -185,6 +186,7 @@ describe("ProductFormPage", () => {
       description: null,
       locale: "uz",
       translationFallback: false,
+      lowStockThreshold: null,
       translations: { uz: { name: "Existing product" } },
     };
     mockGetByPath({
@@ -319,6 +321,7 @@ describe("ProductFormPage", () => {
       description: null,
       locale: "uz",
       translationFallback: false,
+      lowStockThreshold: null,
       translations: { uz: { name: "Existing product" } },
       variants: [],
       images: [],
@@ -358,6 +361,7 @@ describe("ProductFormPage", () => {
       description: null,
       locale: "uz",
       translationFallback: false,
+      lowStockThreshold: null,
       translations: { uz: { name: "Existing product" } },
     };
     mockGetByPath({
