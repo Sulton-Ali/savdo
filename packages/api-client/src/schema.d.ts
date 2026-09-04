@@ -531,7 +531,11 @@ export interface paths {
         delete: operations["removeProductImage"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Retag an image's variant and/or cover status.
+         * @description Requires `catalog.write` (manager+, D-43). Partial update — only provided fields change; `variantId` is nullable (D-35): explicit `null` unties the image from its variant, leaving it product-level.
+         */
+        patch: operations["updateProductImage"];
         trace?: never;
     };
     "/products/{id}/images/order": {
@@ -552,6 +556,246 @@ export interface paths {
          * @description Requires `catalog.write` (manager+).
          */
         patch: operations["reorderProductImages"];
+        trace?: never;
+    };
+    "/suppliers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the shop's suppliers.
+         * @description Requires `manager+`. Cursor-paginated.
+         */
+        get: operations["listSuppliers"];
+        put?: never;
+        /**
+         * Create a supplier.
+         * @description Requires `manager+`.
+         */
+        post: operations["createSupplier"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/suppliers/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a supplier.
+         * @description Requires `manager+`.
+         */
+        get: operations["getSupplier"];
+        put?: never;
+        post?: never;
+        /**
+         * Soft-delete a supplier.
+         * @description Requires `manager+`.
+         */
+        delete: operations["deleteSupplier"];
+        options?: never;
+        head?: never;
+        /**
+         * Update a supplier.
+         * @description Requires `manager+`. Partial update — only provided fields change; `contactName`, `phone`, `telegramUsername` and `note` are nullable (D-35): explicit `null` clears the field.
+         */
+        patch: operations["updateSupplier"];
+        trace?: never;
+    };
+    "/purchases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the shop's purchases.
+         * @description Requires `manager+`. Cursor-paginated.
+         */
+        get: operations["listPurchases"];
+        put?: never;
+        /**
+         * Create a draft purchase.
+         * @description Requires `manager+`. `number` is server-generated (`P-000001` style, D-45) and `totalCost` is computed server-side from `items` (hard rule 8) — neither is accepted in the request.
+         */
+        post: operations["createPurchase"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/purchases/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a purchase.
+         * @description Requires `manager+`.
+         */
+        get: operations["getPurchase"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update a draft purchase.
+         * @description Requires `manager+`. Only while `status: draft` — `409 PURCHASE_NOT_DRAFT` otherwise. Partial update — only provided fields change; `supplierInvoiceNo` and `note` are nullable (D-35): explicit `null` clears the field. `items`, when provided, replaces the full item list.
+         */
+        patch: operations["updatePurchase"];
+        trace?: never;
+    };
+    "/purchases/{id}/receive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Receive a draft purchase.
+         * @description Requires `manager+`. Writes one `purchase_in` stock movement per item in the same transaction and sets each received variant's `costOverride` to that line's `unitCost` (D-42, last purchase cost, no weighted average). Accepts `Idempotency-Key` (docs/05-API.md § Conventions): a replay with the same key returns the original result.
+         */
+        post: operations["receivePurchase"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/purchases/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel a purchase.
+         * @description Requires `manager+`. Cancelling a `draft` purchase is a plain status change; cancelling a `received` purchase writes reversing stock movements, which fail with `409 STOCK_INSUFFICIENT` if the received stock has already been sold or moved below what the reversal needs (D-41).
+         */
+        post: operations["cancelPurchase"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/stock/levels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List stock levels per variant and location.
+         * @description Any authenticated role (D-40) — cashiers see exact quantities, never cost. Cursor-paginated.
+         */
+        get: operations["listStockLevels"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/stock/movements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List stock movements (the append-only ledger).
+         * @description Requires `manager+`. Cursor-paginated.
+         */
+        get: operations["listStockMovements"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/stock/adjustments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record a manual stock adjustment.
+         * @description Requires `manager+` (D-46). Writes one `adjustment` stock movement through `stock.Service.Move`; a negative `qty` that would take the level below zero fails with `409 STOCK_INSUFFICIENT` (D-41). Accepts `Idempotency-Key` (docs/05-API.md § Conventions): a replay with the same key returns the original result.
+         */
+        post: operations["createStockAdjustment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/stock/transfers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Transfer stock between two locations.
+         * @description Requires `manager+`. Writes a `transfer_out` movement at `fromLocationId` and a `transfer_in` movement at `toLocationId` in the same transaction (`stock.Service.Move`, ADR-006); the `transfer_out` side fails with `409 STOCK_INSUFFICIENT` if it would take the source level below zero (D-41).
+         */
+        post: operations["createStockTransfer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/stock/low": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List variants at or below their effective low-stock threshold.
+         * @description Requires `manager+`. A variant's total quantity across all locations is compared against the effective threshold — its product's `lowStockThreshold` override, falling back to the shop's default (D-44). Cursor-paginated.
+         */
+        get: operations["listLowStock"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
 }
@@ -576,7 +820,7 @@ export interface components {
          * @description Machine-readable error codes (ADR-013). A client translates a code to a display sentence; the API never returns one. Adding a new error code means adding it here first.
          * @enum {string}
          */
-        ErrorCode: "VALIDATION_FAILED" | "UNAUTHENTICATED" | "FORBIDDEN" | "NOT_FOUND" | "CONFLICT" | "RATE_LIMITED" | "INTERNAL";
+        ErrorCode: "VALIDATION_FAILED" | "UNAUTHENTICATED" | "FORBIDDEN" | "NOT_FOUND" | "CONFLICT" | "RATE_LIMITED" | "INTERNAL" | "STOCK_INSUFFICIENT" | "PURCHASE_NOT_DRAFT" | "PURCHASE_ALREADY_RECEIVED" | "PURCHASE_ALREADY_CANCELLED" | "SAME_LOCATION" | "IDEMPOTENCY_KEY_REUSED";
         /** @description The error envelope every non-2xx JSON response uses (ADR-013). */
         Error: {
             error: {
@@ -643,6 +887,8 @@ export interface components {
             defaultLocale: components["schemas"]["Locale"];
             allowNegativeStock: boolean;
             updateCostOnPurchase: boolean;
+            /** @description Shop-wide default low-stock threshold (D-44); a product may override it with its own `lowStockThreshold`. */
+            lowStockThreshold: number;
         };
         /** @description Partial update — only provided fields change. */
         ShopPatch: {
@@ -651,6 +897,7 @@ export interface components {
             defaultLocale?: components["schemas"]["Locale"];
             allowNegativeStock?: boolean;
             updateCostOnPurchase?: boolean;
+            lowStockThreshold?: number;
         };
         Location: {
             /** Format: uuid */
@@ -929,6 +1176,8 @@ export interface components {
             translationFallback: boolean;
             /** @description Present only when the caller has the `catalog.write` permission; absent otherwise (ADR-010). */
             translations?: components["schemas"]["Translations"];
+            /** @description Per-product override of the shop's default low-stock threshold (D-44); `null` means "use the shop default". */
+            lowStockThreshold: number | null;
             variants?: components["schemas"]["Variant"][];
             images?: components["schemas"]["ProductImage"][];
         };
@@ -975,10 +1224,11 @@ export interface components {
             promoTo?: string;
             isActive?: boolean;
             isFeatured?: boolean;
+            lowStockThreshold?: number;
             translations: components["schemas"]["Translations"];
             variants?: components["schemas"]["VariantCreate"][];
         };
-        /** @description Partial update — only provided fields change. `sku`, `promoPrice`, `promoFrom`, `promoTo`, `categoryId` and `costPrice` are nullable (D-35): explicit `null` clears the field. Variants are managed through `/products/{id}/variants` and `/variants/{id}`, not here. */
+        /** @description Partial update — only provided fields change. `sku`, `promoPrice`, `promoFrom`, `promoTo`, `categoryId`, `costPrice` and `lowStockThreshold` are nullable (D-35): explicit `null` clears the field. Variants are managed through `/products/{id}/variants` and `/variants/{id}`, not here. */
         ProductPatch: {
             /** Format: uuid */
             categoryId?: string | null;
@@ -997,6 +1247,7 @@ export interface components {
             promoTo?: string | null;
             isActive?: boolean;
             isFeatured?: boolean;
+            lowStockThreshold?: number | null;
             translations?: components["schemas"]["Translations"];
         };
         /** @description Cursor-paginated envelope for `GET /products`. */
@@ -1048,6 +1299,12 @@ export interface components {
             variantId?: string;
             isCover?: boolean;
         };
+        /** @description Request body for `PATCH /products/{id}/images/{imageId}` (D-43). Partial update — only provided fields change. `variantId` is nullable (D-35): explicit `null` unties the image from its variant. */
+        ProductImagePatch: {
+            /** Format: uuid */
+            variantId?: string | null;
+            isCover?: boolean;
+        };
         /** @description Request body for `PATCH /products/{id}/images/order`. */
         ProductImageOrder: {
             /** @description Every image id belonging to the product, in the new display order. */
@@ -1058,6 +1315,195 @@ export interface components {
         /** @description Envelope for `PATCH /products/{id}/images/order`'s response. */
         ProductImageList: {
             items: components["schemas"]["ProductImage"][];
+        };
+        /** @description docs/04-DATA-MODEL.md § 5. */
+        Supplier: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            contactName: string | null;
+            phone: string | null;
+            telegramUsername: string | null;
+            note: string | null;
+        };
+        SupplierCreate: {
+            name: string;
+            contactName?: string;
+            phone?: string;
+            telegramUsername?: string;
+            note?: string;
+        };
+        /** @description Partial update — only provided fields change. `contactName`, `phone`, `telegramUsername` and `note` are nullable (D-35): explicit `null` clears the field. */
+        SupplierPatch: {
+            name?: string;
+            contactName?: string | null;
+            phone?: string | null;
+            telegramUsername?: string | null;
+            note?: string | null;
+        };
+        /** @description Cursor-paginated envelope for `GET /suppliers`. */
+        SupplierList: {
+            items: components["schemas"]["Supplier"][];
+            nextCursor: string | null;
+        };
+        /**
+         * @description docs/04-DATA-MODEL.md § 3.
+         * @enum {string}
+         */
+        PurchaseStatus: "draft" | "received" | "cancelled";
+        /** @description One line of a purchase (docs/04-DATA-MODEL.md § 3). */
+        PurchaseItem: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            variantId: string;
+            qty: components["schemas"]["Decimal"];
+            unitCost: components["schemas"]["Decimal"];
+        };
+        PurchaseItemCreate: {
+            /** Format: uuid */
+            variantId: string;
+            qty: components["schemas"]["Decimal"];
+            unitCost: components["schemas"]["Decimal"];
+        };
+        /** @description `number` and `totalCost` are server-computed, never client-supplied (D-45, hard rule 8). */
+        Purchase: {
+            /** Format: uuid */
+            id: string;
+            /** @description Server-generated, e.g. `P-000001` (D-45). Read-only. */
+            number: string;
+            /** Format: uuid */
+            supplierId: string;
+            /** Format: uuid */
+            locationId: string;
+            status: components["schemas"]["PurchaseStatus"];
+            /** @description The supplier's own document number, free text (D-45). */
+            supplierInvoiceNo: string | null;
+            /** Format: date-time */
+            receivedAt: string | null;
+            note: string | null;
+            totalCost: components["schemas"]["Decimal"];
+            items: components["schemas"]["PurchaseItem"][];
+            /** Format: date-time */
+            createdAt: string;
+        };
+        PurchaseCreate: {
+            /** Format: uuid */
+            supplierId: string;
+            /** Format: uuid */
+            locationId: string;
+            supplierInvoiceNo?: string;
+            note?: string;
+            items: components["schemas"]["PurchaseItemCreate"][];
+        };
+        /** @description Partial update — only provided fields change; allowed only while `status: draft` (409 PURCHASE_NOT_DRAFT otherwise). `supplierInvoiceNo` and `note` are nullable (D-35): explicit `null` clears the field. `items`, when provided, replaces the full item list. */
+        PurchasePatch: {
+            /** Format: uuid */
+            supplierId?: string;
+            /** Format: uuid */
+            locationId?: string;
+            supplierInvoiceNo?: string | null;
+            note?: string | null;
+            items?: components["schemas"]["PurchaseItemCreate"][];
+        };
+        /** @description Cursor-paginated envelope for `GET /purchases`. */
+        PurchaseList: {
+            items: components["schemas"]["Purchase"][];
+            nextCursor: string | null;
+        };
+        /** @description docs/04-DATA-MODEL.md § 3. No cost anywhere on this shape — open to any authenticated role (D-40). */
+        StockLevel: {
+            /** Format: uuid */
+            variantId: string;
+            /** Format: uuid */
+            productId: string;
+            /** Format: uuid */
+            locationId: string;
+            qty: components["schemas"]["Decimal"];
+        };
+        /** @description Cursor-paginated envelope for `GET /stock/levels`. */
+        StockLevelList: {
+            items: components["schemas"]["StockLevel"][];
+            nextCursor: string | null;
+        };
+        /**
+         * @description docs/04-DATA-MODEL.md § 3.
+         * @enum {string}
+         */
+        StockMovementKind: "purchase_in" | "sale_out" | "sale_void_in" | "return_in" | "adjustment" | "transfer_out" | "transfer_in";
+        /** @description One row of the append-only stock ledger (docs/04-DATA-MODEL.md § 3, ADR-006). `qty` is signed: positive in, negative out. */
+        StockMovement: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            variantId: string;
+            /** Format: uuid */
+            locationId: string;
+            kind: components["schemas"]["StockMovementKind"];
+            qty: components["schemas"]["Decimal"];
+            /** Format: decimal */
+            unitCost: string | null;
+            /** @description e.g. `purchase`, `sale`, `transfer` — the kind of record `refId` points to. */
+            refType: string | null;
+            /** Format: uuid */
+            refId: string | null;
+            /** @description Set for `adjustment` movements (D-46); the fixed reason enum value as text. */
+            reason: string | null;
+            note: string | null;
+            /** Format: uuid */
+            createdBy: string | null;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        /** @description Cursor-paginated envelope for `GET /stock/movements`. */
+        StockMovementList: {
+            items: components["schemas"]["StockMovement"][];
+            nextCursor: string | null;
+        };
+        /**
+         * @description Fixed adjustment reason enum (D-46).
+         * @enum {string}
+         */
+        AdjustmentReason: "count_correction" | "damaged" | "lost" | "found" | "other";
+        StockAdjustmentCreate: {
+            /** Format: uuid */
+            variantId: string;
+            /** Format: uuid */
+            locationId: string;
+            /** @description Signed; positive increases the level, negative decreases it. */
+            qty: components["schemas"]["Decimal"];
+            reason: components["schemas"]["AdjustmentReason"];
+            note?: string;
+        };
+        StockTransferCreate: {
+            /** Format: uuid */
+            variantId: string;
+            /** Format: uuid */
+            fromLocationId: string;
+            /** Format: uuid */
+            toLocationId: string;
+            /** @description Positive quantity to move. */
+            qty: components["schemas"]["Decimal"];
+        };
+        /** @description The two movements a transfer writes: `transfer_out` at `fromLocationId` then `transfer_in` at `toLocationId`. */
+        StockTransferResult: {
+            items: components["schemas"]["StockMovement"][];
+        };
+        /** @description docs/04-DATA-MODEL.md § 3 (D-44). */
+        StockLowItem: {
+            /** Format: uuid */
+            variantId: string;
+            /** Format: uuid */
+            productId: string;
+            /** @description Total quantity across all locations. */
+            qty: components["schemas"]["Decimal"];
+            /** @description The effective threshold (product override, else the shop default). */
+            threshold: number;
+        };
+        /** @description Cursor-paginated envelope for `GET /stock/low`. */
+        StockLowList: {
+            items: components["schemas"]["StockLowItem"][];
+            nextCursor: string | null;
         };
     };
     responses: {
@@ -1132,6 +1578,8 @@ export interface components {
         Cursor: string;
         /** @description Preferred response locale. */
         AcceptLanguage: "uz" | "ru" | "en";
+        /** @description Client-generated key (docs/05-API.md § Conventions); a replay with the same key returns the original result instead of repeating the operation. */
+        IdempotencyKey: string;
     };
     requestBodies: never;
     headers: never;
@@ -2111,6 +2559,37 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    updateProductImage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                imageId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProductImagePatch"];
+            };
+        };
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductImage"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     reorderProductImages: {
         parameters: {
             query?: never;
@@ -2139,6 +2618,514 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    listSuppliers: {
+        parameters: {
+            query?: {
+                /** @description Free-text search over supplier name (Postgres ILIKE/trigram). */
+                q?: string;
+                /** @description Maximum number of items to return. */
+                limit?: components["parameters"]["Limit"];
+                /** @description Opaque cursor from a previous page's `nextCursor`. */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupplierList"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createSupplier: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SupplierCreate"];
+            };
+        };
+        responses: {
+            /** @description Created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Supplier"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            /** @description A supplier with this name already exists in the shop. `409 CONFLICT details.field: name` (docs/05-API.md § Conventions, same vocabulary as the staff `username`/`phone` conflict). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getSupplier: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Supplier"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteSupplier: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateSupplier: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SupplierPatch"];
+            };
+        };
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Supplier"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description A supplier with this name already exists in the shop. `409 CONFLICT details.field: name`. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listPurchases: {
+        parameters: {
+            query?: {
+                status?: components["schemas"]["PurchaseStatus"];
+                supplierId?: string;
+                /** @description Maximum number of items to return. */
+                limit?: components["parameters"]["Limit"];
+                /** @description Opaque cursor from a previous page's `nextCursor`. */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PurchaseList"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createPurchase: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PurchaseCreate"];
+            };
+        };
+        responses: {
+            /** @description Created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Purchase"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    getPurchase: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Purchase"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updatePurchase: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PurchasePatch"];
+            };
+        };
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Purchase"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description The purchase is not in `draft` status. `409 PURCHASE_NOT_DRAFT`. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    receivePurchase: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client-generated key (docs/05-API.md § Conventions); a replay with the same key returns the original result instead of repeating the operation. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Purchase"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description `409 PURCHASE_ALREADY_RECEIVED` or `409 PURCHASE_ALREADY_CANCELLED` when the purchase is not `draft`; `409 IDEMPOTENCY_KEY_REUSED` when the same key was already used for a different request. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    cancelPurchase: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Purchase"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description `409 PURCHASE_ALREADY_CANCELLED` when already cancelled; `409 STOCK_INSUFFICIENT details.variantId/locationId/available` when reversing would take a level below zero. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listStockLevels: {
+        parameters: {
+            query?: {
+                variantId?: string;
+                productId?: string;
+                locationId?: string;
+                /** @description Maximum number of items to return. */
+                limit?: components["parameters"]["Limit"];
+                /** @description Opaque cursor from a previous page's `nextCursor`. */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StockLevelList"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+        };
+    };
+    listStockMovements: {
+        parameters: {
+            query?: {
+                variantId?: string;
+                locationId?: string;
+                kind?: components["schemas"]["StockMovementKind"];
+                from?: string;
+                to?: string;
+                /** @description Maximum number of items to return. */
+                limit?: components["parameters"]["Limit"];
+                /** @description Opaque cursor from a previous page's `nextCursor`. */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StockMovementList"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createStockAdjustment: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client-generated key (docs/05-API.md § Conventions); a replay with the same key returns the original result instead of repeating the operation. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StockAdjustmentCreate"];
+            };
+        };
+        responses: {
+            /** @description Created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StockMovement"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description `409 STOCK_INSUFFICIENT details.variantId/locationId/available` when the adjustment would take a level below zero; `409 IDEMPOTENCY_KEY_REUSED` when the same key was already used for a different request. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    createStockTransfer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StockTransferCreate"];
+            };
+        };
+        responses: {
+            /** @description Created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StockTransferResult"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description `409 SAME_LOCATION` when `fromLocationId` equals `toLocationId`; `409 STOCK_INSUFFICIENT details.variantId/locationId/available` when the transfer would take the source level below zero. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listLowStock: {
+        parameters: {
+            query?: {
+                /** @description Maximum number of items to return. */
+                limit?: components["parameters"]["Limit"];
+                /** @description Opaque cursor from a previous page's `nextCursor`. */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StockLowList"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
         };
     };
 }

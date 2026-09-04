@@ -20,6 +20,33 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
+// Defines values for AdjustmentReason.
+const (
+	CountCorrection AdjustmentReason = "count_correction"
+	Damaged         AdjustmentReason = "damaged"
+	Found           AdjustmentReason = "found"
+	Lost            AdjustmentReason = "lost"
+	Other           AdjustmentReason = "other"
+)
+
+// Valid indicates whether the value is a known member of the AdjustmentReason enum.
+func (e AdjustmentReason) Valid() bool {
+	switch e {
+	case CountCorrection:
+		return true
+	case Damaged:
+		return true
+	case Found:
+		return true
+	case Lost:
+		return true
+	case Other:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for Availability.
 const (
 	InStock    Availability = "in_stock"
@@ -43,13 +70,19 @@ func (e Availability) Valid() bool {
 
 // Defines values for ErrorCode.
 const (
-	CONFLICT         ErrorCode = "CONFLICT"
-	FORBIDDEN        ErrorCode = "FORBIDDEN"
-	INTERNAL         ErrorCode = "INTERNAL"
-	NOTFOUND         ErrorCode = "NOT_FOUND"
-	RATELIMITED      ErrorCode = "RATE_LIMITED"
-	UNAUTHENTICATED  ErrorCode = "UNAUTHENTICATED"
-	VALIDATIONFAILED ErrorCode = "VALIDATION_FAILED"
+	CONFLICT                 ErrorCode = "CONFLICT"
+	FORBIDDEN                ErrorCode = "FORBIDDEN"
+	IDEMPOTENCYKEYREUSED     ErrorCode = "IDEMPOTENCY_KEY_REUSED"
+	INTERNAL                 ErrorCode = "INTERNAL"
+	NOTFOUND                 ErrorCode = "NOT_FOUND"
+	PURCHASEALREADYCANCELLED ErrorCode = "PURCHASE_ALREADY_CANCELLED"
+	PURCHASEALREADYRECEIVED  ErrorCode = "PURCHASE_ALREADY_RECEIVED"
+	PURCHASENOTDRAFT         ErrorCode = "PURCHASE_NOT_DRAFT"
+	RATELIMITED              ErrorCode = "RATE_LIMITED"
+	SAMELOCATION             ErrorCode = "SAME_LOCATION"
+	STOCKINSUFFICIENT        ErrorCode = "STOCK_INSUFFICIENT"
+	UNAUTHENTICATED          ErrorCode = "UNAUTHENTICATED"
+	VALIDATIONFAILED         ErrorCode = "VALIDATION_FAILED"
 )
 
 // Valid indicates whether the value is a known member of the ErrorCode enum.
@@ -59,11 +92,23 @@ func (e ErrorCode) Valid() bool {
 		return true
 	case FORBIDDEN:
 		return true
+	case IDEMPOTENCYKEYREUSED:
+		return true
 	case INTERNAL:
 		return true
 	case NOTFOUND:
 		return true
+	case PURCHASEALREADYCANCELLED:
+		return true
+	case PURCHASEALREADYRECEIVED:
+		return true
+	case PURCHASENOTDRAFT:
+		return true
 	case RATELIMITED:
+		return true
+	case SAMELOCATION:
+		return true
+	case STOCKINSUFFICIENT:
 		return true
 	case UNAUTHENTICATED:
 		return true
@@ -122,6 +167,27 @@ func (e LocationKind) Valid() bool {
 	case Store:
 		return true
 	case Warehouse:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PurchaseStatus.
+const (
+	Cancelled PurchaseStatus = "cancelled"
+	Draft     PurchaseStatus = "draft"
+	Received  PurchaseStatus = "received"
+)
+
+// Valid indicates whether the value is a known member of the PurchaseStatus enum.
+func (e PurchaseStatus) Valid() bool {
+	switch e {
+	case Cancelled:
+		return true
+	case Draft:
+		return true
+	case Received:
 		return true
 	default:
 		return false
@@ -221,6 +287,39 @@ func (e StaffRole) Valid() bool {
 	}
 }
 
+// Defines values for StockMovementKind.
+const (
+	Adjustment  StockMovementKind = "adjustment"
+	PurchaseIn  StockMovementKind = "purchase_in"
+	ReturnIn    StockMovementKind = "return_in"
+	SaleOut     StockMovementKind = "sale_out"
+	SaleVoidIn  StockMovementKind = "sale_void_in"
+	TransferIn  StockMovementKind = "transfer_in"
+	TransferOut StockMovementKind = "transfer_out"
+)
+
+// Valid indicates whether the value is a known member of the StockMovementKind enum.
+func (e StockMovementKind) Valid() bool {
+	switch e {
+	case Adjustment:
+		return true
+	case PurchaseIn:
+		return true
+	case ReturnIn:
+		return true
+	case SaleOut:
+		return true
+	case SaleVoidIn:
+		return true
+	case TransferIn:
+		return true
+	case TransferOut:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AcceptLanguage.
 const (
 	AcceptLanguageEn AcceptLanguage = "en"
@@ -241,6 +340,9 @@ func (e AcceptLanguage) Valid() bool {
 		return false
 	}
 }
+
+// AdjustmentReason Fixed adjustment reason enum (D-46).
+type AdjustmentReason string
 
 // AttributeDefinition A per-shop variant attribute, e.g. size or colour (D-32).
 type AttributeDefinition struct {
@@ -466,6 +568,9 @@ type Product struct {
 	// Locale A UI/data locale (ADR-012).
 	Locale Locale `json:"locale"`
 
+	// LowStockThreshold Per-product override of the shop's default low-stock threshold (D-44); `null` means "use the shop default".
+	LowStockThreshold nullable.Nullable[int] `json:"lowStockThreshold"`
+
 	// Name Resolved for the caller's `Accept-Language`.
 	Name                string                       `json:"name"`
 	PromoFrom           nullable.Nullable[time.Time] `json:"promoFrom"`
@@ -488,10 +593,11 @@ type ProductCreate struct {
 	CategoryId *openapi_types.UUID `json:"categoryId,omitempty"`
 
 	// CostPrice money and quantities as decimal strings (ADR-007)
-	CostPrice  *Decimal   `json:"costPrice,omitempty"`
-	IsActive   *bool      `json:"isActive,omitempty"`
-	IsFeatured *bool      `json:"isFeatured,omitempty"`
-	PromoFrom  *time.Time `json:"promoFrom,omitempty"`
+	CostPrice         *Decimal   `json:"costPrice,omitempty"`
+	IsActive          *bool      `json:"isActive,omitempty"`
+	IsFeatured        *bool      `json:"isFeatured,omitempty"`
+	LowStockThreshold *int       `json:"lowStockThreshold,omitempty"`
+	PromoFrom         *time.Time `json:"promoFrom,omitempty"`
 
 	// PromoPrice money and quantities as decimal strings (ADR-007)
 	PromoPrice *Decimal   `json:"promoPrice,omitempty"`
@@ -537,25 +643,32 @@ type ProductImageOrder struct {
 	ImageIds []openapi_types.UUID `json:"imageIds"`
 }
 
+// ProductImagePatch Request body for `PATCH /products/{id}/images/{imageId}` (D-43). Partial update — only provided fields change. `variantId` is nullable (D-35): explicit `null` unties the image from its variant.
+type ProductImagePatch struct {
+	IsCover   *bool                                 `json:"isCover,omitempty"`
+	VariantId nullable.Nullable[openapi_types.UUID] `json:"variantId,omitempty"`
+}
+
 // ProductList Cursor-paginated envelope for `GET /products`.
 type ProductList struct {
 	Items      []Product                 `json:"items"`
 	NextCursor nullable.Nullable[string] `json:"nextCursor"`
 }
 
-// ProductPatch Partial update — only provided fields change. `sku`, `promoPrice`, `promoFrom`, `promoTo`, `categoryId` and `costPrice` are nullable (D-35): explicit `null` clears the field. Variants are managed through `/products/{id}/variants` and `/variants/{id}`, not here.
+// ProductPatch Partial update — only provided fields change. `sku`, `promoPrice`, `promoFrom`, `promoTo`, `categoryId`, `costPrice` and `lowStockThreshold` are nullable (D-35): explicit `null` clears the field. Variants are managed through `/products/{id}/variants` and `/variants/{id}`, not here.
 type ProductPatch struct {
 	// BasePrice money and quantities as decimal strings (ADR-007)
-	BasePrice  *Decimal                              `json:"basePrice,omitempty"`
-	CategoryId nullable.Nullable[openapi_types.UUID] `json:"categoryId,omitempty"`
-	CostPrice  nullable.Nullable[string]             `json:"costPrice,omitempty"`
-	IsActive   *bool                                 `json:"isActive,omitempty"`
-	IsFeatured *bool                                 `json:"isFeatured,omitempty"`
-	PromoFrom  nullable.Nullable[time.Time]          `json:"promoFrom,omitempty"`
-	PromoPrice nullable.Nullable[string]             `json:"promoPrice,omitempty"`
-	PromoTo    nullable.Nullable[time.Time]          `json:"promoTo,omitempty"`
-	Sku        nullable.Nullable[string]             `json:"sku,omitempty"`
-	Slug       *string                               `json:"slug,omitempty"`
+	BasePrice         *Decimal                              `json:"basePrice,omitempty"`
+	CategoryId        nullable.Nullable[openapi_types.UUID] `json:"categoryId,omitempty"`
+	CostPrice         nullable.Nullable[string]             `json:"costPrice,omitempty"`
+	IsActive          *bool                                 `json:"isActive,omitempty"`
+	IsFeatured        *bool                                 `json:"isFeatured,omitempty"`
+	LowStockThreshold nullable.Nullable[int]                `json:"lowStockThreshold,omitempty"`
+	PromoFrom         nullable.Nullable[time.Time]          `json:"promoFrom,omitempty"`
+	PromoPrice        nullable.Nullable[string]             `json:"promoPrice,omitempty"`
+	PromoTo           nullable.Nullable[time.Time]          `json:"promoTo,omitempty"`
+	Sku               nullable.Nullable[string]             `json:"sku,omitempty"`
+	Slug              *string                               `json:"slug,omitempty"`
 
 	// Translations Per-locale name/description (ADR-012), keyed by `Locale`. On create, an entry for the shop's own default locale is required — expressible only as a service-level rule, since the JSON Schema can't know a given shop's `defaultLocale` value. On PATCH, each provided locale entry fully replaces the stored entry for that locale; omitted locales are left unchanged. Response fields outside this object (`name`/`description`/`locale`/ `translationFallback`) are the entity resolved for the caller's `Accept-Language`, fallback order `requested → uz → any`.
 	Translations *Translations       `json:"translations,omitempty"`
@@ -587,6 +700,78 @@ type ProductPublic struct {
 	UnitId              openapi_types.UUID           `json:"unitId"`
 	Variants            *[]VariantPublic             `json:"variants,omitempty"`
 }
+
+// Purchase `number` and `totalCost` are server-computed, never client-supplied (D-45, hard rule 8).
+type Purchase struct {
+	CreatedAt  time.Time                 `json:"createdAt"`
+	Id         openapi_types.UUID        `json:"id"`
+	Items      []PurchaseItem            `json:"items"`
+	LocationId openapi_types.UUID        `json:"locationId"`
+	Note       nullable.Nullable[string] `json:"note"`
+
+	// Number Server-generated, e.g. `P-000001` (D-45). Read-only.
+	Number     string                       `json:"number"`
+	ReceivedAt nullable.Nullable[time.Time] `json:"receivedAt"`
+
+	// Status docs/04-DATA-MODEL.md § 3.
+	Status     PurchaseStatus     `json:"status"`
+	SupplierId openapi_types.UUID `json:"supplierId"`
+
+	// SupplierInvoiceNo The supplier's own document number, free text (D-45).
+	SupplierInvoiceNo nullable.Nullable[string] `json:"supplierInvoiceNo"`
+
+	// TotalCost money and quantities as decimal strings (ADR-007)
+	TotalCost Decimal `json:"totalCost"`
+}
+
+// PurchaseCreate defines model for PurchaseCreate.
+type PurchaseCreate struct {
+	Items             []PurchaseItemCreate `json:"items"`
+	LocationId        openapi_types.UUID   `json:"locationId"`
+	Note              *string              `json:"note,omitempty"`
+	SupplierId        openapi_types.UUID   `json:"supplierId"`
+	SupplierInvoiceNo *string              `json:"supplierInvoiceNo,omitempty"`
+}
+
+// PurchaseItem One line of a purchase (docs/04-DATA-MODEL.md § 3).
+type PurchaseItem struct {
+	Id openapi_types.UUID `json:"id"`
+
+	// Qty money and quantities as decimal strings (ADR-007)
+	Qty Decimal `json:"qty"`
+
+	// UnitCost money and quantities as decimal strings (ADR-007)
+	UnitCost  Decimal            `json:"unitCost"`
+	VariantId openapi_types.UUID `json:"variantId"`
+}
+
+// PurchaseItemCreate defines model for PurchaseItemCreate.
+type PurchaseItemCreate struct {
+	// Qty money and quantities as decimal strings (ADR-007)
+	Qty Decimal `json:"qty"`
+
+	// UnitCost money and quantities as decimal strings (ADR-007)
+	UnitCost  Decimal            `json:"unitCost"`
+	VariantId openapi_types.UUID `json:"variantId"`
+}
+
+// PurchaseList Cursor-paginated envelope for `GET /purchases`.
+type PurchaseList struct {
+	Items      []Purchase                `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"nextCursor"`
+}
+
+// PurchasePatch Partial update — only provided fields change; allowed only while `status: draft` (409 PURCHASE_NOT_DRAFT otherwise). `supplierInvoiceNo` and `note` are nullable (D-35): explicit `null` clears the field. `items`, when provided, replaces the full item list.
+type PurchasePatch struct {
+	Items             *[]PurchaseItemCreate     `json:"items,omitempty"`
+	LocationId        *openapi_types.UUID       `json:"locationId,omitempty"`
+	Note              nullable.Nullable[string] `json:"note,omitempty"`
+	SupplierId        *openapi_types.UUID       `json:"supplierId,omitempty"`
+	SupplierInvoiceNo nullable.Nullable[string] `json:"supplierInvoiceNo,omitempty"`
+}
+
+// PurchaseStatus docs/04-DATA-MODEL.md § 3.
+type PurchaseStatus string
 
 // Readiness Response body for `GET /readyz` (200 and 503 share this shape).
 type Readiness struct {
@@ -646,8 +831,11 @@ type Shop struct {
 	// DefaultLocale A UI/data locale (ADR-012).
 	DefaultLocale Locale             `json:"defaultLocale"`
 	Id            openapi_types.UUID `json:"id"`
-	Name          string             `json:"name"`
-	Slug          string             `json:"slug"`
+
+	// LowStockThreshold Shop-wide default low-stock threshold (D-44); a product may override it with its own `lowStockThreshold`.
+	LowStockThreshold int    `json:"lowStockThreshold"`
+	Name              string `json:"name"`
+	Slug              string `json:"slug"`
 
 	// Timezone IANA timezone name, e.g. `Asia/Tashkent`.
 	Timezone             string `json:"timezone"`
@@ -660,6 +848,7 @@ type ShopPatch struct {
 
 	// DefaultLocale A UI/data locale (ADR-012).
 	DefaultLocale        *Locale `json:"defaultLocale,omitempty"`
+	LowStockThreshold    *int    `json:"lowStockThreshold,omitempty"`
 	Name                 *string `json:"name,omitempty"`
 	Timezone             *string `json:"timezone,omitempty"`
 	UpdateCostOnPurchase *bool   `json:"updateCostOnPurchase,omitempty"`
@@ -694,6 +883,135 @@ type StaffPatch struct {
 
 // StaffRole The roles the owner can assign when creating or editing a staff member. `owner` is not assignable — there is exactly one owner, seeded (D-30).
 type StaffRole string
+
+// StockAdjustmentCreate defines model for StockAdjustmentCreate.
+type StockAdjustmentCreate struct {
+	LocationId openapi_types.UUID `json:"locationId"`
+	Note       *string            `json:"note,omitempty"`
+
+	// Qty Signed; positive increases the level, negative decreases it.
+	Qty Decimal `json:"qty"`
+
+	// Reason Fixed adjustment reason enum (D-46).
+	Reason    AdjustmentReason   `json:"reason"`
+	VariantId openapi_types.UUID `json:"variantId"`
+}
+
+// StockLevel docs/04-DATA-MODEL.md § 3. No cost anywhere on this shape — open to any authenticated role (D-40).
+type StockLevel struct {
+	LocationId openapi_types.UUID `json:"locationId"`
+	ProductId  openapi_types.UUID `json:"productId"`
+
+	// Qty money and quantities as decimal strings (ADR-007)
+	Qty       Decimal            `json:"qty"`
+	VariantId openapi_types.UUID `json:"variantId"`
+}
+
+// StockLevelList Cursor-paginated envelope for `GET /stock/levels`.
+type StockLevelList struct {
+	Items      []StockLevel              `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"nextCursor"`
+}
+
+// StockLowItem docs/04-DATA-MODEL.md § 3 (D-44).
+type StockLowItem struct {
+	ProductId openapi_types.UUID `json:"productId"`
+
+	// Qty Total quantity across all locations.
+	Qty Decimal `json:"qty"`
+
+	// Threshold The effective threshold (product override, else the shop default).
+	Threshold int                `json:"threshold"`
+	VariantId openapi_types.UUID `json:"variantId"`
+}
+
+// StockLowList Cursor-paginated envelope for `GET /stock/low`.
+type StockLowList struct {
+	Items      []StockLowItem            `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"nextCursor"`
+}
+
+// StockMovement One row of the append-only stock ledger (docs/04-DATA-MODEL.md § 3, ADR-006). `qty` is signed: positive in, negative out.
+type StockMovement struct {
+	CreatedAt time.Time                             `json:"createdAt"`
+	CreatedBy nullable.Nullable[openapi_types.UUID] `json:"createdBy"`
+	Id        openapi_types.UUID                    `json:"id"`
+
+	// Kind docs/04-DATA-MODEL.md § 3.
+	Kind       StockMovementKind         `json:"kind"`
+	LocationId openapi_types.UUID        `json:"locationId"`
+	Note       nullable.Nullable[string] `json:"note"`
+
+	// Qty money and quantities as decimal strings (ADR-007)
+	Qty Decimal `json:"qty"`
+
+	// Reason Set for `adjustment` movements (D-46); the fixed reason enum value as text.
+	Reason nullable.Nullable[string]             `json:"reason"`
+	RefId  nullable.Nullable[openapi_types.UUID] `json:"refId"`
+
+	// RefType e.g. `purchase`, `sale`, `transfer` — the kind of record `refId` points to.
+	RefType   nullable.Nullable[string] `json:"refType"`
+	UnitCost  nullable.Nullable[string] `json:"unitCost"`
+	VariantId openapi_types.UUID        `json:"variantId"`
+}
+
+// StockMovementKind docs/04-DATA-MODEL.md § 3.
+type StockMovementKind string
+
+// StockMovementList Cursor-paginated envelope for `GET /stock/movements`.
+type StockMovementList struct {
+	Items      []StockMovement           `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"nextCursor"`
+}
+
+// StockTransferCreate defines model for StockTransferCreate.
+type StockTransferCreate struct {
+	FromLocationId openapi_types.UUID `json:"fromLocationId"`
+
+	// Qty Positive quantity to move.
+	Qty          Decimal            `json:"qty"`
+	ToLocationId openapi_types.UUID `json:"toLocationId"`
+	VariantId    openapi_types.UUID `json:"variantId"`
+}
+
+// StockTransferResult The two movements a transfer writes: `transfer_out` at `fromLocationId` then `transfer_in` at `toLocationId`.
+type StockTransferResult struct {
+	Items []StockMovement `json:"items"`
+}
+
+// Supplier docs/04-DATA-MODEL.md § 5.
+type Supplier struct {
+	ContactName      nullable.Nullable[string] `json:"contactName"`
+	Id               openapi_types.UUID        `json:"id"`
+	Name             string                    `json:"name"`
+	Note             nullable.Nullable[string] `json:"note"`
+	Phone            nullable.Nullable[string] `json:"phone"`
+	TelegramUsername nullable.Nullable[string] `json:"telegramUsername"`
+}
+
+// SupplierCreate defines model for SupplierCreate.
+type SupplierCreate struct {
+	ContactName      *string `json:"contactName,omitempty"`
+	Name             string  `json:"name"`
+	Note             *string `json:"note,omitempty"`
+	Phone            *string `json:"phone,omitempty"`
+	TelegramUsername *string `json:"telegramUsername,omitempty"`
+}
+
+// SupplierList Cursor-paginated envelope for `GET /suppliers`.
+type SupplierList struct {
+	Items      []Supplier                `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"nextCursor"`
+}
+
+// SupplierPatch Partial update — only provided fields change. `contactName`, `phone`, `telegramUsername` and `note` are nullable (D-35): explicit `null` clears the field.
+type SupplierPatch struct {
+	ContactName      nullable.Nullable[string] `json:"contactName,omitempty"`
+	Name             *string                   `json:"name,omitempty"`
+	Note             nullable.Nullable[string] `json:"note,omitempty"`
+	Phone            nullable.Nullable[string] `json:"phone,omitempty"`
+	TelegramUsername nullable.Nullable[string] `json:"telegramUsername,omitempty"`
+}
 
 // TranslationEntry One locale's name/description for a translatable entity.
 type TranslationEntry struct {
@@ -822,6 +1140,9 @@ type AcceptLanguage string
 // Cursor defines model for Cursor.
 type Cursor = string
 
+// IdempotencyKey defines model for IdempotencyKey.
+type IdempotencyKey = string
+
 // Limit defines model for Limit.
 type Limit = int
 
@@ -883,8 +1204,81 @@ type ListProductsParams struct {
 	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
 }
 
+// ListPurchasesParams defines parameters for ListPurchases.
+type ListPurchasesParams struct {
+	Status     *PurchaseStatus     `form:"status,omitempty" json:"status,omitempty"`
+	SupplierId *openapi_types.UUID `form:"supplierId,omitempty" json:"supplierId,omitempty"`
+
+	// Limit Maximum number of items to return.
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque cursor from a previous page's `nextCursor`.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// ReceivePurchaseParams defines parameters for ReceivePurchase.
+type ReceivePurchaseParams struct {
+	// IdempotencyKey Client-generated key (docs/05-API.md § Conventions); a replay with the same key returns the original result instead of repeating the operation.
+	IdempotencyKey *IdempotencyKey `json:"Idempotency-Key,omitempty"`
+}
+
 // ListStaffParams defines parameters for ListStaff.
 type ListStaffParams struct {
+	// Limit Maximum number of items to return.
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque cursor from a previous page's `nextCursor`.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// CreateStockAdjustmentParams defines parameters for CreateStockAdjustment.
+type CreateStockAdjustmentParams struct {
+	// IdempotencyKey Client-generated key (docs/05-API.md § Conventions); a replay with the same key returns the original result instead of repeating the operation.
+	IdempotencyKey *IdempotencyKey `json:"Idempotency-Key,omitempty"`
+}
+
+// ListStockLevelsParams defines parameters for ListStockLevels.
+type ListStockLevelsParams struct {
+	VariantId  *openapi_types.UUID `form:"variantId,omitempty" json:"variantId,omitempty"`
+	ProductId  *openapi_types.UUID `form:"productId,omitempty" json:"productId,omitempty"`
+	LocationId *openapi_types.UUID `form:"locationId,omitempty" json:"locationId,omitempty"`
+
+	// Limit Maximum number of items to return.
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque cursor from a previous page's `nextCursor`.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// ListLowStockParams defines parameters for ListLowStock.
+type ListLowStockParams struct {
+	// Limit Maximum number of items to return.
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque cursor from a previous page's `nextCursor`.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// ListStockMovementsParams defines parameters for ListStockMovements.
+type ListStockMovementsParams struct {
+	VariantId  *openapi_types.UUID `form:"variantId,omitempty" json:"variantId,omitempty"`
+	LocationId *openapi_types.UUID `form:"locationId,omitempty" json:"locationId,omitempty"`
+	Kind       *StockMovementKind  `form:"kind,omitempty" json:"kind,omitempty"`
+	From       *time.Time          `form:"from,omitempty" json:"from,omitempty"`
+	To         *time.Time          `form:"to,omitempty" json:"to,omitempty"`
+
+	// Limit Maximum number of items to return.
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque cursor from a previous page's `nextCursor`.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// ListSuppliersParams defines parameters for ListSuppliers.
+type ListSuppliersParams struct {
+	// Q Free-text search over supplier name (Postgres ILIKE/trigram).
+	Q *string `form:"q,omitempty" json:"q,omitempty"`
+
 	// Limit Maximum number of items to return.
 	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
@@ -928,8 +1322,17 @@ type AddProductImageJSONRequestBody = ProductImageCreate
 // ReorderProductImagesJSONRequestBody defines body for ReorderProductImages for application/json ContentType.
 type ReorderProductImagesJSONRequestBody = ProductImageOrder
 
+// UpdateProductImageJSONRequestBody defines body for UpdateProductImage for application/json ContentType.
+type UpdateProductImageJSONRequestBody = ProductImagePatch
+
 // CreateVariantJSONRequestBody defines body for CreateVariant for application/json ContentType.
 type CreateVariantJSONRequestBody = VariantCreate
+
+// CreatePurchaseJSONRequestBody defines body for CreatePurchase for application/json ContentType.
+type CreatePurchaseJSONRequestBody = PurchaseCreate
+
+// UpdatePurchaseJSONRequestBody defines body for UpdatePurchase for application/json ContentType.
+type UpdatePurchaseJSONRequestBody = PurchasePatch
 
 // UpdateShopJSONRequestBody defines body for UpdateShop for application/json ContentType.
 type UpdateShopJSONRequestBody = ShopPatch
@@ -942,6 +1345,18 @@ type UpdateStaffJSONRequestBody = StaffPatch
 
 // SetStaffPasswordJSONRequestBody defines body for SetStaffPassword for application/json ContentType.
 type SetStaffPasswordJSONRequestBody = SetStaffPassword
+
+// CreateStockAdjustmentJSONRequestBody defines body for CreateStockAdjustment for application/json ContentType.
+type CreateStockAdjustmentJSONRequestBody = StockAdjustmentCreate
+
+// CreateStockTransferJSONRequestBody defines body for CreateStockTransfer for application/json ContentType.
+type CreateStockTransferJSONRequestBody = StockTransferCreate
+
+// CreateSupplierJSONRequestBody defines body for CreateSupplier for application/json ContentType.
+type CreateSupplierJSONRequestBody = SupplierCreate
+
+// UpdateSupplierJSONRequestBody defines body for UpdateSupplier for application/json ContentType.
+type UpdateSupplierJSONRequestBody = SupplierPatch
 
 // UpdateVariantJSONRequestBody defines body for UpdateVariant for application/json ContentType.
 type UpdateVariantJSONRequestBody = VariantPatch
@@ -1026,12 +1441,33 @@ type ServerInterface interface {
 	// RemoveProductImage Remove an image from a product.
 	// (DELETE /products/{id}/images/{imageId})
 	RemoveProductImage(w http.ResponseWriter, r *http.Request, id openapi_types.UUID, imageId openapi_types.UUID)
+	// UpdateProductImage Retag an image's variant and/or cover status.
+	// (PATCH /products/{id}/images/{imageId})
+	UpdateProductImage(w http.ResponseWriter, r *http.Request, id openapi_types.UUID, imageId openapi_types.UUID)
 	// ListVariants List a product's variants.
 	// (GET /products/{id}/variants)
 	ListVariants(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
 	// CreateVariant Add a variant to a product.
 	// (POST /products/{id}/variants)
 	CreateVariant(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
+	// ListPurchases List the shop's purchases.
+	// (GET /purchases)
+	ListPurchases(w http.ResponseWriter, r *http.Request, params ListPurchasesParams)
+	// CreatePurchase Create a draft purchase.
+	// (POST /purchases)
+	CreatePurchase(w http.ResponseWriter, r *http.Request)
+	// GetPurchase Get a purchase.
+	// (GET /purchases/{id})
+	GetPurchase(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
+	// UpdatePurchase Update a draft purchase.
+	// (PATCH /purchases/{id})
+	UpdatePurchase(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
+	// CancelPurchase Cancel a purchase.
+	// (POST /purchases/{id}/cancel)
+	CancelPurchase(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
+	// ReceivePurchase Receive a draft purchase.
+	// (POST /purchases/{id}/receive)
+	ReceivePurchase(w http.ResponseWriter, r *http.Request, id openapi_types.UUID, params ReceivePurchaseParams)
 	// GetReadyz Readiness check.
 	// (GET /readyz)
 	GetReadyz(w http.ResponseWriter, r *http.Request)
@@ -1053,6 +1489,36 @@ type ServerInterface interface {
 	// SetStaffPassword Set a staff member's password.
 	// (POST /staff/{id}/password)
 	SetStaffPassword(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
+	// CreateStockAdjustment Record a manual stock adjustment.
+	// (POST /stock/adjustments)
+	CreateStockAdjustment(w http.ResponseWriter, r *http.Request, params CreateStockAdjustmentParams)
+	// ListStockLevels List stock levels per variant and location.
+	// (GET /stock/levels)
+	ListStockLevels(w http.ResponseWriter, r *http.Request, params ListStockLevelsParams)
+	// ListLowStock List variants at or below their effective low-stock threshold.
+	// (GET /stock/low)
+	ListLowStock(w http.ResponseWriter, r *http.Request, params ListLowStockParams)
+	// ListStockMovements List stock movements (the append-only ledger).
+	// (GET /stock/movements)
+	ListStockMovements(w http.ResponseWriter, r *http.Request, params ListStockMovementsParams)
+	// CreateStockTransfer Transfer stock between two locations.
+	// (POST /stock/transfers)
+	CreateStockTransfer(w http.ResponseWriter, r *http.Request)
+	// ListSuppliers List the shop's suppliers.
+	// (GET /suppliers)
+	ListSuppliers(w http.ResponseWriter, r *http.Request, params ListSuppliersParams)
+	// CreateSupplier Create a supplier.
+	// (POST /suppliers)
+	CreateSupplier(w http.ResponseWriter, r *http.Request)
+	// DeleteSupplier Soft-delete a supplier.
+	// (DELETE /suppliers/{id})
+	DeleteSupplier(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
+	// GetSupplier Get a supplier.
+	// (GET /suppliers/{id})
+	GetSupplier(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
+	// UpdateSupplier Update a supplier.
+	// (PATCH /suppliers/{id})
+	UpdateSupplier(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
 	// ListUnits List the shop's units of measure.
 	// (GET /units)
 	ListUnits(w http.ResponseWriter, r *http.Request)
@@ -1744,6 +2210,41 @@ func (siw *ServerInterfaceWrapper) RemoveProductImage(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
+// UpdateProductImage operation middleware
+func (siw *ServerInterfaceWrapper) UpdateProductImage(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "imageId" -------------
+	var imageId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "imageId", r.PathValue("imageId"), &imageId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "imageId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateProductImage(w, r, id, imageId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListVariants operation middleware
 func (siw *ServerInterfaceWrapper) ListVariants(w http.ResponseWriter, r *http.Request) {
 
@@ -1787,6 +2288,220 @@ func (siw *ServerInterfaceWrapper) CreateVariant(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreateVariant(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListPurchases operation middleware
+func (siw *ServerInterfaceWrapper) ListPurchases(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListPurchasesParams
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", r.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "status"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "status", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "supplierId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "supplierId", r.URL.Query(), &params.SupplierId, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "supplierId"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "supplierId", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListPurchases(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreatePurchase operation middleware
+func (siw *ServerInterfaceWrapper) CreatePurchase(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreatePurchase(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPurchase operation middleware
+func (siw *ServerInterfaceWrapper) GetPurchase(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPurchase(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdatePurchase operation middleware
+func (siw *ServerInterfaceWrapper) UpdatePurchase(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdatePurchase(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CancelPurchase operation middleware
+func (siw *ServerInterfaceWrapper) CancelPurchase(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CancelPurchase(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ReceivePurchase operation middleware
+func (siw *ServerInterfaceWrapper) ReceivePurchase(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ReceivePurchaseParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = &IdempotencyKey
+
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReceivePurchase(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1941,6 +2656,454 @@ func (siw *ServerInterfaceWrapper) SetStaffPassword(w http.ResponseWriter, r *ht
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetStaffPassword(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateStockAdjustment operation middleware
+func (siw *ServerInterfaceWrapper) CreateStockAdjustment(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CreateStockAdjustmentParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = &IdempotencyKey
+
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateStockAdjustment(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListStockLevels operation middleware
+func (siw *ServerInterfaceWrapper) ListStockLevels(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListStockLevelsParams
+
+	// ------------- Optional query parameter "variantId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "variantId", r.URL.Query(), &params.VariantId, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "variantId"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "variantId", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "productId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "productId", r.URL.Query(), &params.ProductId, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "productId"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "productId", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "locationId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "locationId", r.URL.Query(), &params.LocationId, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "locationId"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "locationId", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListStockLevels(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListLowStock operation middleware
+func (siw *ServerInterfaceWrapper) ListLowStock(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListLowStockParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListLowStock(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListStockMovements operation middleware
+func (siw *ServerInterfaceWrapper) ListStockMovements(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListStockMovementsParams
+
+	// ------------- Optional query parameter "variantId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "variantId", r.URL.Query(), &params.VariantId, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "variantId"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "variantId", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "locationId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "locationId", r.URL.Query(), &params.LocationId, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "locationId"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "locationId", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "kind" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "kind", r.URL.Query(), &params.Kind, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "kind"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "kind", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListStockMovements(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateStockTransfer operation middleware
+func (siw *ServerInterfaceWrapper) CreateStockTransfer(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateStockTransfer(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListSuppliers operation middleware
+func (siw *ServerInterfaceWrapper) ListSuppliers(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListSuppliersParams
+
+	// ------------- Optional query parameter "q" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "q", r.URL.Query(), &params.Q, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "q"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "q", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListSuppliers(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateSupplier operation middleware
+func (siw *ServerInterfaceWrapper) CreateSupplier(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateSupplier(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteSupplier operation middleware
+func (siw *ServerInterfaceWrapper) DeleteSupplier(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteSupplier(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetSupplier operation middleware
+func (siw *ServerInterfaceWrapper) GetSupplier(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetSupplier(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateSupplier operation middleware
+func (siw *ServerInterfaceWrapper) UpdateSupplier(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateSupplier(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2173,7 +3336,24 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/media", wrapper.UploadMedia)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/products/{id}/images", wrapper.AddProductImage)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/products/{id}/images/{imageId}", wrapper.RemoveProductImage)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/products/{id}/images/{imageId}", wrapper.UpdateProductImage)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/products/{id}/images/order", wrapper.ReorderProductImages)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/suppliers", wrapper.ListSuppliers)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/suppliers", wrapper.CreateSupplier)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/suppliers/{id}", wrapper.DeleteSupplier)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/suppliers/{id}", wrapper.GetSupplier)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/suppliers/{id}", wrapper.UpdateSupplier)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/purchases", wrapper.ListPurchases)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/purchases", wrapper.CreatePurchase)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/purchases/{id}", wrapper.GetPurchase)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/purchases/{id}", wrapper.UpdatePurchase)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/purchases/{id}/receive", wrapper.ReceivePurchase)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/purchases/{id}/cancel", wrapper.CancelPurchase)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/stock/levels", wrapper.ListStockLevels)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/stock/movements", wrapper.ListStockMovements)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/stock/adjustments", wrapper.CreateStockAdjustment)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/stock/transfers", wrapper.CreateStockTransfer)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/stock/low", wrapper.ListLowStock)
 
 	return m
 }
@@ -3801,6 +4981,86 @@ func (response RemoveProductImage404JSONResponse) VisitRemoveProductImageRespons
 	return err
 }
 
+type UpdateProductImageRequestObject struct {
+	Id      openapi_types.UUID `json:"id"`
+	ImageId openapi_types.UUID `json:"imageId"`
+	Body    *UpdateProductImageJSONRequestBody
+}
+
+type UpdateProductImageResponseObject interface {
+	VisitUpdateProductImageResponse(w http.ResponseWriter) error
+}
+
+type UpdateProductImage200JSONResponse ProductImage
+
+func (response UpdateProductImage200JSONResponse) VisitUpdateProductImageResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateProductImage400JSONResponse struct{ ValidationFailedJSONResponse }
+
+func (response UpdateProductImage400JSONResponse) VisitUpdateProductImageResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateProductImage401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response UpdateProductImage401JSONResponse) VisitUpdateProductImageResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateProductImage403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response UpdateProductImage403JSONResponse) VisitUpdateProductImageResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateProductImage404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response UpdateProductImage404JSONResponse) VisitUpdateProductImageResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListVariantsRequestObject struct {
 	Id openapi_types.UUID `json:"id"`
 }
@@ -3933,6 +5193,434 @@ func (response CreateVariant404JSONResponse) VisitCreateVariantResponse(w http.R
 type CreateVariant409JSONResponse struct{ ConflictJSONResponse }
 
 func (response CreateVariant409JSONResponse) VisitCreateVariantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListPurchasesRequestObject struct {
+	Params ListPurchasesParams
+}
+
+type ListPurchasesResponseObject interface {
+	VisitListPurchasesResponse(w http.ResponseWriter) error
+}
+
+type ListPurchases200JSONResponse PurchaseList
+
+func (response ListPurchases200JSONResponse) VisitListPurchasesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListPurchases401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListPurchases401JSONResponse) VisitListPurchasesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListPurchases403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListPurchases403JSONResponse) VisitListPurchasesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreatePurchaseRequestObject struct {
+	Body *CreatePurchaseJSONRequestBody
+}
+
+type CreatePurchaseResponseObject interface {
+	VisitCreatePurchaseResponse(w http.ResponseWriter) error
+}
+
+type CreatePurchase201JSONResponse Purchase
+
+func (response CreatePurchase201JSONResponse) VisitCreatePurchaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreatePurchase400JSONResponse struct{ ValidationFailedJSONResponse }
+
+func (response CreatePurchase400JSONResponse) VisitCreatePurchaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreatePurchase401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CreatePurchase401JSONResponse) VisitCreatePurchaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreatePurchase403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response CreatePurchase403JSONResponse) VisitCreatePurchaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPurchaseRequestObject struct {
+	Id openapi_types.UUID `json:"id"`
+}
+
+type GetPurchaseResponseObject interface {
+	VisitGetPurchaseResponse(w http.ResponseWriter) error
+}
+
+type GetPurchase200JSONResponse Purchase
+
+func (response GetPurchase200JSONResponse) VisitGetPurchaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPurchase401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response GetPurchase401JSONResponse) VisitGetPurchaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPurchase403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetPurchase403JSONResponse) VisitGetPurchaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPurchase404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetPurchase404JSONResponse) VisitGetPurchaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdatePurchaseRequestObject struct {
+	Id   openapi_types.UUID `json:"id"`
+	Body *UpdatePurchaseJSONRequestBody
+}
+
+type UpdatePurchaseResponseObject interface {
+	VisitUpdatePurchaseResponse(w http.ResponseWriter) error
+}
+
+type UpdatePurchase200JSONResponse Purchase
+
+func (response UpdatePurchase200JSONResponse) VisitUpdatePurchaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdatePurchase400JSONResponse struct{ ValidationFailedJSONResponse }
+
+func (response UpdatePurchase400JSONResponse) VisitUpdatePurchaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdatePurchase401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response UpdatePurchase401JSONResponse) VisitUpdatePurchaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdatePurchase403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response UpdatePurchase403JSONResponse) VisitUpdatePurchaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdatePurchase404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response UpdatePurchase404JSONResponse) VisitUpdatePurchaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdatePurchase409JSONResponse Error
+
+func (response UpdatePurchase409JSONResponse) VisitUpdatePurchaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CancelPurchaseRequestObject struct {
+	Id openapi_types.UUID `json:"id"`
+}
+
+type CancelPurchaseResponseObject interface {
+	VisitCancelPurchaseResponse(w http.ResponseWriter) error
+}
+
+type CancelPurchase200JSONResponse Purchase
+
+func (response CancelPurchase200JSONResponse) VisitCancelPurchaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CancelPurchase401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CancelPurchase401JSONResponse) VisitCancelPurchaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CancelPurchase403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response CancelPurchase403JSONResponse) VisitCancelPurchaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CancelPurchase404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CancelPurchase404JSONResponse) VisitCancelPurchaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CancelPurchase409JSONResponse Error
+
+func (response CancelPurchase409JSONResponse) VisitCancelPurchaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReceivePurchaseRequestObject struct {
+	Id     openapi_types.UUID `json:"id"`
+	Params ReceivePurchaseParams
+}
+
+type ReceivePurchaseResponseObject interface {
+	VisitReceivePurchaseResponse(w http.ResponseWriter) error
+}
+
+type ReceivePurchase200JSONResponse Purchase
+
+func (response ReceivePurchase200JSONResponse) VisitReceivePurchaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReceivePurchase401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ReceivePurchase401JSONResponse) VisitReceivePurchaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReceivePurchase403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ReceivePurchase403JSONResponse) VisitReceivePurchaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReceivePurchase404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ReceivePurchase404JSONResponse) VisitReceivePurchaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReceivePurchase409JSONResponse Error
+
+func (response ReceivePurchase409JSONResponse) VisitReceivePurchaseResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -4372,6 +6060,670 @@ func (response SetStaffPassword404JSONResponse) VisitSetStaffPasswordResponse(w 
 	return err
 }
 
+type CreateStockAdjustmentRequestObject struct {
+	Params CreateStockAdjustmentParams
+	Body   *CreateStockAdjustmentJSONRequestBody
+}
+
+type CreateStockAdjustmentResponseObject interface {
+	VisitCreateStockAdjustmentResponse(w http.ResponseWriter) error
+}
+
+type CreateStockAdjustment201JSONResponse StockMovement
+
+func (response CreateStockAdjustment201JSONResponse) VisitCreateStockAdjustmentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateStockAdjustment400JSONResponse struct{ ValidationFailedJSONResponse }
+
+func (response CreateStockAdjustment400JSONResponse) VisitCreateStockAdjustmentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateStockAdjustment401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CreateStockAdjustment401JSONResponse) VisitCreateStockAdjustmentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateStockAdjustment403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response CreateStockAdjustment403JSONResponse) VisitCreateStockAdjustmentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateStockAdjustment404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CreateStockAdjustment404JSONResponse) VisitCreateStockAdjustmentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateStockAdjustment409JSONResponse Error
+
+func (response CreateStockAdjustment409JSONResponse) VisitCreateStockAdjustmentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListStockLevelsRequestObject struct {
+	Params ListStockLevelsParams
+}
+
+type ListStockLevelsResponseObject interface {
+	VisitListStockLevelsResponse(w http.ResponseWriter) error
+}
+
+type ListStockLevels200JSONResponse StockLevelList
+
+func (response ListStockLevels200JSONResponse) VisitListStockLevelsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListStockLevels401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListStockLevels401JSONResponse) VisitListStockLevelsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListLowStockRequestObject struct {
+	Params ListLowStockParams
+}
+
+type ListLowStockResponseObject interface {
+	VisitListLowStockResponse(w http.ResponseWriter) error
+}
+
+type ListLowStock200JSONResponse StockLowList
+
+func (response ListLowStock200JSONResponse) VisitListLowStockResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListLowStock401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListLowStock401JSONResponse) VisitListLowStockResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListLowStock403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListLowStock403JSONResponse) VisitListLowStockResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListStockMovementsRequestObject struct {
+	Params ListStockMovementsParams
+}
+
+type ListStockMovementsResponseObject interface {
+	VisitListStockMovementsResponse(w http.ResponseWriter) error
+}
+
+type ListStockMovements200JSONResponse StockMovementList
+
+func (response ListStockMovements200JSONResponse) VisitListStockMovementsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListStockMovements401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListStockMovements401JSONResponse) VisitListStockMovementsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListStockMovements403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListStockMovements403JSONResponse) VisitListStockMovementsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateStockTransferRequestObject struct {
+	Body *CreateStockTransferJSONRequestBody
+}
+
+type CreateStockTransferResponseObject interface {
+	VisitCreateStockTransferResponse(w http.ResponseWriter) error
+}
+
+type CreateStockTransfer201JSONResponse StockTransferResult
+
+func (response CreateStockTransfer201JSONResponse) VisitCreateStockTransferResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateStockTransfer400JSONResponse struct{ ValidationFailedJSONResponse }
+
+func (response CreateStockTransfer400JSONResponse) VisitCreateStockTransferResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateStockTransfer401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CreateStockTransfer401JSONResponse) VisitCreateStockTransferResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateStockTransfer403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response CreateStockTransfer403JSONResponse) VisitCreateStockTransferResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateStockTransfer404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CreateStockTransfer404JSONResponse) VisitCreateStockTransferResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateStockTransfer409JSONResponse Error
+
+func (response CreateStockTransfer409JSONResponse) VisitCreateStockTransferResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSuppliersRequestObject struct {
+	Params ListSuppliersParams
+}
+
+type ListSuppliersResponseObject interface {
+	VisitListSuppliersResponse(w http.ResponseWriter) error
+}
+
+type ListSuppliers200JSONResponse SupplierList
+
+func (response ListSuppliers200JSONResponse) VisitListSuppliersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSuppliers401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListSuppliers401JSONResponse) VisitListSuppliersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSuppliers403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListSuppliers403JSONResponse) VisitListSuppliersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSupplierRequestObject struct {
+	Body *CreateSupplierJSONRequestBody
+}
+
+type CreateSupplierResponseObject interface {
+	VisitCreateSupplierResponse(w http.ResponseWriter) error
+}
+
+type CreateSupplier201JSONResponse Supplier
+
+func (response CreateSupplier201JSONResponse) VisitCreateSupplierResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSupplier400JSONResponse struct{ ValidationFailedJSONResponse }
+
+func (response CreateSupplier400JSONResponse) VisitCreateSupplierResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSupplier401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CreateSupplier401JSONResponse) VisitCreateSupplierResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSupplier403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response CreateSupplier403JSONResponse) VisitCreateSupplierResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSupplier409JSONResponse Error
+
+func (response CreateSupplier409JSONResponse) VisitCreateSupplierResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteSupplierRequestObject struct {
+	Id openapi_types.UUID `json:"id"`
+}
+
+type DeleteSupplierResponseObject interface {
+	VisitDeleteSupplierResponse(w http.ResponseWriter) error
+}
+
+type DeleteSupplier204Response struct {
+}
+
+func (response DeleteSupplier204Response) VisitDeleteSupplierResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteSupplier401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response DeleteSupplier401JSONResponse) VisitDeleteSupplierResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteSupplier403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response DeleteSupplier403JSONResponse) VisitDeleteSupplierResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteSupplier404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeleteSupplier404JSONResponse) VisitDeleteSupplierResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSupplierRequestObject struct {
+	Id openapi_types.UUID `json:"id"`
+}
+
+type GetSupplierResponseObject interface {
+	VisitGetSupplierResponse(w http.ResponseWriter) error
+}
+
+type GetSupplier200JSONResponse Supplier
+
+func (response GetSupplier200JSONResponse) VisitGetSupplierResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSupplier401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response GetSupplier401JSONResponse) VisitGetSupplierResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSupplier403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetSupplier403JSONResponse) VisitGetSupplierResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSupplier404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetSupplier404JSONResponse) VisitGetSupplierResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateSupplierRequestObject struct {
+	Id   openapi_types.UUID `json:"id"`
+	Body *UpdateSupplierJSONRequestBody
+}
+
+type UpdateSupplierResponseObject interface {
+	VisitUpdateSupplierResponse(w http.ResponseWriter) error
+}
+
+type UpdateSupplier200JSONResponse Supplier
+
+func (response UpdateSupplier200JSONResponse) VisitUpdateSupplierResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateSupplier400JSONResponse struct{ ValidationFailedJSONResponse }
+
+func (response UpdateSupplier400JSONResponse) VisitUpdateSupplierResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateSupplier401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response UpdateSupplier401JSONResponse) VisitUpdateSupplierResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateSupplier403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response UpdateSupplier403JSONResponse) VisitUpdateSupplierResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateSupplier404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response UpdateSupplier404JSONResponse) VisitUpdateSupplierResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateSupplier409JSONResponse Error
+
+func (response UpdateSupplier409JSONResponse) VisitUpdateSupplierResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListUnitsRequestObject struct {
 }
 
@@ -4652,12 +7004,33 @@ type StrictServerInterface interface {
 	// RemoveProductImage Remove an image from a product.
 	// (DELETE /products/{id}/images/{imageId})
 	RemoveProductImage(ctx context.Context, request RemoveProductImageRequestObject) (RemoveProductImageResponseObject, error)
+	// UpdateProductImage Retag an image's variant and/or cover status.
+	// (PATCH /products/{id}/images/{imageId})
+	UpdateProductImage(ctx context.Context, request UpdateProductImageRequestObject) (UpdateProductImageResponseObject, error)
 	// ListVariants List a product's variants.
 	// (GET /products/{id}/variants)
 	ListVariants(ctx context.Context, request ListVariantsRequestObject) (ListVariantsResponseObject, error)
 	// CreateVariant Add a variant to a product.
 	// (POST /products/{id}/variants)
 	CreateVariant(ctx context.Context, request CreateVariantRequestObject) (CreateVariantResponseObject, error)
+	// ListPurchases List the shop's purchases.
+	// (GET /purchases)
+	ListPurchases(ctx context.Context, request ListPurchasesRequestObject) (ListPurchasesResponseObject, error)
+	// CreatePurchase Create a draft purchase.
+	// (POST /purchases)
+	CreatePurchase(ctx context.Context, request CreatePurchaseRequestObject) (CreatePurchaseResponseObject, error)
+	// GetPurchase Get a purchase.
+	// (GET /purchases/{id})
+	GetPurchase(ctx context.Context, request GetPurchaseRequestObject) (GetPurchaseResponseObject, error)
+	// UpdatePurchase Update a draft purchase.
+	// (PATCH /purchases/{id})
+	UpdatePurchase(ctx context.Context, request UpdatePurchaseRequestObject) (UpdatePurchaseResponseObject, error)
+	// CancelPurchase Cancel a purchase.
+	// (POST /purchases/{id}/cancel)
+	CancelPurchase(ctx context.Context, request CancelPurchaseRequestObject) (CancelPurchaseResponseObject, error)
+	// ReceivePurchase Receive a draft purchase.
+	// (POST /purchases/{id}/receive)
+	ReceivePurchase(ctx context.Context, request ReceivePurchaseRequestObject) (ReceivePurchaseResponseObject, error)
 	// GetReadyz Readiness check.
 	// (GET /readyz)
 	GetReadyz(ctx context.Context, request GetReadyzRequestObject) (GetReadyzResponseObject, error)
@@ -4679,6 +7052,36 @@ type StrictServerInterface interface {
 	// SetStaffPassword Set a staff member's password.
 	// (POST /staff/{id}/password)
 	SetStaffPassword(ctx context.Context, request SetStaffPasswordRequestObject) (SetStaffPasswordResponseObject, error)
+	// CreateStockAdjustment Record a manual stock adjustment.
+	// (POST /stock/adjustments)
+	CreateStockAdjustment(ctx context.Context, request CreateStockAdjustmentRequestObject) (CreateStockAdjustmentResponseObject, error)
+	// ListStockLevels List stock levels per variant and location.
+	// (GET /stock/levels)
+	ListStockLevels(ctx context.Context, request ListStockLevelsRequestObject) (ListStockLevelsResponseObject, error)
+	// ListLowStock List variants at or below their effective low-stock threshold.
+	// (GET /stock/low)
+	ListLowStock(ctx context.Context, request ListLowStockRequestObject) (ListLowStockResponseObject, error)
+	// ListStockMovements List stock movements (the append-only ledger).
+	// (GET /stock/movements)
+	ListStockMovements(ctx context.Context, request ListStockMovementsRequestObject) (ListStockMovementsResponseObject, error)
+	// CreateStockTransfer Transfer stock between two locations.
+	// (POST /stock/transfers)
+	CreateStockTransfer(ctx context.Context, request CreateStockTransferRequestObject) (CreateStockTransferResponseObject, error)
+	// ListSuppliers List the shop's suppliers.
+	// (GET /suppliers)
+	ListSuppliers(ctx context.Context, request ListSuppliersRequestObject) (ListSuppliersResponseObject, error)
+	// CreateSupplier Create a supplier.
+	// (POST /suppliers)
+	CreateSupplier(ctx context.Context, request CreateSupplierRequestObject) (CreateSupplierResponseObject, error)
+	// DeleteSupplier Soft-delete a supplier.
+	// (DELETE /suppliers/{id})
+	DeleteSupplier(ctx context.Context, request DeleteSupplierRequestObject) (DeleteSupplierResponseObject, error)
+	// GetSupplier Get a supplier.
+	// (GET /suppliers/{id})
+	GetSupplier(ctx context.Context, request GetSupplierRequestObject) (GetSupplierResponseObject, error)
+	// UpdateSupplier Update a supplier.
+	// (PATCH /suppliers/{id})
+	UpdateSupplier(ctx context.Context, request UpdateSupplierRequestObject) (UpdateSupplierResponseObject, error)
 	// ListUnits List the shop's units of measure.
 	// (GET /units)
 	ListUnits(ctx context.Context, request ListUnitsRequestObject) (ListUnitsResponseObject, error)
@@ -5470,6 +7873,40 @@ func (sh *strictHandler) RemoveProductImage(w http.ResponseWriter, r *http.Reque
 	}
 }
 
+// UpdateProductImage operation middleware
+func (sh *strictHandler) UpdateProductImage(w http.ResponseWriter, r *http.Request, id openapi_types.UUID, imageId openapi_types.UUID) {
+	var request UpdateProductImageRequestObject
+
+	request.Id = id
+	request.ImageId = imageId
+
+	var body UpdateProductImageJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateProductImage(ctx, request.(UpdateProductImageRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateProductImage")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateProductImageResponseObject); ok {
+		if err := validResponse.VisitUpdateProductImageResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListVariants operation middleware
 func (sh *strictHandler) ListVariants(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
 	var request ListVariantsRequestObject
@@ -5522,6 +7959,175 @@ func (sh *strictHandler) CreateVariant(w http.ResponseWriter, r *http.Request, i
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(CreateVariantResponseObject); ok {
 		if err := validResponse.VisitCreateVariantResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListPurchases operation middleware
+func (sh *strictHandler) ListPurchases(w http.ResponseWriter, r *http.Request, params ListPurchasesParams) {
+	var request ListPurchasesRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListPurchases(ctx, request.(ListPurchasesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListPurchases")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListPurchasesResponseObject); ok {
+		if err := validResponse.VisitListPurchasesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreatePurchase operation middleware
+func (sh *strictHandler) CreatePurchase(w http.ResponseWriter, r *http.Request) {
+	var request CreatePurchaseRequestObject
+
+	var body CreatePurchaseJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreatePurchase(ctx, request.(CreatePurchaseRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreatePurchase")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreatePurchaseResponseObject); ok {
+		if err := validResponse.VisitCreatePurchaseResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetPurchase operation middleware
+func (sh *strictHandler) GetPurchase(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	var request GetPurchaseRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetPurchase(ctx, request.(GetPurchaseRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetPurchase")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetPurchaseResponseObject); ok {
+		if err := validResponse.VisitGetPurchaseResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdatePurchase operation middleware
+func (sh *strictHandler) UpdatePurchase(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	var request UpdatePurchaseRequestObject
+
+	request.Id = id
+
+	var body UpdatePurchaseJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdatePurchase(ctx, request.(UpdatePurchaseRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdatePurchase")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdatePurchaseResponseObject); ok {
+		if err := validResponse.VisitUpdatePurchaseResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CancelPurchase operation middleware
+func (sh *strictHandler) CancelPurchase(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	var request CancelPurchaseRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CancelPurchase(ctx, request.(CancelPurchaseRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CancelPurchase")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CancelPurchaseResponseObject); ok {
+		if err := validResponse.VisitCancelPurchaseResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ReceivePurchase operation middleware
+func (sh *strictHandler) ReceivePurchase(w http.ResponseWriter, r *http.Request, id openapi_types.UUID, params ReceivePurchaseParams) {
+	var request ReceivePurchaseRequestObject
+
+	request.Id = id
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ReceivePurchase(ctx, request.(ReceivePurchaseRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ReceivePurchase")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ReceivePurchaseResponseObject); ok {
+		if err := validResponse.VisitReceivePurchaseResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -5724,6 +8330,290 @@ func (sh *strictHandler) SetStaffPassword(w http.ResponseWriter, r *http.Request
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SetStaffPasswordResponseObject); ok {
 		if err := validResponse.VisitSetStaffPasswordResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateStockAdjustment operation middleware
+func (sh *strictHandler) CreateStockAdjustment(w http.ResponseWriter, r *http.Request, params CreateStockAdjustmentParams) {
+	var request CreateStockAdjustmentRequestObject
+
+	request.Params = params
+
+	var body CreateStockAdjustmentJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateStockAdjustment(ctx, request.(CreateStockAdjustmentRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateStockAdjustment")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateStockAdjustmentResponseObject); ok {
+		if err := validResponse.VisitCreateStockAdjustmentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListStockLevels operation middleware
+func (sh *strictHandler) ListStockLevels(w http.ResponseWriter, r *http.Request, params ListStockLevelsParams) {
+	var request ListStockLevelsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListStockLevels(ctx, request.(ListStockLevelsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListStockLevels")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListStockLevelsResponseObject); ok {
+		if err := validResponse.VisitListStockLevelsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListLowStock operation middleware
+func (sh *strictHandler) ListLowStock(w http.ResponseWriter, r *http.Request, params ListLowStockParams) {
+	var request ListLowStockRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListLowStock(ctx, request.(ListLowStockRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListLowStock")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListLowStockResponseObject); ok {
+		if err := validResponse.VisitListLowStockResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListStockMovements operation middleware
+func (sh *strictHandler) ListStockMovements(w http.ResponseWriter, r *http.Request, params ListStockMovementsParams) {
+	var request ListStockMovementsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListStockMovements(ctx, request.(ListStockMovementsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListStockMovements")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListStockMovementsResponseObject); ok {
+		if err := validResponse.VisitListStockMovementsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateStockTransfer operation middleware
+func (sh *strictHandler) CreateStockTransfer(w http.ResponseWriter, r *http.Request) {
+	var request CreateStockTransferRequestObject
+
+	var body CreateStockTransferJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateStockTransfer(ctx, request.(CreateStockTransferRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateStockTransfer")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateStockTransferResponseObject); ok {
+		if err := validResponse.VisitCreateStockTransferResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListSuppliers operation middleware
+func (sh *strictHandler) ListSuppliers(w http.ResponseWriter, r *http.Request, params ListSuppliersParams) {
+	var request ListSuppliersRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListSuppliers(ctx, request.(ListSuppliersRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListSuppliers")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListSuppliersResponseObject); ok {
+		if err := validResponse.VisitListSuppliersResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateSupplier operation middleware
+func (sh *strictHandler) CreateSupplier(w http.ResponseWriter, r *http.Request) {
+	var request CreateSupplierRequestObject
+
+	var body CreateSupplierJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateSupplier(ctx, request.(CreateSupplierRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateSupplier")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateSupplierResponseObject); ok {
+		if err := validResponse.VisitCreateSupplierResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteSupplier operation middleware
+func (sh *strictHandler) DeleteSupplier(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	var request DeleteSupplierRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteSupplier(ctx, request.(DeleteSupplierRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteSupplier")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteSupplierResponseObject); ok {
+		if err := validResponse.VisitDeleteSupplierResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetSupplier operation middleware
+func (sh *strictHandler) GetSupplier(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	var request GetSupplierRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetSupplier(ctx, request.(GetSupplierRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetSupplier")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetSupplierResponseObject); ok {
+		if err := validResponse.VisitGetSupplierResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateSupplier operation middleware
+func (sh *strictHandler) UpdateSupplier(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	var request UpdateSupplierRequestObject
+
+	request.Id = id
+
+	var body UpdateSupplierJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateSupplier(ctx, request.(UpdateSupplierRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateSupplier")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateSupplierResponseObject); ok {
+		if err := validResponse.VisitUpdateSupplierResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
