@@ -10,18 +10,13 @@ package stock
 // cashier-reachable purchases code path to separately filter cost out of
 // (mirrors ListStockMovements' own note on this).
 //
-// productName is resolved by locale (contracts/openapi.yaml's PurchaseItem),
-// but this package has no way to read the caller's Accept-Language: that
-// header is stashed on the request context only by
-// catalog.AcceptLanguageMiddleware, under a context key private to the
-// catalog package (internal/catalog/locale.go) — internal/stock cannot
-// read it without either importing catalog (this task's file scope does
-// not include catalog) or adding a second, duplicate middleware to
-// httpx.NewRouter (out of scope: the task limits router.go changes to
-// wiring crm the same way stock was wired). Every productName in this
-// file therefore resolves in the shop's own default_locale
-// (shops.default_locale) rather than the caller's Accept-Language —
-// flagged in the T4 report as a decision, not a silent guess.
+// productName is resolved by the caller's locale (contracts/openapi.yaml's
+// PurchaseItem, requested -> uz -> any, same as Product.name, ADR-012):
+// catalog.AcceptLanguageFromContext/catalog.ResolveLocale (exported for
+// exactly this, internal/catalog/locale.go) read the Accept-Language
+// httpx.NewRouter's existing catalog.AcceptLanguageMiddleware already
+// stashes on every request's context — catalog does not import stock, so
+// this is not a cycle.
 
 import (
 	"context"
@@ -38,6 +33,7 @@ import (
 	"github.com/Sulton-Ali/savdo/api/internal/apierr"
 	"github.com/Sulton-Ali/savdo/api/internal/audit"
 	"github.com/Sulton-Ali/savdo/api/internal/auth"
+	"github.com/Sulton-Ali/savdo/api/internal/catalog"
 	"github.com/Sulton-Ali/savdo/api/internal/db"
 	"github.com/Sulton-Ali/savdo/api/internal/money"
 	"github.com/Sulton-Ali/savdo/api/internal/pagination"
@@ -58,6 +54,13 @@ func computeLineTotal(qty, unitCost decimal.Decimal) decimal.Decimal {
 	return qty.Mul(unitCost).Round(2)
 }
 
+// maxPurchaseItems bounds PurchaseCreate.items/PurchasePatch.items
+// (contracts/openapi.yaml `maxItems: 200`, MINOR 8, T4 review) — enforced
+// here too since the strict server does not check JSON Schema array
+// bounds at runtime (the same reasoning as httpx.ValidateIdempotencyKey's
+// own doc comment on maxLength).
+const maxPurchaseItems = 200
+
 // validatePurchaseItems checks every item of a PurchaseCreate/PurchasePatch
 // against the shop: each variantId must belong to the shop (404 "variant",
 // returned immediately — a different error class from the field-level 400s
@@ -67,10 +70,16 @@ func computeLineTotal(qty, unitCost decimal.Decimal) decimal.Decimal {
 // rejects negative amounts) — field errors are collected across every item
 // and reported together as one 400 VALIDATION_FAILED, `items[i].qty` /
 // `items[i].unitCost` naming, matching catalog.prepareVariants' own
-// `variants[i].<field>` convention.
+// `variants[i].<field>` convention. A variantId repeated across two items
+// of the same purchase is also rejected (`items`: invalid, MINOR 3, T4
+// review) — a purchase with two lines for the same variant is not a
+// documented case any docs/04-DATA-MODEL.md § 3 read describes, and
+// silently accepting it would let ReceivePurchaseTx write two separate
+// purchase_in movements for what a caller almost certainly meant as one.
 func (h *Handler) validatePurchaseItems(ctx context.Context, shopID uuid.UUID, in []gen.PurchaseItemCreate) ([]purchaseItemInput, error) {
 	items := make([]purchaseItemInput, len(in))
 	fields := map[string]string{}
+	seenVariants := make(map[uuid.UUID]bool, len(in))
 	for i, it := range in {
 		if _, err := h.svc.q.GetVariantForStaff(ctx, db.GetVariantForStaffParams{ShopID: shopID, ID: it.VariantId}); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
@@ -78,6 +87,11 @@ func (h *Handler) validatePurchaseItems(ctx context.Context, shopID uuid.UUID, i
 			}
 			return nil, fmt.Errorf("stock: get variant: %w", err)
 		}
+
+		if seenVariants[it.VariantId] {
+			fields["items"] = "invalid"
+		}
+		seenVariants[it.VariantId] = true
 
 		qty, ok := parseQty(it.Qty)
 		if !ok || !qty.IsPositive() {
@@ -96,32 +110,29 @@ func (h *Handler) validatePurchaseItems(ctx context.Context, shopID uuid.UUID, i
 	return items, nil
 }
 
-// defaultLocaleFor reads shopID's default_locale — every purchase
-// response's productName resolves against it (see this file's own doc
-// comment on why the caller's Accept-Language is unreachable here).
-func defaultLocaleFor(ctx context.Context, q *db.Queries, shopID uuid.UUID) (string, error) {
+// requestLocaleFor resolves the locale a purchase response's productName
+// fields render in: the caller's `Accept-Language` (catalog.ResolveLocale,
+// requested -> uz -> any) falling back to shopID's own default_locale,
+// exactly like catalog's own resolveLocale — see this file's own doc
+// comment.
+func requestLocaleFor(ctx context.Context, q *db.Queries, shopID uuid.UUID) (string, error) {
 	shopRow, err := q.GetShop(ctx, shopID)
 	if err != nil {
 		return "", fmt.Errorf("stock: get shop: %w", err)
 	}
-	return shopRow.DefaultLocale, nil
+	return catalog.ResolveLocale(ctx, shopRow.DefaultLocale), nil
 }
 
-// loadPurchaseWithItems builds the full wire Purchase for p: its items
-// (each resolved to productName/variantLabel/sku via
-// ListPurchaseItemsWithLabels) and totalCost (summed from them —
-// toGenPurchase's own doc comment on why the stored column is never
-// trusted here). q is the caller's *db.Queries — h.svc.q for a plain read
-// (Get/List/Create/Update, after their own transaction already committed)
-// or a qtx still inside the caller's transaction (ReceivePurchaseTx).
-func (h *Handler) loadPurchaseWithItems(ctx context.Context, q *db.Queries, shopID uuid.UUID, locale string, p db.Purchase) (gen.Purchase, error) {
-	rows, err := q.ListPurchaseItemsWithLabels(ctx, db.ListPurchaseItemsWithLabelsParams{Locale: locale, ShopID: shopID, PurchaseID: p.ID})
+// purchaseItemsAndTotals loads purchaseID's items (resolved to
+// productName/variantLabel/sku via ListPurchaseItemsWithLabels) and each
+// one's line_total, given defs already fetched by the caller — split out
+// of loadPurchaseWithItems (NIT 10, T4 review) so ListPurchases can fetch
+// the shop's attribute definitions once for the whole page instead of once
+// per purchase.
+func purchaseItemsAndTotals(ctx context.Context, q *db.Queries, shopID uuid.UUID, locale string, purchaseID uuid.UUID, defs []db.ListAttributeDefinitionsRow) ([]gen.PurchaseItem, []decimal.Decimal, error) {
+	rows, err := q.ListPurchaseItemsWithLabels(ctx, db.ListPurchaseItemsWithLabelsParams{Locale: locale, ShopID: shopID, PurchaseID: purchaseID})
 	if err != nil {
-		return gen.Purchase{}, fmt.Errorf("stock: list purchase items with labels: %w", err)
-	}
-	defs, err := q.ListAttributeDefinitions(ctx, db.ListAttributeDefinitionsParams{Locale: locale, ShopID: shopID})
-	if err != nil {
-		return gen.Purchase{}, fmt.Errorf("stock: list attribute definitions: %w", err)
+		return nil, nil, fmt.Errorf("stock: list purchase items with labels: %w", err)
 	}
 
 	items := make([]gen.PurchaseItem, len(rows))
@@ -129,19 +140,41 @@ func (h *Handler) loadPurchaseWithItems(ctx context.Context, q *db.Queries, shop
 	for i, r := range rows {
 		label, err := variantLabel(r.VariantSku, r.VariantID, r.VariantAttributes, defs)
 		if err != nil {
-			return gen.Purchase{}, err
+			return nil, nil, err
 		}
 		g, err := toGenPurchaseItem(r, label)
 		if err != nil {
-			return gen.Purchase{}, err
+			return nil, nil, err
 		}
 		items[i] = g
 
 		lineTotal, err := money.FromNumeric(r.LineTotal)
 		if err != nil {
-			return gen.Purchase{}, fmt.Errorf("stock: purchase item line total: %w", err)
+			return nil, nil, fmt.Errorf("stock: purchase item line total: %w", err)
 		}
 		totals[i] = lineTotal
+	}
+	return items, totals, nil
+}
+
+// loadPurchaseWithItems builds the full wire Purchase for p: its items and
+// totalCost (summed from them — toGenPurchase's own doc comment on why the
+// stored column is never trusted here), fetching the shop's attribute
+// definitions itself — the single-purchase case (Get/Create/Update/
+// Receive/Cancel all return exactly one Purchase, so one extra query per
+// call is the right trade-off; ListPurchases fetches defs once for the
+// whole page and calls purchaseItemsAndTotals directly instead, see its
+// own doc comment). q is the caller's *db.Queries — h.svc.q for a plain
+// read (after its own transaction already committed) or a qtx still
+// inside the caller's transaction (ReceivePurchaseTx).
+func (h *Handler) loadPurchaseWithItems(ctx context.Context, q *db.Queries, shopID uuid.UUID, locale string, p db.Purchase) (gen.Purchase, error) {
+	defs, err := q.ListAttributeDefinitions(ctx, db.ListAttributeDefinitionsParams{Locale: locale, ShopID: shopID})
+	if err != nil {
+		return gen.Purchase{}, fmt.Errorf("stock: list attribute definitions: %w", err)
+	}
+	items, totals, err := purchaseItemsAndTotals(ctx, q, shopID, locale, p.ID, defs)
+	if err != nil {
+		return gen.Purchase{}, err
 	}
 	return toGenPurchase(p, items, totals), nil
 }
@@ -177,6 +210,9 @@ func (h *Handler) CreatePurchase(ctx context.Context, req gen.CreatePurchaseRequ
 	if len(body.Items) == 0 {
 		return nil, apierr.Validation(map[string]string{"items": "required"})
 	}
+	if len(body.Items) > maxPurchaseItems {
+		return nil, apierr.Validation(map[string]string{"items": "too_long"})
+	}
 	items, err := h.validatePurchaseItems(ctx, authCtx.ShopID, body.Items)
 	if err != nil {
 		return nil, err
@@ -208,6 +244,9 @@ func (h *Handler) CreatePurchase(ctx context.Context, req gen.CreatePurchaseRequ
 			ID: newID(), ShopID: authCtx.ShopID, PurchaseID: created.ID, VariantID: it.variantID,
 			Qty: money.ToNumeric(it.qty), UnitCost: money.ToNumeric(it.unitCost), LineTotal: money.ToNumeric(it.lineTotal),
 		}); err != nil {
+			if apiErr, ok := mapOutOfRange(err); ok {
+				return nil, apiErr
+			}
 			return nil, fmt.Errorf("stock: create purchase item: %w", err)
 		}
 	}
@@ -216,7 +255,7 @@ func (h *Handler) CreatePurchase(ctx context.Context, req gen.CreatePurchaseRequ
 		return nil, fmt.Errorf("stock: commit create purchase: %w", err)
 	}
 
-	locale, err := defaultLocaleFor(ctx, h.svc.q, authCtx.ShopID)
+	locale, err := requestLocaleFor(ctx, h.svc.q, authCtx.ShopID)
 	if err != nil {
 		return nil, err
 	}
@@ -245,7 +284,7 @@ func (h *Handler) GetPurchase(ctx context.Context, req gen.GetPurchaseRequestObj
 		}
 		return nil, fmt.Errorf("stock: get purchase: %w", err)
 	}
-	locale, err := defaultLocaleFor(ctx, h.svc.q, authCtx.ShopID)
+	locale, err := requestLocaleFor(ctx, h.svc.q, authCtx.ShopID)
 	if err != nil {
 		return nil, err
 	}
@@ -290,17 +329,25 @@ func (h *Handler) ListPurchases(ctx context.Context, req gen.ListPurchasesReques
 	}
 
 	items, nextCursor := paginatePurchases(rows, limit)
-	locale, err := defaultLocaleFor(ctx, h.svc.q, authCtx.ShopID)
+	locale, err := requestLocaleFor(ctx, h.svc.q, authCtx.ShopID)
 	if err != nil {
 		return nil, err
 	}
+	// Fetched once for the whole page, not once per purchase (NIT 10, T4
+	// review) — every item on every purchase resolves its variantLabel
+	// against the same shop-wide attribute-definition order regardless of
+	// which purchase it belongs to.
+	defs, err := h.svc.q.ListAttributeDefinitions(ctx, db.ListAttributeDefinitionsParams{Locale: locale, ShopID: authCtx.ShopID})
+	if err != nil {
+		return nil, fmt.Errorf("stock: list attribute definitions: %w", err)
+	}
 	genItems := make([]gen.Purchase, len(items))
 	for i, r := range items {
-		g, err := h.loadPurchaseWithItems(ctx, h.svc.q, authCtx.ShopID, locale, r)
+		purchaseItems, totals, err := purchaseItemsAndTotals(ctx, h.svc.q, authCtx.ShopID, locale, r.ID, defs)
 		if err != nil {
 			return nil, err
 		}
-		genItems[i] = g
+		genItems[i] = toGenPurchase(r, purchaseItems, totals)
 	}
 	return gen.ListPurchases200JSONResponse(gen.PurchaseList{Items: genItems, NextCursor: nullableString(nextCursor)}), nil
 }
@@ -343,6 +390,9 @@ func (h *Handler) UpdatePurchase(ctx context.Context, req gen.UpdatePurchaseRequ
 	if replaceItems {
 		if len(*body.Items) == 0 {
 			return nil, apierr.Validation(map[string]string{"items": "required"})
+		}
+		if len(*body.Items) > maxPurchaseItems {
+			return nil, apierr.Validation(map[string]string{"items": "too_long"})
 		}
 		var err error
 		newItems, err = h.validatePurchaseItems(ctx, authCtx.ShopID, *body.Items)
@@ -395,6 +445,9 @@ func (h *Handler) UpdatePurchase(ctx context.Context, req gen.UpdatePurchaseRequ
 				ID: newID(), ShopID: authCtx.ShopID, PurchaseID: req.Id, VariantID: it.variantID,
 				Qty: money.ToNumeric(it.qty), UnitCost: money.ToNumeric(it.unitCost), LineTotal: money.ToNumeric(it.lineTotal),
 			}); err != nil {
+				if apiErr, ok := mapOutOfRange(err); ok {
+					return nil, apiErr
+				}
 				return nil, fmt.Errorf("stock: create purchase item: %w", err)
 			}
 		}
@@ -404,7 +457,7 @@ func (h *Handler) UpdatePurchase(ctx context.Context, req gen.UpdatePurchaseRequ
 		return nil, fmt.Errorf("stock: commit update purchase: %w", err)
 	}
 
-	locale, err := defaultLocaleFor(ctx, h.svc.q, authCtx.ShopID)
+	locale, err := requestLocaleFor(ctx, h.svc.q, authCtx.ShopID)
 	if err != nil {
 		return nil, err
 	}
@@ -528,6 +581,9 @@ func (h *Handler) ReceivePurchaseTx(ctx context.Context, qtx *db.Queries, id uui
 
 	received, err := qtx.SetPurchaseReceived(ctx, db.SetPurchaseReceivedParams{ShopID: authCtx.ShopID, ID: id, TotalCost: money.ToNumeric(total)})
 	if err != nil {
+		if apiErr, ok := mapOutOfRange(err); ok {
+			return gen.Purchase{}, apiErr
+		}
 		return gen.Purchase{}, fmt.Errorf("stock: set purchase received: %w", err)
 	}
 
@@ -546,7 +602,7 @@ func (h *Handler) ReceivePurchaseTx(ctx context.Context, qtx *db.Queries, id uui
 		return gen.Purchase{}, fmt.Errorf("stock: write audit: %w", err)
 	}
 
-	resp, err := h.loadPurchaseWithItems(ctx, qtx, authCtx.ShopID, shopRow.DefaultLocale, received)
+	resp, err := h.loadPurchaseWithItems(ctx, qtx, authCtx.ShopID, catalog.ResolveLocale(ctx, shopRow.DefaultLocale), received)
 	if err != nil {
 		return gen.Purchase{}, err
 	}
@@ -641,10 +697,13 @@ func (h *Handler) CancelPurchase(ctx context.Context, req gen.CancelPurchaseRequ
 	}
 
 	if err := tx.Commit(ctx); err != nil {
+		if isDeadlock(err) {
+			return nil, errDeadlock
+		}
 		return nil, fmt.Errorf("stock: commit cancel purchase: %w", err)
 	}
 
-	locale, err := defaultLocaleFor(ctx, h.svc.q, authCtx.ShopID)
+	locale, err := requestLocaleFor(ctx, h.svc.q, authCtx.ShopID)
 	if err != nil {
 		return nil, err
 	}
