@@ -166,9 +166,9 @@ func runSeed(args []string) error {
 	if err != nil {
 		return fmt.Errorf("seed catalog: %w", err)
 	}
-	fmt.Printf("catalog: %d units, %d attribute definitions, %d categories, %d products, %d variants, %d images created\n",
+	fmt.Printf("catalog: %d units, %d attribute definitions, %d categories, %d products, %d variants, %d images created, %d images repaired\n",
 		catalogReport.UnitsCreated, catalogReport.AttributesCreated, catalogReport.CategoriesCreated,
-		catalogReport.ProductsCreated, catalogReport.VariantsCreated, catalogReport.ImagesCreated)
+		catalogReport.ProductsCreated, catalogReport.VariantsCreated, catalogReport.ImagesCreated, catalogReport.ImagesRepaired)
 	return nil
 }
 

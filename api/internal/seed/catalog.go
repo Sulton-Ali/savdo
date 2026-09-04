@@ -23,9 +23,10 @@ import (
 const seedLocale = "uz"
 
 // CatalogReport summarizes what Catalog did, for the CLI's summary
-// line and for tests. It counts only what was newly created on this
-// call — a second call against an already-seeded shop reports every
-// field as 0.
+// line and for tests. It counts only what was newly created (or, for
+// ImagesRepaired, attached to a product that already existed but had
+// none) on this call — a second call against a fully-seeded shop
+// reports every field as 0.
 type CatalogReport struct {
 	UnitsCreated      int
 	AttributesCreated int
@@ -33,6 +34,14 @@ type CatalogReport struct {
 	ProductsCreated   int
 	VariantsCreated   int
 	ImagesCreated     int
+
+	// ImagesRepaired counts images attached to a product that already
+	// existed (so seedProducts skipped creating it) but had zero images
+	// on file — e.g. a product created some other way, or one whose
+	// images were lost from disk without the database rows following.
+	// Its variants are never touched: an existing product's variant set
+	// is left exactly as it is, only a missing image set is repaired.
+	ImagesRepaired int
 }
 
 // catalogAuthContext stands in for auth.Middleware: every catalog write
@@ -62,7 +71,12 @@ func catalogAuthContext(ctx context.Context, shopID, ownerID uuid.UUID) context.
 // and everything else is looked up first and skipped if it already
 // exists — an attribute definition by code, a category by slug, a
 // product by slug — so a second call against the same database creates
-// nothing new and reports every count as 0.
+// nothing new and reports every count as 0. The one exception is a
+// product's images: an existing product with zero images on file (its
+// variants are never touched) gets its spec's images attached anyway,
+// counted as CatalogReport.ImagesRepaired rather than ImagesCreated
+// (seedProducts' repairProductImages) — so a product that exists but
+// somehow never got its images still ends up with them.
 func Catalog(ctx context.Context, q *db.Queries, catalogHandler *catalog.Handler, mediaSvc *media.Service, shopID, ownerID uuid.UUID) (CatalogReport, error) {
 	authCtx := catalogAuthContext(ctx, shopID, ownerID)
 
@@ -86,13 +100,14 @@ func Catalog(ctx context.Context, q *db.Queries, catalogHandler *catalog.Handler
 	}
 	report.CategoriesCreated = categoriesCreated
 
-	productsCreated, variantsCreated, imagesCreated, err := seedProducts(authCtx, q, shopID, ownerID, catalogHandler, mediaSvc, unitIDs, categoryIDs)
+	productsCreated, variantsCreated, imagesCreated, imagesRepaired, err := seedProducts(authCtx, q, shopID, ownerID, catalogHandler, mediaSvc, unitIDs, categoryIDs)
 	if err != nil {
 		return CatalogReport{}, fmt.Errorf("seed catalog: products: %w", err)
 	}
 	report.ProductsCreated = productsCreated
 	report.VariantsCreated = variantsCreated
 	report.ImagesCreated = imagesCreated
+	report.ImagesRepaired = imagesRepaired
 
 	return report, nil
 }
@@ -216,67 +231,117 @@ func seedCategories(ctx context.Context, q *db.Queries, shopID uuid.UUID, h *cat
 	return ids, created, nil
 }
 
-// existingProductSlugs lists shopID's current product slugs (active and
-// inactive alike), for seedProducts' skip-if-exists check. Products are
-// few enough (dozens, not thousands) that one unpaginated
+// existingProducts maps shopID's current product slugs (active and
+// inactive alike) to their id, for seedProducts' skip-if-exists check and
+// for repairing a pre-existing product's missing images. Products are few
+// enough (dozens, not thousands) that one unpaginated
 // ListProductsForStaff call covers the whole catalogue.
-func existingProductSlugs(ctx context.Context, q *db.Queries, shopID uuid.UUID) (map[string]bool, error) {
+func existingProducts(ctx context.Context, q *db.Queries, shopID uuid.UUID) (map[string]uuid.UUID, error) {
 	rows, err := q.ListProductsForStaff(ctx, db.ListProductsForStaffParams{
 		Locale: seedLocale, ShopID: shopID, IncludeInactive: true, Limit: 1000,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list products: %w", err)
 	}
-	slugs := make(map[string]bool, len(rows))
+	bySlug := make(map[string]uuid.UUID, len(rows))
 	for _, r := range rows {
-		slugs[r.Slug] = true
+		bySlug[r.Slug] = r.ID
 	}
-	return slugs, nil
+	return bySlug, nil
 }
 
 // seedProducts creates whichever of productSpecs don't already exist for
 // shopID (matched by slug), each through one catalogHandler.CreateProduct
 // call carrying its variants, then attaches its generated placeholder
 // images through mediaSvc.Upload + catalogHandler.AddProductImage. A
-// product that already exists is skipped whole — its variants and
-// images are never re-checked individually, since CreateProduct writes
-// a product with all of its variants in one transaction (products.go)
-// and this function only ever calls it for a genuinely new slug.
-func seedProducts(ctx context.Context, q *db.Queries, shopID, ownerID uuid.UUID, h *catalog.Handler, mediaSvc *media.Service, unitIDs, categoryIDs map[string]uuid.UUID) (productsCreated, variantsCreated, imagesCreated int, err error) {
-	existingSlugs, err := existingProductSlugs(ctx, q, shopID)
+// product that already exists is never re-created and its variants are
+// never touched, but if it has zero images on file — e.g. it was created
+// some other way, or its images were lost from disk without the database
+// rows following — its spec's images are attached to it anyway
+// (repairProductImages), counted separately as ImagesRepaired.
+func seedProducts(ctx context.Context, q *db.Queries, shopID, ownerID uuid.UUID, h *catalog.Handler, mediaSvc *media.Service, unitIDs, categoryIDs map[string]uuid.UUID) (productsCreated, variantsCreated, imagesCreated, imagesRepaired int, err error) {
+	existing, err := existingProducts(ctx, q, shopID)
 	if err != nil {
-		return 0, 0, 0, err
+		return 0, 0, 0, 0, err
 	}
 
 	pcsUnitID, ok := unitIDs["pcs"]
 	if !ok {
-		return 0, 0, 0, fmt.Errorf("unit %q was not seeded", "pcs")
+		return 0, 0, 0, 0, fmt.Errorf("unit %q was not seeded", "pcs")
 	}
 
 	for _, spec := range productSpecs {
-		if existingSlugs[spec.slug] {
+		if existingID, ok := existing[spec.slug]; ok {
+			n, err := repairProductImages(ctx, q, h, mediaSvc, shopID, ownerID, spec, existingID)
+			if err != nil {
+				return 0, 0, 0, 0, err
+			}
+			imagesRepaired += n
 			continue
 		}
 
 		categoryID, ok := categoryIDs[spec.categorySlug]
 		if !ok {
-			return 0, 0, 0, fmt.Errorf("product %q: category %q was not seeded", spec.slug, spec.categorySlug)
+			return 0, 0, 0, 0, fmt.Errorf("product %q: category %q was not seeded", spec.slug, spec.categorySlug)
 		}
 
 		created, err := createProduct(ctx, h, spec, categoryID, pcsUnitID)
 		if err != nil {
-			return 0, 0, 0, err
+			return 0, 0, 0, 0, err
 		}
 		productsCreated++
 		variantsCreated += len(spec.variants)
 
-		n, err := attachImages(ctx, h, mediaSvc, shopID, ownerID, spec, created)
+		variantIDs := responseVariantIDs(created)
+		n, err := attachImages(ctx, h, mediaSvc, shopID, ownerID, spec, created.Id, variantIDs)
 		if err != nil {
-			return 0, 0, 0, err
+			return 0, 0, 0, 0, err
 		}
 		imagesCreated += n
 	}
-	return productsCreated, variantsCreated, imagesCreated, nil
+	return productsCreated, variantsCreated, imagesCreated, imagesRepaired, nil
+}
+
+// repairProductImages attaches spec's images to productID — a product
+// seedProducts found already existing — only when it currently has none.
+// A product with at least one image already is left alone: this is a
+// repair for a product that fell through without ever getting the images
+// its own spec calls for, not a way to force every existing product back
+// to exactly spec.images on every run.
+func repairProductImages(ctx context.Context, q *db.Queries, h *catalog.Handler, mediaSvc *media.Service, shopID, ownerID uuid.UUID, spec productSpec, productID uuid.UUID) (int, error) {
+	images, err := q.ListProductImages(ctx, db.ListProductImagesParams{ShopID: shopID, ProductID: productID})
+	if err != nil {
+		return 0, fmt.Errorf("list product images for %q: %w", spec.slug, err)
+	}
+	if len(images) > 0 {
+		return 0, nil
+	}
+
+	variants, err := q.ListVariantsForStaff(ctx, db.ListVariantsForStaffParams{ShopID: shopID, ProductID: productID})
+	if err != nil {
+		return 0, fmt.Errorf("list variants for %q: %w", spec.slug, err)
+	}
+	variantIDs := make([]uuid.UUID, len(variants))
+	for i, v := range variants {
+		variantIDs[i] = v.ID
+	}
+
+	return attachImages(ctx, h, mediaSvc, shopID, ownerID, spec, productID, variantIDs)
+}
+
+// responseVariantIDs extracts a just-created product's variant ids, in the
+// order CreateProduct returned them (buildFullProduct's own
+// ListVariantsForStaff-backed ordering — see attachImages/imageSpec.
+// variantIdx), for attachImages to tie a variant-specific image to.
+func responseVariantIDs(product gen.CreateProduct201JSONResponse) []uuid.UUID {
+	if product.Variants == nil {
+		return nil
+	}
+	ids := make([]uuid.UUID, len(*product.Variants))
+	for i, v := range *product.Variants {
+		ids[i] = v.Id
+	}
+	return ids
 }
 
 // createProduct builds and sends the CreateProduct request for spec,
@@ -333,17 +398,14 @@ func createProduct(ctx context.Context, h *catalog.Handler, spec productSpec, ca
 
 // attachImages generates spec.images' placeholder PNGs, uploads each
 // through mediaSvc.Upload (the media pipeline: validate, derive WebP
-// thumb/card/full, record a media_files row) and attaches it to product
-// via catalogHandler.AddProductImage, tying it to a variant when the
-// imageSpec names one.
-func attachImages(ctx context.Context, h *catalog.Handler, mediaSvc *media.Service, shopID, ownerID uuid.UUID, spec productSpec, product gen.CreateProduct201JSONResponse) (int, error) {
-	var variantIDs []uuid.UUID
-	if product.Variants != nil {
-		for _, v := range *product.Variants {
-			variantIDs = append(variantIDs, v.Id)
-		}
-	}
-
+// thumb/card/full, record a media_files row) and attaches it to productID
+// via catalogHandler.AddProductImage, tying it to variantIDs[img.
+// variantIdx] when the imageSpec names one. variantIDs must be in the
+// product's own variant-creation order (spec.variants' order) for that
+// tagging to land on the intended variant — both callers (createProduct's
+// response and repairProductImages' ListVariantsForStaff) already
+// resolve it that way.
+func attachImages(ctx context.Context, h *catalog.Handler, mediaSvc *media.Service, shopID, ownerID uuid.UUID, spec productSpec, productID uuid.UUID, variantIDs []uuid.UUID) (int, error) {
 	count := 0
 	for _, img := range spec.images {
 		data, err := generatePlaceholderImage(img.bgHex, img.label)
@@ -361,7 +423,7 @@ func attachImages(ctx context.Context, h *catalog.Handler, mediaSvc *media.Servi
 			vid := variantIDs[img.variantIdx]
 			imgBody.VariantId = &vid
 		}
-		if _, err := h.AddProductImage(ctx, gen.AddProductImageRequestObject{Id: product.Id, Body: &imgBody}); err != nil {
+		if _, err := h.AddProductImage(ctx, gen.AddProductImageRequestObject{Id: productID, Body: &imgBody}); err != nil {
 			return count, fmt.Errorf("add product image for %q: %w", spec.slug, err)
 		}
 		count++
