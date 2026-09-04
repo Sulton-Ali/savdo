@@ -86,7 +86,7 @@ func run() error {
 	// correctness requirement — SweepTemp logs and continues past any
 	// single file it can't remove — so it never blocks startup.
 	mediaStorage.SweepTemp(time.Hour)
-	mediaSvc := media.NewService(queries, mediaStorage, cfg.MediaBaseURL, cfg.MediaMaxBytes, cfg.MediaConcurrency)
+	mediaSvc := media.NewService(queries, mediaStorage, cfg.MediaBaseURL, cfg.MediaMaxBytes, cfg.MediaConcurrency, cfg.MediaQueue)
 	var devMedia http.Handler
 	if cfg.Env != "prod" {
 		devMedia = media.DevHandler(mediaStorage)

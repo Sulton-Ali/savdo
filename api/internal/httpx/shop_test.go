@@ -67,7 +67,7 @@ func newShopTestFixture(t *testing.T) shopTestFixture {
 	}
 	authSvc := auth.NewService(q, cfg, shopRow.ID)
 	shopSvc := shop.NewService(pool, q)
-	mediaSvc := media.NewService(q, nil, "/media", 10<<20, 2)
+	mediaSvc := media.NewService(q, nil, "/media", 10<<20, 2, 10)
 
 	return shopTestFixture{
 		router:        NewRouter(testLogger(), pool, authSvc, shopSvc, mediaSvc, nil),

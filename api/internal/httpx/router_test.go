@@ -43,7 +43,7 @@ func testShopService() *shop.Service {
 // tests that never exercise POST /media — a nil *db.Queries and a nil
 // Storage are never dereferenced in that case.
 func testMediaService() *media.Service {
-	return media.NewService(nil, nil, "/media", 10<<20, 2)
+	return media.NewService(nil, nil, "/media", 10<<20, 2, 10)
 }
 
 func TestHealthz(t *testing.T) {

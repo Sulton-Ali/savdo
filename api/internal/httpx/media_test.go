@@ -83,7 +83,7 @@ func newMediaTestFixture(t *testing.T, maxBytes int64) mediaTestFixture {
 	if err != nil {
 		t.Fatalf("NewLocalStorage: %v", err)
 	}
-	mediaSvc := media.NewService(q, storage, "/media", maxBytes, 2)
+	mediaSvc := media.NewService(q, storage, "/media", maxBytes, 2, 10)
 
 	return mediaTestFixture{
 		router:          NewRouter(testLogger(), pool, authSvc, shopSvc, mediaSvc, media.DevHandler(storage)),
@@ -169,8 +169,10 @@ func TestUploadMedia_ownerSucceedsAndDevServingWorks(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if body.Mime != "image/png" {
-		t.Errorf("Mime = %q, want image/png", body.Mime)
+	// Review B follow-up MINOR (after O-16): the response reflects the
+	// "_full" derivative actually served, not the uploaded PNG.
+	if body.Mime != "image/webp" {
+		t.Errorf("Mime = %q, want image/webp", body.Mime)
 	}
 	if body.Width != 300 || body.Height != 200 {
 		t.Errorf("dimensions = %dx%d, want 300x200", body.Width, body.Height)
