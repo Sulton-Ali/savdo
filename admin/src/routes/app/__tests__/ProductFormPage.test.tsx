@@ -219,4 +219,68 @@ describe("ProductFormPage", () => {
       });
     });
   });
+
+  // T6a review MINOR: a 409 CONFLICT naming a real, mounted field (slug is a
+  // top-level Form.Item, unlike the nested translation fields) must still
+  // land as an inline field error.
+  it("maps a 409 CONFLICT on slug to the slug field", async () => {
+    mockGetByPath({
+      "/categories": { items: [] },
+      "/units": { items: [unit()] },
+    });
+    mockedApi.POST.mockResolvedValueOnce({
+      data: undefined,
+      error: { error: { code: "CONFLICT", details: { field: "slug" } } },
+      response: new Response(null, { status: 409 }),
+    } as never);
+
+    renderForm(undefined);
+
+    fireEvent.change(await screen.findByLabelText("Name"), {
+      target: { value: "T-Shirt" },
+    });
+    fireEvent.mouseDown(screen.getByLabelText("Unit"));
+    fireEvent.click(await screen.findByText("Pieces"));
+    fireEvent.click(screen.getByRole("tab", { name: "Prices" }));
+    fireEvent.change(await screen.findByLabelText("Base price"), {
+      target: { value: "100" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText("This value is already in use")).toBeTruthy();
+  });
+
+  // T6a review MINOR: a 409 CONFLICT naming a field with no matching
+  // mounted Form.Item — a flat "name" from a translation entry, which every
+  // locale here renders as a nested `["translations", locale, "name"]`
+  // path — must fall back to a page-level notification instead of being
+  // silently swallowed by `form.setFields` on a field nothing displays.
+  it("shows a page-level notification for a 409 CONFLICT on a field with no matching Form.Item", async () => {
+    mockGetByPath({
+      "/categories": { items: [] },
+      "/units": { items: [unit()] },
+    });
+    mockedApi.POST.mockResolvedValueOnce({
+      data: undefined,
+      error: { error: { code: "CONFLICT", details: { field: "name" } } },
+      response: new Response(null, { status: 409 }),
+    } as never);
+
+    renderForm(undefined);
+
+    fireEvent.change(await screen.findByLabelText("Name"), {
+      target: { value: "T-Shirt" },
+    });
+    fireEvent.mouseDown(screen.getByLabelText("Unit"));
+    fireEvent.click(await screen.findByText("Pieces"));
+    fireEvent.click(screen.getByRole("tab", { name: "Prices" }));
+    fireEvent.change(await screen.findByLabelText("Base price"), {
+      target: { value: "100" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText("Something went wrong. Please try again.")).toBeTruthy();
+  });
 });
