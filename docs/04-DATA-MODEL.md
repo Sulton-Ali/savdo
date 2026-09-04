@@ -105,16 +105,18 @@ movements. (kind `purchase_in`, negative qty, `ref_type = purchase_cancel`, D-51
 `total numeric(14,2)`, `note`, `completed_at`, `voided_at`, `voided_by`, `void_reason`.
 Unique `(shop_id, number)`. **Never updated after insert except the void columns.**
 
+**Rules (D-56 to D-59):** unit prices come from the catalogue (promo price when active), never from the client; the manual discount is a percent or a fixed sum recorded as `discount_amount`, capped at the subtotal; a void is allowed only on the sale's calendar day in the shop timezone; a return is a `return`-kind sale referencing `original_sale_id`, may be partial, never exceeds sold minus already returned per line, restores stock at the sale's location and refunds by the original payment method.
+
 **sale_items** — `sale_id`, `variant_id`, `qty numeric(12,3)`, `unit_price
 numeric(14,2)` (price at sale time, after promo), `unit_cost numeric(14,2)` (frozen for
 margin reports; **never returned to cashier or public**), `line_total`.
 
 **sale_payments** — `sale_id`, `method payment_method` (`cash|card|transfer`),
-`amount numeric(14,2)`. One row per sale in MVP (Q-07); the table shape allows splits.
+`amount numeric(14,2)`. One row per sale in MVP (D-54); the table shape allows splits.
 
 **discounts** — promotions beyond per-product promo price: `name`, `kind`
 (`percent|fixed`), `value`, `applies_to` (`sale|category|product`), `target_id`,
-`starts_at`, `ends_at`, `is_active`. Scope per Q-05.
+`starts_at`, `ends_at`, `is_active`. Post-MVP (D-60); not created in Phase 4.
 
 ## 5. CRM (`crm`)
 

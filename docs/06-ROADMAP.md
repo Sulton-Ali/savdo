@@ -91,12 +91,12 @@ after truncating `stock_levels`; the concurrency test is green.
 ## Phase 4 — Sales, customers, discounts, reports + admin screens (correctness-critical)
 
 - [ ] Owner answers Q-05, Q-06, Q-07, Q-10
-- [ ] Migrations: `customers`, `sales`, `sale_items`, `sale_payments`, `discounts`
+- [ ] Migrations: `customers`, `sales`, `sale_items`, `sale_payments`
 - [ ] Quick sale with server-side pricing, promo price, discount, idempotency key, per-shop sale number
 - [ ] Void and return with reversing movements; immutability enforced
-- [ ] Customers CRUD with purchase history; discounts CRUD
+- [ ] Customers CRUD with purchase history
 - [ ] Reports: sales summary (period), by product, low stock; cashier own-day rule
-- [ ] Admin: quick-sale screen (search, variant pick, cart, payment), sales list/detail, void/return, customers, discounts, reports dashboard
+- [ ] Admin: quick-sale screen (search, variant pick, cart, payment), sales list/detail, void/return, customers, reports dashboard
 - [ ] Tests: totals computed server-side, void restores stock, cashier cannot void, replayed idempotency key returns same sale
 - [ ] Two-model review recorded
 
@@ -174,7 +174,7 @@ definition-of-done points hold.
 
 Debt ledger (nasiya) · barcode scanning in the mobile app · online cart + checkout with
 Payme/Click · multi-tenant signup and billing · iOS build · loyalty points · SMS OTP ·
-offline mobile mode · bot staff mode · printed receipts · accounting exports.
+offline mobile mode · bot staff mode · printed receipts · campaign discounts (automatic percent/sum by category, product or all sales for a date range; D-60) · accounting exports.
 
 Engineering debt: Move the `Accept-Language` context helpers out of `catalog` into a small `internal/locale` package so `stock` (and later `sales`) stop importing a sibling domain module · Idempotency helper: run the permission check and request validation before opening the transaction and taking the advisory lock; re-run `auth.Require` on replay · Movement history: add a `createdByName`-style display name to purchase and adjustment audit views; per-row quick actions on the stock levels grid.
 

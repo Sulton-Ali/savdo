@@ -34,6 +34,7 @@ Base path `/v1`. JSON only. Server: Go, `api/cmd/api`, port 8080 behind Caddy.
   HTTP status by class: `400 VALIDATION_FAILED` (with `details.fields`), `401
   UNAUTHENTICATED`, `403 FORBIDDEN`, `404 NOT_FOUND`, `409` for state conflicts
   (`STOCK_INSUFFICIENT`, `SALE_ALREADY_VOIDED`, `PURCHASE_ALREADY_RECEIVED`,
+  `SALE_VOID_WINDOW_CLOSED`, `RETURN_EXCEEDS_SOLD`, `DISCOUNT_EXCEEDS_SUBTOTAL`,
   `DUPLICATE_SKU`, …), `429 RATE_LIMITED`, `500 INTERNAL`. The full enum lives in the
   spec under `components.schemas.ErrorCode`; adding a code means adding it there.
 - **Validation and conflict vocabulary** (O-12): `details.fields` maps field → one of `required`, `invalid`, `too_short`, `too_long`; a uniqueness violation is `409 CONFLICT` with `details.field` naming the field (`username`, `phone`, `name`). Clients translate these words; nothing else is used.
@@ -146,8 +147,6 @@ Phase numbers refer to `06-ROADMAP.md`.
 | GET    | `/sales/{id}`                | cashier+             |
 | POST   | `/sales/{id}/void`           | manager+             |
 | POST   | `/sales/{id}/return`         | manager+             |
-| GET/POST | `/discounts`               | manager+             |
-| PATCH/DELETE | `/discounts/{id}`      | manager+             |
 | GET    | `/reports/sales/summary`     | manager+ (cashier: own day) |
 | GET    | `/reports/sales/by-product`  | manager+             |
 | GET    | `/reports/stock/low`         | manager+             |
