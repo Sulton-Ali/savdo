@@ -80,15 +80,30 @@ func (q *Queries) CreateProduct(ctx context.Context, arg CreateProductParams) (P
 
 const getProductForCashier = `-- name: GetProductForCashier :one
 SELECT
-    id, shop_id, category_id, unit_id, slug, sku,
-    base_price, promo_price, promo_from, promo_to,
-    is_active, is_featured, has_variants, deleted_at,
-    created_at, updated_at
-FROM products
-WHERE shop_id = $1 AND id = $2 AND deleted_at IS NULL
+    p.id, p.shop_id, p.category_id, p.unit_id, p.slug, p.sku,
+    p.base_price, p.promo_price, p.promo_from, p.promo_to,
+    p.is_active, p.is_featured, p.has_variants, p.deleted_at,
+    p.created_at, p.updated_at,
+    COALESCE(t.locale, '') AS locale_used,
+    COALESCE(t.name, '') AS name
+FROM products p
+LEFT JOIN LATERAL (
+    SELECT pt.locale, pt.name
+    FROM product_translations pt
+    WHERE pt.product_id = p.id
+    ORDER BY
+        CASE
+            WHEN pt.locale = $1 THEN 0
+            WHEN pt.locale = 'uz' THEN 1
+            ELSE 2
+        END
+    LIMIT 1
+) t ON true
+WHERE p.shop_id = $2 AND p.id = $3 AND p.deleted_at IS NULL
 `
 
 type GetProductForCashierParams struct {
+	Locale string    `json:"locale"`
 	ShopID uuid.UUID `json:"shop_id"`
 	ID     uuid.UUID `json:"id"`
 }
@@ -110,10 +125,14 @@ type GetProductForCashierRow struct {
 	DeletedAt   *time.Time     `json:"deleted_at"`
 	CreatedAt   time.Time      `json:"created_at"`
 	UpdatedAt   time.Time      `json:"updated_at"`
+	LocaleUsed  string         `json:"locale_used"`
+	Name        string         `json:"name"`
 }
 
+// Same locale-fallback + COALESCE pattern as ListProductsForCashier; no
+// cost_price (§ 04-DATA-MODEL.md rule 8, ADR-010).
 func (q *Queries) GetProductForCashier(ctx context.Context, arg GetProductForCashierParams) (GetProductForCashierRow, error) {
-	row := q.db.QueryRow(ctx, getProductForCashier, arg.ShopID, arg.ID)
+	row := q.db.QueryRow(ctx, getProductForCashier, arg.Locale, arg.ShopID, arg.ID)
 	var i GetProductForCashierRow
 	err := row.Scan(
 		&i.ID,
@@ -132,23 +151,65 @@ func (q *Queries) GetProductForCashier(ctx context.Context, arg GetProductForCas
 		&i.DeletedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LocaleUsed,
+		&i.Name,
 	)
 	return i, err
 }
 
 const getProductForStaff = `-- name: GetProductForStaff :one
-SELECT id, shop_id, category_id, unit_id, slug, sku, base_price, cost_price, promo_price, promo_from, promo_to, is_active, is_featured, has_variants, deleted_at, created_at, updated_at FROM products
-WHERE shop_id = $1 AND id = $2 AND deleted_at IS NULL
+SELECT
+    p.id, p.shop_id, p.category_id, p.unit_id, p.slug, p.sku, p.base_price, p.cost_price, p.promo_price, p.promo_from, p.promo_to, p.is_active, p.is_featured, p.has_variants, p.deleted_at, p.created_at, p.updated_at,
+    COALESCE(t.locale, '') AS locale_used,
+    COALESCE(t.name, '') AS name
+FROM products p
+LEFT JOIN LATERAL (
+    SELECT pt.locale, pt.name
+    FROM product_translations pt
+    WHERE pt.product_id = p.id
+    ORDER BY
+        CASE
+            WHEN pt.locale = $1 THEN 0
+            WHEN pt.locale = 'uz' THEN 1
+            ELSE 2
+        END
+    LIMIT 1
+) t ON true
+WHERE p.shop_id = $2 AND p.id = $3 AND p.deleted_at IS NULL
 `
 
 type GetProductForStaffParams struct {
+	Locale string    `json:"locale"`
 	ShopID uuid.UUID `json:"shop_id"`
 	ID     uuid.UUID `json:"id"`
 }
 
-func (q *Queries) GetProductForStaff(ctx context.Context, arg GetProductForStaffParams) (Product, error) {
-	row := q.db.QueryRow(ctx, getProductForStaff, arg.ShopID, arg.ID)
-	var i Product
+type GetProductForStaffRow struct {
+	ID          uuid.UUID      `json:"id"`
+	ShopID      uuid.UUID      `json:"shop_id"`
+	CategoryID  *uuid.UUID     `json:"category_id"`
+	UnitID      uuid.UUID      `json:"unit_id"`
+	Slug        string         `json:"slug"`
+	Sku         *string        `json:"sku"`
+	BasePrice   pgtype.Numeric `json:"base_price"`
+	CostPrice   pgtype.Numeric `json:"cost_price"`
+	PromoPrice  pgtype.Numeric `json:"promo_price"`
+	PromoFrom   *time.Time     `json:"promo_from"`
+	PromoTo     *time.Time     `json:"promo_to"`
+	IsActive    bool           `json:"is_active"`
+	IsFeatured  bool           `json:"is_featured"`
+	HasVariants bool           `json:"has_variants"`
+	DeletedAt   *time.Time     `json:"deleted_at"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+	LocaleUsed  string         `json:"locale_used"`
+	Name        string         `json:"name"`
+}
+
+// Same locale-fallback + COALESCE pattern as ListProductsForStaff.
+func (q *Queries) GetProductForStaff(ctx context.Context, arg GetProductForStaffParams) (GetProductForStaffRow, error) {
+	row := q.db.QueryRow(ctx, getProductForStaff, arg.Locale, arg.ShopID, arg.ID)
+	var i GetProductForStaffRow
 	err := row.Scan(
 		&i.ID,
 		&i.ShopID,
@@ -167,20 +228,37 @@ func (q *Queries) GetProductForStaff(ctx context.Context, arg GetProductForStaff
 		&i.DeletedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LocaleUsed,
+		&i.Name,
 	)
 	return i, err
 }
 
 const getProductPublic = `-- name: GetProductPublic :one
 SELECT
-    id, shop_id, category_id, unit_id, slug, sku,
-    base_price, promo_price, promo_from, promo_to,
-    is_featured, created_at
-FROM products
-WHERE shop_id = $1 AND id = $2 AND deleted_at IS NULL AND is_active
+    p.id, p.shop_id, p.category_id, p.unit_id, p.slug, p.sku,
+    p.base_price, p.promo_price, p.promo_from, p.promo_to,
+    p.is_featured, p.created_at,
+    COALESCE(t.locale, '') AS locale_used,
+    COALESCE(t.name, '') AS name
+FROM products p
+LEFT JOIN LATERAL (
+    SELECT pt.locale, pt.name
+    FROM product_translations pt
+    WHERE pt.product_id = p.id
+    ORDER BY
+        CASE
+            WHEN pt.locale = $1 THEN 0
+            WHEN pt.locale = 'uz' THEN 1
+            ELSE 2
+        END
+    LIMIT 1
+) t ON true
+WHERE p.shop_id = $2 AND p.id = $3 AND p.deleted_at IS NULL AND p.is_active
 `
 
 type GetProductPublicParams struct {
+	Locale string    `json:"locale"`
 	ShopID uuid.UUID `json:"shop_id"`
 	ID     uuid.UUID `json:"id"`
 }
@@ -198,10 +276,14 @@ type GetProductPublicRow struct {
 	PromoTo    *time.Time     `json:"promo_to"`
 	IsFeatured bool           `json:"is_featured"`
 	CreatedAt  time.Time      `json:"created_at"`
+	LocaleUsed string         `json:"locale_used"`
+	Name       string         `json:"name"`
 }
 
+// Same locale-fallback + COALESCE pattern as ListProductsPublic; active
+// only, never cost.
 func (q *Queries) GetProductPublic(ctx context.Context, arg GetProductPublicParams) (GetProductPublicRow, error) {
-	row := q.db.QueryRow(ctx, getProductPublic, arg.ShopID, arg.ID)
+	row := q.db.QueryRow(ctx, getProductPublic, arg.Locale, arg.ShopID, arg.ID)
 	var i GetProductPublicRow
 	err := row.Scan(
 		&i.ID,
@@ -216,6 +298,8 @@ func (q *Queries) GetProductPublic(ctx context.Context, arg GetProductPublicPara
 		&i.PromoTo,
 		&i.IsFeatured,
 		&i.CreatedAt,
+		&i.LocaleUsed,
+		&i.Name,
 	)
 	return i, err
 }
@@ -257,8 +341,8 @@ SELECT
     p.base_price, p.promo_price, p.promo_from, p.promo_to,
     p.is_active, p.is_featured, p.has_variants, p.deleted_at,
     p.created_at, p.updated_at,
-    t.locale AS locale_used,
-    t.name AS name
+    COALESCE(t.locale, '') AS locale_used,
+    COALESCE(t.name, '') AS name
 FROM products p
 LEFT JOIN LATERAL (
     SELECT pt.locale, pt.name
@@ -376,8 +460,11 @@ const listProductsForStaff = `-- name: ListProductsForStaff :many
 
 SELECT
     p.id, p.shop_id, p.category_id, p.unit_id, p.slug, p.sku, p.base_price, p.cost_price, p.promo_price, p.promo_from, p.promo_to, p.is_active, p.is_featured, p.has_variants, p.deleted_at, p.created_at, p.updated_at,
-    t.locale AS locale_used,
-    t.name AS name
+    -- COALESCE to '': a product with zero translations must still list, not
+    -- fail to scan (LEFT JOIN LATERAL leaves these NULL and sqlc does not
+    -- infer that as nullable).
+    COALESCE(t.locale, '') AS locale_used,
+    COALESCE(t.name, '') AS name
 FROM products p
 LEFT JOIN LATERAL (
     SELECT pt.locale, pt.name
@@ -511,8 +598,8 @@ SELECT
     p.id, p.shop_id, p.category_id, p.unit_id, p.slug, p.sku,
     p.base_price, p.promo_price, p.promo_from, p.promo_to,
     p.is_featured, p.created_at,
-    t.locale AS locale_used,
-    t.name AS name
+    COALESCE(t.locale, '') AS locale_used,
+    COALESCE(t.name, '') AS name
 FROM products p
 LEFT JOIN LATERAL (
     SELECT pt.locale, pt.name

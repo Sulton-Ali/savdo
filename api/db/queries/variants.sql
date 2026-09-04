@@ -58,4 +58,4 @@ WHERE shop_id = $1 AND id = $2;
 -- (§ 04-DATA-MODEL.md) — refuse deleting the last active variant of a
 -- product, and to decide when to flip products.has_variants.
 SELECT count(*) FROM product_variants
-WHERE product_id = $1 AND deleted_at IS NULL AND is_active;
+WHERE shop_id = $1 AND product_id = $2 AND deleted_at IS NULL AND is_active;

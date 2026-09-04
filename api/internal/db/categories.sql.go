@@ -74,18 +74,51 @@ func (q *Queries) CreateCategory(ctx context.Context, arg CreateCategoryParams) 
 }
 
 const getCategory = `-- name: GetCategory :one
-SELECT id, shop_id, parent_id, slug, sort_order, is_active, image_id, deleted_at, created_at, updated_at FROM categories
-WHERE shop_id = $1 AND id = $2 AND deleted_at IS NULL
+SELECT
+    c.id, c.shop_id, c.parent_id, c.slug, c.sort_order, c.is_active, c.image_id, c.deleted_at, c.created_at, c.updated_at,
+    COALESCE(t.locale, '') AS locale_used,
+    COALESCE(t.name, '') AS name
+FROM categories c
+LEFT JOIN LATERAL (
+    SELECT ct.locale, ct.name
+    FROM category_translations ct
+    WHERE ct.category_id = c.id
+    ORDER BY
+        CASE
+            WHEN ct.locale = $1 THEN 0
+            WHEN ct.locale = 'uz' THEN 1
+            ELSE 2
+        END
+    LIMIT 1
+) t ON true
+WHERE c.shop_id = $2 AND c.id = $3 AND c.deleted_at IS NULL
 `
 
 type GetCategoryParams struct {
+	Locale string    `json:"locale"`
 	ShopID uuid.UUID `json:"shop_id"`
 	ID     uuid.UUID `json:"id"`
 }
 
-func (q *Queries) GetCategory(ctx context.Context, arg GetCategoryParams) (Category, error) {
-	row := q.db.QueryRow(ctx, getCategory, arg.ShopID, arg.ID)
-	var i Category
+type GetCategoryRow struct {
+	ID         uuid.UUID  `json:"id"`
+	ShopID     uuid.UUID  `json:"shop_id"`
+	ParentID   *uuid.UUID `json:"parent_id"`
+	Slug       string     `json:"slug"`
+	SortOrder  int32      `json:"sort_order"`
+	IsActive   bool       `json:"is_active"`
+	ImageID    *uuid.UUID `json:"image_id"`
+	DeletedAt  *time.Time `json:"deleted_at"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
+	LocaleUsed string     `json:"locale_used"`
+	Name       string     `json:"name"`
+}
+
+// Same locale-fallback + COALESCE pattern as ListCategories.
+func (q *Queries) GetCategory(ctx context.Context, arg GetCategoryParams) (GetCategoryRow, error) {
+	row := q.db.QueryRow(ctx, getCategory, arg.Locale, arg.ShopID, arg.ID)
+	var i GetCategoryRow
 	err := row.Scan(
 		&i.ID,
 		&i.ShopID,
@@ -97,6 +130,8 @@ func (q *Queries) GetCategory(ctx context.Context, arg GetCategoryParams) (Categ
 		&i.DeletedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LocaleUsed,
+		&i.Name,
 	)
 	return i, err
 }
@@ -113,7 +148,7 @@ WITH RECURSIVE ancestors AS (
     FROM categories c
     JOIN ancestors a ON c.id = a.parent_id
 )
-SELECT max(a.depth)::int AS depth FROM ancestors a
+SELECT COALESCE(max(a.depth), 0)::int AS depth FROM ancestors a
 `
 
 type GetCategoryDepthParams struct {
@@ -124,6 +159,9 @@ type GetCategoryDepthParams struct {
 // Depth of category_id counting from 1 at a root (no parent), by walking
 // parent_id up to the root. The service calls this before creating or
 // re-parenting a category to enforce depth <= 3 (§ 04-DATA-MODEL.md).
+// COALESCE: category_id not found (or wrong shop) makes ancestors empty,
+// and max() over zero rows is NULL — 0 reads better than NULL for "does not
+// exist / has no ancestors" here.
 func (q *Queries) GetCategoryDepth(ctx context.Context, arg GetCategoryDepthParams) (int32, error) {
 	row := q.db.QueryRow(ctx, getCategoryDepth, arg.CategoryID, arg.ShopID)
 	var depth int32
@@ -134,8 +172,13 @@ func (q *Queries) GetCategoryDepth(ctx context.Context, arg GetCategoryDepthPara
 const listCategories = `-- name: ListCategories :many
 SELECT
     c.id, c.shop_id, c.parent_id, c.slug, c.sort_order, c.is_active, c.image_id, c.deleted_at, c.created_at, c.updated_at,
-    t.locale AS locale_used,
-    t.name AS name
+    -- COALESCE to '': a category with zero translations (e.g. mid-creation,
+    -- before its first UpsertCategoryTranslation) must still list, not fail
+    -- to scan — LEFT JOIN LATERAL leaves t.locale/t.name NULL when no
+    -- translation matches, and sqlc does not infer that as nullable. An
+    -- empty string, not a real locale, signals "no translation yet".
+    COALESCE(t.locale, '') AS locale_used,
+    COALESCE(t.name, '') AS name
 FROM categories c
 LEFT JOIN LATERAL (
     SELECT ct.locale, ct.name

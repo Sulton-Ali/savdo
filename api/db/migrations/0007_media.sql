@@ -33,7 +33,11 @@ CREATE TABLE product_images (
 -- locations_shop_id_default_key: a plain UNIQUE(product_id, is_cover) would
 -- also forbid more than one non-cover row, so it has to be partial.
 CREATE UNIQUE INDEX product_images_one_cover_key ON product_images (product_id) WHERE is_cover;
-CREATE INDEX product_images_shop_id_idx ON product_images (shop_id);
+-- Composite, not a standalone shop_id index: every list/count query filters
+-- by (shop_id, product_id) together (ListProductImages, CountProductImages,
+-- ListImageIDsForProduct), and shop_id leftmost still serves a bare
+-- shop_id lookup, so one index covers both instead of two.
+CREATE INDEX product_images_shop_id_product_id_idx ON product_images (shop_id, product_id);
 CREATE INDEX product_images_variant_id_idx ON product_images (variant_id);
 CREATE INDEX product_images_media_id_idx ON product_images (media_id);
 

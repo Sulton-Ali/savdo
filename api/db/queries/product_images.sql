@@ -23,7 +23,7 @@ WHERE shop_id = $1 AND id = $2;
 -- name: CountProductImages :one
 -- Enforces the "up to 8 images per product" limit (D-34) in the service.
 SELECT count(*) FROM product_images
-WHERE product_id = $1;
+WHERE shop_id = $1 AND product_id = $2;
 
 -- name: ClearCover :exec
 -- Run before SetCover in the same transaction so the partial unique index

@@ -4,8 +4,11 @@
 -- tell whether the requested locale actually had a translation.
 SELECT
     u.*,
-    t.locale AS locale_used,
-    t.name AS name
+    -- COALESCE to '': a unit with zero translations must still list, not
+    -- fail to scan (LEFT JOIN LATERAL leaves these NULL and sqlc does not
+    -- infer that as nullable).
+    COALESCE(t.locale, '') AS locale_used,
+    COALESCE(t.name, '') AS name
 FROM units u
 LEFT JOIN LATERAL (
     SELECT ut.locale, ut.name

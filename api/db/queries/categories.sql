@@ -5,8 +5,13 @@
 -- them, the public/cashier catalog does not).
 SELECT
     c.*,
-    t.locale AS locale_used,
-    t.name AS name
+    -- COALESCE to '': a category with zero translations (e.g. mid-creation,
+    -- before its first UpsertCategoryTranslation) must still list, not fail
+    -- to scan — LEFT JOIN LATERAL leaves t.locale/t.name NULL when no
+    -- translation matches, and sqlc does not infer that as nullable. An
+    -- empty string, not a real locale, signals "no translation yet".
+    COALESCE(t.locale, '') AS locale_used,
+    COALESCE(t.name, '') AS name
 FROM categories c
 LEFT JOIN LATERAL (
     SELECT ct.locale, ct.name
@@ -26,8 +31,25 @@ WHERE c.shop_id = sqlc.arg('shop_id')
 ORDER BY c.sort_order, c.slug;
 
 -- name: GetCategory :one
-SELECT * FROM categories
-WHERE shop_id = $1 AND id = $2 AND deleted_at IS NULL;
+-- Same locale-fallback + COALESCE pattern as ListCategories.
+SELECT
+    c.*,
+    COALESCE(t.locale, '') AS locale_used,
+    COALESCE(t.name, '') AS name
+FROM categories c
+LEFT JOIN LATERAL (
+    SELECT ct.locale, ct.name
+    FROM category_translations ct
+    WHERE ct.category_id = c.id
+    ORDER BY
+        CASE
+            WHEN ct.locale = sqlc.arg('locale') THEN 0
+            WHEN ct.locale = 'uz' THEN 1
+            ELSE 2
+        END
+    LIMIT 1
+) t ON true
+WHERE c.shop_id = sqlc.arg('shop_id') AND c.id = sqlc.arg('id') AND c.deleted_at IS NULL;
 
 -- name: CreateCategory :one
 INSERT INTO categories (id, shop_id, parent_id, slug, sort_order, is_active, image_id)
@@ -82,4 +104,7 @@ WITH RECURSIVE ancestors AS (
     FROM categories c
     JOIN ancestors a ON c.id = a.parent_id
 )
-SELECT max(a.depth)::int AS depth FROM ancestors a;
+-- COALESCE: category_id not found (or wrong shop) makes ancestors empty,
+-- and max() over zero rows is NULL — 0 reads better than NULL for "does not
+-- exist / has no ancestors" here.
+SELECT COALESCE(max(a.depth), 0)::int AS depth FROM ancestors a;

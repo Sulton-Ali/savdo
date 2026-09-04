@@ -74,12 +74,17 @@ func (q *Queries) ClearCover(ctx context.Context, arg ClearCoverParams) error {
 
 const countProductImages = `-- name: CountProductImages :one
 SELECT count(*) FROM product_images
-WHERE product_id = $1
+WHERE shop_id = $1 AND product_id = $2
 `
 
+type CountProductImagesParams struct {
+	ShopID    uuid.UUID `json:"shop_id"`
+	ProductID uuid.UUID `json:"product_id"`
+}
+
 // Enforces the "up to 8 images per product" limit (D-34) in the service.
-func (q *Queries) CountProductImages(ctx context.Context, productID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countProductImages, productID)
+func (q *Queries) CountProductImages(ctx context.Context, arg CountProductImagesParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countProductImages, arg.ShopID, arg.ProductID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err

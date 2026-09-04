@@ -72,8 +72,11 @@ func (q *Queries) GetAttributeDefinition(ctx context.Context, arg GetAttributeDe
 const listAttributeDefinitions = `-- name: ListAttributeDefinitions :many
 SELECT
     ad.id, ad.shop_id, ad.code, ad.sort_order, ad.created_at, ad.updated_at,
-    t.locale AS locale_used,
-    t.name AS name,
+    -- COALESCE to '': an attribute definition with zero translations must
+    -- still list, not fail to scan (LEFT JOIN LATERAL leaves these NULL and
+    -- sqlc does not infer that as nullable).
+    COALESCE(t.locale, '') AS locale_used,
+    COALESCE(t.name, '') AS name,
     COALESCE(agg.translations, '{}'::jsonb) AS translations
 FROM attribute_definitions ad
 LEFT JOIN LATERAL (

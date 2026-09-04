@@ -16,14 +16,19 @@ import (
 
 const countActiveVariants = `-- name: CountActiveVariants :one
 SELECT count(*) FROM product_variants
-WHERE product_id = $1 AND deleted_at IS NULL AND is_active
+WHERE shop_id = $1 AND product_id = $2 AND deleted_at IS NULL AND is_active
 `
+
+type CountActiveVariantsParams struct {
+	ShopID    uuid.UUID `json:"shop_id"`
+	ProductID uuid.UUID `json:"product_id"`
+}
 
 // Used by the service to keep "every product has at least one variant"
 // (§ 04-DATA-MODEL.md) — refuse deleting the last active variant of a
 // product, and to decide when to flip products.has_variants.
-func (q *Queries) CountActiveVariants(ctx context.Context, productID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countActiveVariants, productID)
+func (q *Queries) CountActiveVariants(ctx context.Context, arg CountActiveVariantsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countActiveVariants, arg.ShopID, arg.ProductID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err

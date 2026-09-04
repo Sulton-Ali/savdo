@@ -13,8 +13,11 @@
 -- name: ListProductsForStaff :many
 SELECT
     p.*,
-    t.locale AS locale_used,
-    t.name AS name
+    -- COALESCE to '': a product with zero translations must still list, not
+    -- fail to scan (LEFT JOIN LATERAL leaves these NULL and sqlc does not
+    -- infer that as nullable).
+    COALESCE(t.locale, '') AS locale_used,
+    COALESCE(t.name, '') AS name
 FROM products p
 LEFT JOIN LATERAL (
     SELECT pt.locale, pt.name
@@ -53,8 +56,8 @@ SELECT
     p.base_price, p.promo_price, p.promo_from, p.promo_to,
     p.is_active, p.is_featured, p.has_variants, p.deleted_at,
     p.created_at, p.updated_at,
-    t.locale AS locale_used,
-    t.name AS name
+    COALESCE(t.locale, '') AS locale_used,
+    COALESCE(t.name, '') AS name
 FROM products p
 LEFT JOIN LATERAL (
     SELECT pt.locale, pt.name
@@ -93,8 +96,8 @@ SELECT
     p.id, p.shop_id, p.category_id, p.unit_id, p.slug, p.sku,
     p.base_price, p.promo_price, p.promo_from, p.promo_to,
     p.is_featured, p.created_at,
-    t.locale AS locale_used,
-    t.name AS name
+    COALESCE(t.locale, '') AS locale_used,
+    COALESCE(t.name, '') AS name
 FROM products p
 LEFT JOIN LATERAL (
     SELECT pt.locale, pt.name
@@ -128,25 +131,74 @@ ORDER BY p.created_at DESC, p.id DESC
 LIMIT sqlc.arg('limit');
 
 -- name: GetProductForStaff :one
-SELECT * FROM products
-WHERE shop_id = $1 AND id = $2 AND deleted_at IS NULL;
+-- Same locale-fallback + COALESCE pattern as ListProductsForStaff.
+SELECT
+    p.*,
+    COALESCE(t.locale, '') AS locale_used,
+    COALESCE(t.name, '') AS name
+FROM products p
+LEFT JOIN LATERAL (
+    SELECT pt.locale, pt.name
+    FROM product_translations pt
+    WHERE pt.product_id = p.id
+    ORDER BY
+        CASE
+            WHEN pt.locale = sqlc.arg('locale') THEN 0
+            WHEN pt.locale = 'uz' THEN 1
+            ELSE 2
+        END
+    LIMIT 1
+) t ON true
+WHERE p.shop_id = sqlc.arg('shop_id') AND p.id = sqlc.arg('id') AND p.deleted_at IS NULL;
 
 -- name: GetProductForCashier :one
+-- Same locale-fallback + COALESCE pattern as ListProductsForCashier; no
+-- cost_price (§ 04-DATA-MODEL.md rule 8, ADR-010).
 SELECT
-    id, shop_id, category_id, unit_id, slug, sku,
-    base_price, promo_price, promo_from, promo_to,
-    is_active, is_featured, has_variants, deleted_at,
-    created_at, updated_at
-FROM products
-WHERE shop_id = $1 AND id = $2 AND deleted_at IS NULL;
+    p.id, p.shop_id, p.category_id, p.unit_id, p.slug, p.sku,
+    p.base_price, p.promo_price, p.promo_from, p.promo_to,
+    p.is_active, p.is_featured, p.has_variants, p.deleted_at,
+    p.created_at, p.updated_at,
+    COALESCE(t.locale, '') AS locale_used,
+    COALESCE(t.name, '') AS name
+FROM products p
+LEFT JOIN LATERAL (
+    SELECT pt.locale, pt.name
+    FROM product_translations pt
+    WHERE pt.product_id = p.id
+    ORDER BY
+        CASE
+            WHEN pt.locale = sqlc.arg('locale') THEN 0
+            WHEN pt.locale = 'uz' THEN 1
+            ELSE 2
+        END
+    LIMIT 1
+) t ON true
+WHERE p.shop_id = sqlc.arg('shop_id') AND p.id = sqlc.arg('id') AND p.deleted_at IS NULL;
 
 -- name: GetProductPublic :one
+-- Same locale-fallback + COALESCE pattern as ListProductsPublic; active
+-- only, never cost.
 SELECT
-    id, shop_id, category_id, unit_id, slug, sku,
-    base_price, promo_price, promo_from, promo_to,
-    is_featured, created_at
-FROM products
-WHERE shop_id = $1 AND id = $2 AND deleted_at IS NULL AND is_active;
+    p.id, p.shop_id, p.category_id, p.unit_id, p.slug, p.sku,
+    p.base_price, p.promo_price, p.promo_from, p.promo_to,
+    p.is_featured, p.created_at,
+    COALESCE(t.locale, '') AS locale_used,
+    COALESCE(t.name, '') AS name
+FROM products p
+LEFT JOIN LATERAL (
+    SELECT pt.locale, pt.name
+    FROM product_translations pt
+    WHERE pt.product_id = p.id
+    ORDER BY
+        CASE
+            WHEN pt.locale = sqlc.arg('locale') THEN 0
+            WHEN pt.locale = 'uz' THEN 1
+            ELSE 2
+        END
+    LIMIT 1
+) t ON true
+WHERE p.shop_id = sqlc.arg('shop_id') AND p.id = sqlc.arg('id') AND p.deleted_at IS NULL AND p.is_active;
 
 -- name: CreateProduct :one
 INSERT INTO products (
