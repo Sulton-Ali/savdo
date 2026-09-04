@@ -2,6 +2,14 @@
 SELECT * FROM shops
 WHERE id = $1;
 
+-- name: LockShop :one
+-- Per-tenant serialization point for default-location changes: acquire this
+-- lock first, then decide/update location defaults within the same
+-- transaction.
+SELECT id FROM shops
+WHERE id = $1
+FOR UPDATE;
+
 -- name: GetShopBySlug :one
 SELECT * FROM shops
 WHERE slug = $1;

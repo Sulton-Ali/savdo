@@ -196,6 +196,19 @@ func (q *Queries) ListLocations(ctx context.Context, arg ListLocationsParams) ([
 	return items, nil
 }
 
+const shopHasLocations = `-- name: ShopHasLocations :one
+SELECT EXISTS (SELECT 1 FROM locations WHERE shop_id = $1)
+`
+
+// Used inside the transaction after LockShop to decide whether a location
+// about to be created is the shop's first (and therefore its default).
+func (q *Queries) ShopHasLocations(ctx context.Context, shopID uuid.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, shopHasLocations, shopID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const updateLocation = `-- name: UpdateLocation :one
 UPDATE locations
 SET
