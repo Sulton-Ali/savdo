@@ -130,7 +130,7 @@ Phase numbers refer to `06-ROADMAP.md`.
 | GET/PATCH | `/purchases/{id}`            | manager+ (PATCH only while draft) |
 | POST   | `/purchases/{id}/receive`       | manager+   |
 | POST   | `/purchases/{id}/cancel`        | manager+   |
-| GET    | `/stock/levels`                 | any (cashier per Q-02) |
+| GET    | `/stock/levels`                 | any (D-40) |
 | GET    | `/stock/movements`              | manager+   |
 | POST   | `/stock/adjustments`            | manager+   |
 | POST   | `/stock/transfers`              | manager+   |

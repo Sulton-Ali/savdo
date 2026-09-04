@@ -75,16 +75,18 @@ always reference a variant, never a product.
 transfer_out|transfer_in`), `qty numeric(12,3)` (signed: positive in, negative out),
 `unit_cost numeric(14,2)`, `ref_type text`, `ref_id uuid`, `reason text`,
 `created_by uuid`, `created_at`. Index `(shop_id, variant_id, location_id, created_at)`.
-**No UPDATE or DELETE is ever issued on this table** — enforce with a trigger that raises.
+**No UPDATE or DELETE is ever issued on this table** — enforce with a trigger that raises. Adjustments carry a fixed reason enum (`count_correction`, `damaged`, `lost`, `found`, `other`; D-46) plus an optional note.
 
 **stock_levels** — `variant_id`, `location_id`, `qty numeric(12,3) not null default 0`,
 `updated_at`. PK `(shop_id, variant_id, location_id)`. Maintained only by
 `stock.Service.Move` inside the movement's transaction with `FOR UPDATE`. Rebuildable:
 `savdo stock rebuild`.
 
+**Rules (D-41, D-42, D-44):** a level never goes below zero — any movement that would do so fails with `STOCK_INSUFFICIENT` inside `stock.Service.Move` (D-41). Receiving a purchase sets each received variant's `cost_override` to the line's `unit_cost` (D-42). Low stock: `shops.low_stock_threshold` default with optional `products.low_stock_threshold` override; a variant is low when its total quantity across locations is at or below the effective threshold (D-44).
+
 **purchases** — `supplier_id`, `location_id`, `number text`, `status purchase_status`
 (`draft|received|cancelled`), `received_at`, `note`, `total_cost numeric(14,2)`,
-`created_by`. Unique `(shop_id, number)`.
+`created_by`, `supplier_invoice_no text null`. Unique `(shop_id, number)`. `number` is system-generated per shop (`P-000001` style, from `shops.next_purchase_number` under row lock; D-45).
 
 **purchase_items** — `purchase_id`, `variant_id`, `qty numeric(12,3)`, `unit_cost`.
 
@@ -137,7 +139,7 @@ telegram_chat_id)`.
 
 **audit_log** — `actor_id`, `action text`, `entity_type`, `entity_id`, `before jsonb`,
 `after jsonb`, `created_at`. Written by services for: price changes, stock adjustments,
-voids, role changes, settings changes.
+voids, role changes, settings changes (created in Phase 3, D-47).
 
 ## 7. Permissions (ADR-010)
 
@@ -145,7 +147,7 @@ voids, role changes, settings changes.
 | --------------------------------------- | :---: | :-----: | :-----: | :----: |
 | Read products, variants, prices         |   ✓   |    ✓    |    ✓    | ✓ (active only) |
 | See `cost_price`, `unit_cost`, margins  |   ✓   |    ✓    |    ✗    |   ✗    |
-| See stock quantities                    |   ✓   |    ✓    |  ✓ (Q-02) | ✗ (availability only) |
+| See stock quantities                    |   ✓   |    ✓    |  ✓ (D-40) | ✗ (availability only) |
 | Create/edit products, categories, media |   ✓   |    ✓    |    ✗    |   ✗    |
 | Purchases, adjustments, transfers       |   ✓   |    ✓    |    ✗    |   ✗    |
 | Create sale, attach customer            |   ✓   |    ✓    |    ✓    |   ✗    |
