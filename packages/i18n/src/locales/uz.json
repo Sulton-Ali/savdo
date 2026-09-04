@@ -198,7 +198,68 @@
         "sortOrder": "Tartib raqami"
       }
     },
-    "variantsPlaceholder": "Variantlar va rasmlar keyingi yangilanishda shu bo‘limda mavjud bo‘ladi.",
+    "variants": {
+      "saveFirst": "Variantlar va rasmlarni boshqarish uchun avval mahsulotni saqlang.",
+      "matrix": {
+        "title": "Variantlarni generatsiya qilish",
+        "valuesPlaceholder": "Qiymatni yozing va Enter tugmasini bosing",
+        "invalidValue": "Qiymat 1-64 belgidan iborat bo‘lishi kerak — qolganlari e’tiborga olinmadi.",
+        "preview": "Yaratiladigan kombinatsiyalar",
+        "noNew": "Barcha kombinatsiyalar uchun variant allaqachon mavjud.",
+        "generate_one": "1 ta variant yaratish",
+        "generate_other": "{{count}} ta variant yaratish",
+        "generate_few": "{{count}} ta variant yaratish",
+        "generate_many": "{{count}} ta variant yaratish",
+        "created": "{{count}} ta variant yaratildi.",
+        "partial": "Xatolik yuz berguncha {{total}} tadan {{created}} tasi yaratildi."
+      },
+      "columns": {
+        "sku": "SKU",
+        "barcode": "Shtrix-kod",
+        "priceOverride": "Narx (o‘ziga xos)",
+        "costOverride": "Tannarx (o‘ziga xos)",
+        "active": "Faol"
+      },
+      "edit": "Variantni tahrirlash",
+      "fields": {
+        "sku": "SKU",
+        "barcode": "Shtrix-kod",
+        "priceOverride": "Narx (o‘ziga xos)",
+        "costOverride": "Tannarx (o‘ziga xos)",
+        "isActive": "Faol"
+      },
+      "delete": "O‘chirish",
+      "confirmDelete": "Bu variantni o‘chirasizmi?",
+      "deleteOnly": "Mahsulotda kamida bitta variant qolishi kerak.",
+      "saved": "Variant saqlandi."
+    },
+    "images": {
+      "title": "Rasmlar",
+      "upload": "Rasm yuklash",
+      "uploadHint": "JPEG, PNG yoki WebP, 10 MB gacha. Mahsulotga 8 tagacha rasm.",
+      "capReached": "Bu mahsulotda allaqachon maksimal 8 ta rasm bor.",
+      "cover": "Muqova",
+      "setCover": "Muqova qilib belgilash",
+      "moveUp": "Yuqoriga siljitish",
+      "moveDown": "Pastga siljitish",
+      "remove": "O‘chirish",
+      "confirmRemove": "Bu rasmni o‘chirasizmi?",
+      "variantTag": "Variant",
+      "noVariant": "Barcha variantlar",
+      "invalidType": "Rasm formati qo‘llab-quvvatlanmaydi.",
+      "tooLarge": "Rasm hajmi 10 MB dan katta.",
+      "alreadyAttached": "Bu rasm mahsulotga allaqachon biriktirilgan.",
+      "uploaded": "Rasm yuklandi.",
+      "tooManyUploads": "Juda ko‘p yuklash. Birozdan so‘ng qayta urinib ko‘ring.",
+      "crop": {
+        "title": "Rasmni kesish",
+        "apply": "Qo‘llash",
+        "cancel": "Bekor qilish",
+        "free": "Erkin",
+        "square": "1:1",
+        "portrait": "4:5"
+      }
+    },
     "errors": {
       "categoryHasProducts": "Bu kategoriyada hali mahsulotlar bor, uni o‘chirib bo‘lmaydi."
     }

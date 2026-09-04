@@ -1,7 +1,7 @@
 import type { components } from "@savdo/api-client";
 
 import { api } from "../lib/api";
-import { ApiError } from "../lib/errors";
+import { ApiError, parseRetryAfterSeconds } from "../lib/errors";
 import type { CursorPage } from "../lib/useCursorList";
 
 export type Unit = components["schemas"]["Unit"];
@@ -15,6 +15,14 @@ export type Product = components["schemas"]["Product"];
 export type ProductCreate = components["schemas"]["ProductCreate"];
 export type ProductPatch = components["schemas"]["ProductPatch"];
 export type Translations = components["schemas"]["Translations"];
+export type AttributeValues = components["schemas"]["AttributeValues"];
+export type Variant = components["schemas"]["Variant"];
+export type VariantCreate = components["schemas"]["VariantCreate"];
+export type VariantPatch = components["schemas"]["VariantPatch"];
+export type MediaFile = components["schemas"]["MediaFile"];
+export type ProductImage = components["schemas"]["ProductImage"];
+export type ProductImageCreate = components["schemas"]["ProductImageCreate"];
+export type ProductImageOrder = components["schemas"]["ProductImageOrder"];
 
 /** Matches every other collection endpoint's default (`docs/05-API.md` §
  * Conventions). */
@@ -176,4 +184,121 @@ export async function updateProduct(id: string, body: ProductPatch): Promise<Pro
     throw new ApiError(error);
   }
   return data;
+}
+
+/** `GET /products/{id}/variants` — not cursor-paginated (a product's
+ * variants are always few). */
+export async function fetchVariants(productId: string): Promise<Variant[]> {
+  const { data, error } = await api.GET("/products/{id}/variants", {
+    params: { path: { id: productId } },
+  });
+  if (error) {
+    throw new ApiError(error);
+  }
+  return data.items;
+}
+
+/** `POST /products/{id}/variants` — requires `catalog.write`. */
+export async function createVariant(productId: string, body: VariantCreate): Promise<Variant> {
+  const { data, error } = await api.POST("/products/{id}/variants", {
+    params: { path: { id: productId } },
+    body,
+  });
+  if (error) {
+    throw new ApiError(error);
+  }
+  return data;
+}
+
+/** `PATCH /variants/{id}` — requires `catalog.write`. Partial update; `null`
+ * clears `priceOverride`/`costOverride` (D-35). */
+export async function updateVariant(id: string, body: VariantPatch): Promise<Variant> {
+  const { data, error } = await api.PATCH("/variants/{id}", {
+    params: { path: { id } },
+    body,
+  });
+  if (error) {
+    throw new ApiError(error);
+  }
+  return data;
+}
+
+/** `DELETE /variants/{id}` — requires `catalog.write`. `400
+ * fields.variantId: invalid` when this is the product's only variant. */
+export async function deleteVariant(id: string): Promise<void> {
+  const { error } = await api.DELETE("/variants/{id}", {
+    params: { path: { id } },
+  });
+  if (error) {
+    throw new ApiError(error);
+  }
+}
+
+/** `POST /media` — requires `catalog.write` (multipart). The generated
+ * `MediaUpload` schema types `file` as `string` (openapi-typescript's
+ * rendering of `format: binary`), but the wire body is real
+ * `multipart/form-data` — `bodySerializer` below builds actual `FormData`
+ * from the `File`/`Blob`, and openapi-fetch's `defaultBodySerializer` passes
+ * a `FormData` body through untouched so the browser sets the
+ * `Content-Type` boundary itself (never set it by hand). */
+export async function uploadMedia(file: File | Blob): Promise<MediaFile> {
+  const { data, error, response } = await api.POST("/media", {
+    body: { file } as unknown as { file: string },
+    bodySerializer(body) {
+      const formData = new FormData();
+      formData.append("file", (body as unknown as { file: File | Blob }).file);
+      return formData;
+    },
+  });
+  if (error) {
+    // The admission queue returns 429 RATE_LIMITED with Retry-After when
+    // full (`api/internal/media/service.go`); surface it to the caller.
+    throw new ApiError(error, parseRetryAfterSeconds(response));
+  }
+  return data;
+}
+
+/** `POST /products/{id}/images` — requires `catalog.write`. `400
+ * fields.mediaId: invalid` (or `fields.images: too_long`) once the product
+ * already has 8 images (D-34); `409 CONFLICT details.field: mediaId` when
+ * this media file is already attached to the product. */
+export async function addProductImage(
+  productId: string,
+  body: ProductImageCreate,
+): Promise<ProductImage> {
+  const { data, error } = await api.POST("/products/{id}/images", {
+    params: { path: { id: productId } },
+    body,
+  });
+  if (error) {
+    throw new ApiError(error);
+  }
+  return data;
+}
+
+/** `DELETE /products/{id}/images/{imageId}` — requires `catalog.write`. */
+export async function removeProductImage(productId: string, imageId: string): Promise<void> {
+  const { error } = await api.DELETE("/products/{id}/images/{imageId}", {
+    params: { path: { id: productId, imageId } },
+  });
+  if (error) {
+    throw new ApiError(error);
+  }
+}
+
+/** `PATCH /products/{id}/images/order` — requires `catalog.write`. Always
+ * send every image id belonging to the product, in the new display order;
+ * `coverImageId` optionally changes the cover in the same call. */
+export async function reorderProductImages(
+  productId: string,
+  body: ProductImageOrder,
+): Promise<ProductImage[]> {
+  const { data, error } = await api.PATCH("/products/{id}/images/order", {
+    params: { path: { id: productId } },
+    body,
+  });
+  if (error) {
+    throw new ApiError(error);
+  }
+  return data.items;
 }

@@ -283,4 +283,55 @@ describe("ProductFormPage", () => {
 
     expect(await screen.findByText("Something went wrong. Please try again.")).toBeTruthy();
   });
+
+  // T6b: the Variants & images tab hangs off a product id, so it must stay
+  // disabled until the product exists.
+  it("disables the Variants & images tab in create mode", async () => {
+    mockGetByPath({
+      "/categories": { items: [] },
+      "/units": { items: [unit()] },
+    });
+
+    renderForm(undefined);
+
+    const tab = await screen.findByRole("tab", { name: "Variants & images" });
+    expect(tab.getAttribute("aria-disabled")).toBe("true");
+  });
+
+  it("renders the variants matrix and image gallery once an existing product is loaded", async () => {
+    const existing: Product = {
+      id: "p1",
+      categoryId: null,
+      slug: "existing-product",
+      sku: null,
+      unitId: "unit1",
+      basePrice: "10000.00",
+      promoPrice: null,
+      promoFrom: null,
+      promoTo: null,
+      isActive: true,
+      isFeatured: false,
+      name: "Existing product",
+      description: null,
+      locale: "uz",
+      translationFallback: false,
+      translations: { uz: { name: "Existing product" } },
+      variants: [],
+      images: [],
+    };
+    mockGetByPath({
+      "/categories": { items: [] },
+      "/units": { items: [unit()] },
+      "/products/{id}": existing,
+      "/attribute-definitions": { items: [] },
+      "/products/{id}/variants": { items: [] },
+    });
+
+    renderForm("p1");
+
+    fireEvent.click(await screen.findByRole("tab", { name: "Variants & images" }));
+
+    expect(await screen.findByText("Generate variants")).toBeTruthy();
+    expect(screen.getByText("Images")).toBeTruthy();
+  });
 });

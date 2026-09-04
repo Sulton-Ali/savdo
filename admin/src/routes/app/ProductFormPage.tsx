@@ -37,6 +37,7 @@ import {
   buildTranslationsForPatch,
   type TranslationsFormValue,
 } from "../../lib/translations";
+import { VariantsImagesTab } from "./VariantsImagesTab";
 
 interface ProductFormValues {
   translations?: TranslationsFormValue;
@@ -54,8 +55,9 @@ interface ProductFormValues {
 
 /** Shared by `productNewRoute` (`productId` undefined) and `productEditRoute`
  * (`productId` set). General/Prices/Variants tabs, translation tabs nested
- * inside General (T6a spec). Variants & images are a placeholder card here —
- * they land in T6b. */
+ * inside General (T6a spec). The Variants tab is disabled in create mode —
+ * variants and images both hang off a product id, so it only renders
+ * `VariantsImagesTab` once the product exists (T6b spec). */
 export function ProductFormPage({ productId }: { productId?: string }) {
   const { t } = useTranslation();
   const { notification } = App.useApp();
@@ -364,7 +366,13 @@ export function ProductFormPage({ productId }: { productId?: string }) {
             {
               key: "variants",
               label: t("catalog.products.tabs.variants"),
-              children: <Card>{t("catalog.variantsPlaceholder")}</Card>,
+              disabled: !isEdit,
+              children:
+                isEdit && product ? (
+                  <VariantsImagesTab product={product} />
+                ) : (
+                  <Card>{t("catalog.variants.saveFirst")}</Card>
+                ),
             },
           ]}
         />
