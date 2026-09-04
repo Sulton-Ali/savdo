@@ -1,6 +1,6 @@
 import type { components } from "@savdo/api-client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { App as AntApp, ConfigProvider } from "antd";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -154,6 +154,60 @@ describe("CategoriesPage", () => {
       expect(
         screen.getByText("This category still has products and can't be deleted."),
       ).toBeTruthy();
+    });
+  });
+
+  // T6a review MAJOR 1: the edit Drawer must remount per category and read
+  // its starting values from `initialValues`, never `setFieldsValue` after
+  // mount — the latter marks already-registered fields "touched", which
+  // would make the PATCH resend every locale instead of only the one the
+  // user actually opened and changed.
+  it("patches only the ru locale when only its name is edited", async () => {
+    mockedApi.GET.mockResolvedValue(
+      apiResult({
+        items: [
+          category({
+            id: "a",
+            name: "Category A",
+            slug: "cat-a",
+            sortOrder: 1,
+            translations: {
+              uz: { name: "Kategoriya A" },
+              en: { name: "Category A" },
+            },
+          }),
+        ],
+      }),
+    );
+    mockedApi.PATCH.mockResolvedValueOnce(apiResult(category({ id: "a", name: "Category A" })));
+
+    renderPage();
+
+    await screen.findByText("Category A");
+    fireEvent.click(screen.getByTitle("Edit category"));
+
+    fireEvent.click(await screen.findByRole("tab", { name: "Русский" }));
+    // Both locale tabs visited so far ("uz" from the initial active tab,
+    // "ru" just clicked) stay in the DOM (AntD Tabs doesn't destroy a
+    // visited pane), so scope to the active tabpanel to reach the right
+    // "Name" input.
+    const activePanel = await screen.findByRole("tabpanel");
+    fireEvent.change(within(activePanel).getByLabelText("Name"), {
+      target: { value: "Категория А" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(mockedApi.PATCH).toHaveBeenCalledWith("/categories/{id}", {
+        params: { path: { id: "a" } },
+        body: {
+          slug: "cat-a",
+          sortOrder: 1,
+          isActive: true,
+          translations: { ru: { name: "Категория А" } },
+        },
+      });
     });
   });
 });

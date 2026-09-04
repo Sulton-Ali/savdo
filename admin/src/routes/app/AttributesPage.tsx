@@ -1,10 +1,23 @@
-import { locales } from "@savdo/i18n";
+import { type Locale, locales } from "@savdo/i18n";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { App, Button, Card, Drawer, Form, Input, InputNumber, Modal, Table, Tabs } from "antd";
+import {
+  App,
+  Button,
+  Card,
+  Drawer,
+  Form,
+  type FormInstance,
+  Input,
+  InputNumber,
+  Modal,
+  Table,
+  Tabs,
+} from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { useState } from "react";
+import { forwardRef, useImperativeHandle, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { useAuth } from "../../auth/AuthContext";
 import {
   type AttributeDefinition,
   type AttributeDefinitionCreate,
@@ -14,18 +27,28 @@ import {
   updateAttributeDefinition,
 } from "../../catalog/api";
 import { applyApiErrorToForm, notifyApiError } from "../../lib/errors";
-import { buildTranslationsForCreate, buildTranslationsForPatch } from "../../lib/translations";
+import {
+  buildTranslationsForCreate,
+  buildTranslationsForPatch,
+  type TranslationsFormValue,
+} from "../../lib/translations";
 
-interface FormValues {
+interface CreateFormValues {
   code?: string;
   sortOrder?: number;
-  translations?: Record<string, { name?: string }>;
+  translations?: TranslationsFormValue;
+}
+
+interface EditFormValues {
+  sortOrder?: number;
+  translations?: TranslationsFormValue;
 }
 
 /** The translations tabs shared by the create modal and edit drawer — just
  * `name` per locale, no `description` (attribute labels are short, e.g.
- * "Size", "Colour"). */
-function TranslationTabs() {
+ * "Size", "Colour"). The shop's own default locale is required, matching
+ * every other translated form (categories, products). */
+function TranslationTabs({ defaultLocale }: { defaultLocale: Locale }) {
   const { t } = useTranslation();
   return (
     <Tabs
@@ -36,6 +59,7 @@ function TranslationTabs() {
           <Form.Item
             name={["translations", locale, "name"]}
             label={t("catalog.attributes.fields.name")}
+            rules={[{ required: locale === defaultLocale }]}
           >
             <Input />
           </Form.Item>
@@ -45,13 +69,52 @@ function TranslationTabs() {
   );
 }
 
+/**
+ * The edit Drawer's form body, mounted fresh (via the parent's `key`) for
+ * every attribute definition it edits, reading its starting values from
+ * `Form`'s own `initialValues` rather than a `setFieldsValue` call after
+ * mount — the latter marks already-registered fields "touched", making
+ * `buildTranslationsForPatch` think the user edited a locale they never
+ * opened (T6a review, MAJOR 1).
+ */
+const AttributeEditForm = forwardRef<
+  FormInstance<EditFormValues>,
+  {
+    attribute: AttributeDefinition;
+    defaultLocale: Locale;
+    onFinish: (values: EditFormValues, form: FormInstance<EditFormValues>) => void;
+  }
+>(function AttributeEditForm({ attribute, defaultLocale, onFinish }, ref) {
+  const { t } = useTranslation();
+  const [form] = Form.useForm<EditFormValues>();
+  useImperativeHandle(ref, () => form, [form]);
+
+  return (
+    <Form<EditFormValues>
+      form={form}
+      layout="vertical"
+      initialValues={{ sortOrder: attribute.sortOrder, translations: attribute.translations }}
+      onFinish={(values) => onFinish(values, form)}
+    >
+      <Form.Item label={t("catalog.attributes.fields.code")}>
+        <Input value={attribute.code} disabled />
+      </Form.Item>
+      <Form.Item name="sortOrder" label={t("catalog.attributes.fields.sortOrder")}>
+        <InputNumber style={{ width: "100%" }} />
+      </Form.Item>
+      <TranslationTabs defaultLocale={defaultLocale} />
+    </Form>
+  );
+});
+
 export function AttributesPage() {
   const { t } = useTranslation();
   const { notification } = App.useApp();
+  const { me } = useAuth();
   const queryClient = useQueryClient();
 
-  const [createForm] = Form.useForm<FormValues>();
-  const [editForm] = Form.useForm<FormValues>();
+  const [createForm] = Form.useForm<CreateFormValues>();
+  const editFormRef = useRef<FormInstance<EditFormValues>>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<AttributeDefinition | null>(null);
 
@@ -66,7 +129,7 @@ export function AttributesPage() {
   }
 
   const createMutation = useMutation({
-    mutationFn: (values: FormValues) => {
+    mutationFn: (values: CreateFormValues) => {
       const body: AttributeDefinitionCreate = {
         code: (values.code ?? "").trim(),
         translations: buildTranslationsForCreate(values.translations),
@@ -94,7 +157,8 @@ export function AttributesPage() {
       setEditing(null);
     },
     onError: (error) => {
-      if (!applyApiErrorToForm(editForm, error, t)) {
+      const form = editFormRef.current;
+      if (!form || !applyApiErrorToForm(form, error, t)) {
         notifyApiError(notification, error, t);
       }
     },
@@ -108,18 +172,7 @@ export function AttributesPage() {
       title: "",
       key: "actions",
       render: (_, row) => (
-        <Button
-          size="small"
-          onClick={() => {
-            setEditing(row);
-            editForm.resetFields();
-            editForm.setFieldsValue({
-              code: row.code,
-              sortOrder: row.sortOrder,
-              translations: row.translations,
-            });
-          }}
-        >
+        <Button size="small" onClick={() => setEditing(row)}>
           {t("catalog.attributes.edit")}
         </Button>
       ),
@@ -153,7 +206,7 @@ export function AttributesPage() {
         onOk={() => createForm.submit()}
         confirmLoading={createMutation.isPending}
       >
-        <Form<FormValues>
+        <Form<CreateFormValues>
           form={createForm}
           layout="vertical"
           onFinish={(values) => createMutation.mutate(values)}
@@ -168,7 +221,7 @@ export function AttributesPage() {
           <Form.Item name="sortOrder" label={t("catalog.attributes.fields.sortOrder")}>
             <InputNumber style={{ width: "100%" }} />
           </Form.Item>
-          <TranslationTabs />
+          <TranslationTabs defaultLocale={me.shop.defaultLocale} />
         </Form>
       </Modal>
 
@@ -177,34 +230,32 @@ export function AttributesPage() {
         open={editing != null}
         onClose={() => setEditing(null)}
         extra={
-          <Button type="primary" loading={editMutation.isPending} onClick={() => editForm.submit()}>
+          <Button
+            type="primary"
+            loading={editMutation.isPending}
+            onClick={() => editFormRef.current?.submit()}
+          >
             {t("common.save")}
           </Button>
         }
       >
         {editing && (
-          <Form<FormValues>
-            form={editForm}
-            layout="vertical"
-            onFinish={(values) => {
+          <AttributeEditForm
+            key={editing.id}
+            ref={editFormRef}
+            attribute={editing}
+            defaultLocale={me.shop.defaultLocale}
+            onFinish={(values, form) => {
               const body: AttributeDefinitionPatch = {
                 ...(values.sortOrder != null ? { sortOrder: values.sortOrder } : {}),
               };
-              const translations = buildTranslationsForPatch(editForm, values.translations);
+              const translations = buildTranslationsForPatch(form, values.translations);
               if (translations) {
                 body.translations = translations;
               }
               editMutation.mutate({ id: editing.id, body });
             }}
-          >
-            <Form.Item name="code" label={t("catalog.attributes.fields.code")}>
-              <Input disabled />
-            </Form.Item>
-            <Form.Item name="sortOrder" label={t("catalog.attributes.fields.sortOrder")}>
-              <InputNumber style={{ width: "100%" }} />
-            </Form.Item>
-            <TranslationTabs />
-          </Form>
+          />
         )}
       </Drawer>
     </Card>

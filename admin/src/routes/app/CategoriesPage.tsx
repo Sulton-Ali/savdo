@@ -1,4 +1,4 @@
-import { locales } from "@savdo/i18n";
+import { type Locale, locales } from "@savdo/i18n";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   App,
@@ -6,6 +6,7 @@ import {
   Card,
   Drawer,
   Form,
+  type FormInstance,
   Input,
   InputNumber,
   Popconfirm,
@@ -13,11 +14,20 @@ import {
   Switch,
   Tabs,
   Tag,
+  Tooltip,
   Tree,
 } from "antd";
 import type { DataNode } from "antd/es/tree";
 import { Pencil, Plus, Trash2 } from "lucide-react";
-import { type ReactNode, useCallback, useMemo, useState } from "react";
+import {
+  forwardRef,
+  type ReactNode,
+  useCallback,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../../auth/AuthContext";
 import {
@@ -31,13 +41,17 @@ import {
 } from "../../catalog/api";
 import { buildCategoryTree, categoryDepth, MAX_CATEGORY_DEPTH } from "../../catalog/tree";
 import { ApiError, applyApiErrorToForm, notifyApiError } from "../../lib/errors";
-import { buildTranslationsForCreate, buildTranslationsForPatch } from "../../lib/translations";
+import {
+  buildTranslationsForCreate,
+  buildTranslationsForPatch,
+  type TranslationsFormValue,
+} from "../../lib/translations";
 
-interface FormValues {
+interface CategoryFormValues {
   slug?: string;
   sortOrder?: number;
   isActive?: boolean;
-  translations?: Record<string, { name?: string; description?: string }>;
+  translations?: TranslationsFormValue;
 }
 
 /** `{ type: "create", parentId }` opens the create Drawer for a new root
@@ -47,16 +61,100 @@ type DrawerState =
   | { type: "create"; parentId: string | null }
   | { type: "edit"; category: Category };
 
+/**
+ * The Drawer's form body, mounted fresh (via the parent's `key`) for every
+ * entity it edits — never reused across two different categories. It reads
+ * its starting values from `Form`'s own `initialValues`, never from
+ * `form.setFieldsValue` after mount: calling `setFieldsValue` on a form
+ * whose fields are already registered marks them "touched", which would
+ * make `buildTranslationsForPatch` think the user edited a locale they
+ * never opened (T6a review, MAJOR 1).
+ */
+const CategoryDrawerForm = forwardRef<
+  FormInstance<CategoryFormValues>,
+  {
+    drawer: DrawerState;
+    defaultLocale: Locale;
+    onFinish: (values: CategoryFormValues, form: FormInstance<CategoryFormValues>) => void;
+  }
+>(function CategoryDrawerForm({ drawer, defaultLocale, onFinish }, ref) {
+  const { t } = useTranslation();
+  const [form] = Form.useForm<CategoryFormValues>();
+  useImperativeHandle(ref, () => form, [form]);
+
+  const initialValues: CategoryFormValues =
+    drawer.type === "edit"
+      ? {
+          slug: drawer.category.slug,
+          sortOrder: drawer.category.sortOrder,
+          isActive: drawer.category.isActive,
+          translations: drawer.category.translations,
+        }
+      : { isActive: true };
+
+  return (
+    <Form<CategoryFormValues>
+      form={form}
+      layout="vertical"
+      initialValues={initialValues}
+      onFinish={(values) => onFinish(values, form)}
+    >
+      <Tabs
+        items={locales.map((locale) => ({
+          key: locale,
+          label: t(`lang.${locale}`),
+          children: (
+            <>
+              <Form.Item
+                name={["translations", locale, "name"]}
+                label={t("catalog.categories.fields.name")}
+                rules={[{ required: locale === defaultLocale }]}
+              >
+                <Input />
+              </Form.Item>
+              <Form.Item
+                name={["translations", locale, "description"]}
+                label={t("catalog.categories.fields.description")}
+              >
+                <Input.TextArea rows={3} />
+              </Form.Item>
+            </>
+          ),
+        }))}
+      />
+      <Form.Item name="slug" label={t("catalog.categories.fields.slug")}>
+        <Input />
+      </Form.Item>
+      <Form.Item name="sortOrder" label={t("catalog.categories.fields.sortOrder")}>
+        <InputNumber style={{ width: "100%" }} />
+      </Form.Item>
+      <Form.Item
+        name="isActive"
+        label={t("catalog.categories.fields.isActive")}
+        valuePropName="checked"
+      >
+        <Switch />
+      </Form.Item>
+    </Form>
+  );
+});
+
 export function CategoriesPage() {
   const { t } = useTranslation();
   const { notification } = App.useApp();
   const queryClient = useQueryClient();
   const { me } = useAuth();
 
-  const [form] = Form.useForm<FormValues>();
+  const formRef = useRef<FormInstance<CategoryFormValues>>(null);
   const [drawer, setDrawer] = useState<DrawerState | null>(null);
 
-  const { data, isPending } = useQuery({ queryKey: ["categories"], queryFn: fetchCategories });
+  // Always includes inactive categories — this page is only reachable with
+  // `catalog.write`, which must see and manage inactive categories too
+  // (unlike the product list's cashier-hidden toggle).
+  const { data, isPending } = useQuery({
+    queryKey: ["categories", true],
+    queryFn: () => fetchCategories(true),
+  });
   const categories = useMemo(() => data ?? [], [data]);
 
   function invalidate() {
@@ -64,7 +162,13 @@ export function CategoriesPage() {
   }
 
   const saveMutation = useMutation({
-    mutationFn: (values: FormValues) => {
+    mutationFn: ({
+      values,
+      form,
+    }: {
+      values: CategoryFormValues;
+      form: FormInstance<CategoryFormValues>;
+    }) => {
       if (!drawer) {
         throw new Error("no category form open");
       }
@@ -94,7 +198,8 @@ export function CategoriesPage() {
       setDrawer(null);
     },
     onError: (error) => {
-      if (!applyApiErrorToForm(form, error, t)) {
+      const form = formRef.current;
+      if (!form || !applyApiErrorToForm(form, error, t)) {
         notifyApiError(notification, error, t);
       }
     },
@@ -116,28 +221,13 @@ export function CategoriesPage() {
     },
   });
 
-  const openCreate = useCallback(
-    (parentId: string | null) => {
-      form.resetFields();
-      form.setFieldsValue({ isActive: true });
-      setDrawer({ type: "create", parentId });
-    },
-    [form],
-  );
+  const openCreate = useCallback((parentId: string | null) => {
+    setDrawer({ type: "create", parentId });
+  }, []);
 
-  const openEdit = useCallback(
-    (category: Category) => {
-      form.resetFields();
-      form.setFieldsValue({
-        slug: category.slug,
-        sortOrder: category.sortOrder,
-        isActive: category.isActive,
-        translations: category.translations,
-      });
-      setDrawer({ type: "edit", category });
-    },
-    [form],
-  );
+  const openEdit = useCallback((category: Category) => {
+    setDrawer({ type: "edit", category });
+  }, []);
 
   const renderTitle = useCallback(
     (category: Category): ReactNode => {
@@ -146,17 +236,23 @@ export function CategoriesPage() {
         <Space>
           <span>{category.name}</span>
           {!category.isActive && <Tag>{t("catalog.categories.inactive")}</Tag>}
-          <Button
-            type="text"
-            size="small"
-            icon={<Plus size={14} />}
-            disabled={depth >= MAX_CATEGORY_DEPTH}
-            title={t("catalog.categories.addChild")}
-            onClick={(event) => {
-              event.stopPropagation();
-              openCreate(category.id);
-            }}
-          />
+          <Tooltip
+            title={
+              depth >= MAX_CATEGORY_DEPTH ? t("catalog.categories.maxDepthReached") : undefined
+            }
+          >
+            <Button
+              type="text"
+              size="small"
+              icon={<Plus size={14} />}
+              disabled={depth >= MAX_CATEGORY_DEPTH}
+              title={t("catalog.categories.addChild")}
+              onClick={(event) => {
+                event.stopPropagation();
+                openCreate(category.id);
+              }}
+            />
+          </Tooltip>
           <Button
             type="text"
             size="small"
@@ -234,54 +330,27 @@ export function CategoriesPage() {
         open={drawer != null}
         onClose={() => setDrawer(null)}
         extra={
-          <Button type="primary" loading={saveMutation.isPending} onClick={() => form.submit()}>
+          <Button
+            type="primary"
+            loading={saveMutation.isPending}
+            onClick={() => formRef.current?.submit()}
+          >
             {t("common.save")}
           </Button>
         }
       >
         {drawer && (
-          <Form<FormValues>
-            form={form}
-            layout="vertical"
-            onFinish={(values) => saveMutation.mutate(values)}
-          >
-            <Tabs
-              items={locales.map((locale) => ({
-                key: locale,
-                label: t(`lang.${locale}`),
-                children: (
-                  <>
-                    <Form.Item
-                      name={["translations", locale, "name"]}
-                      label={t("catalog.categories.fields.name")}
-                      rules={[{ required: locale === me.shop.defaultLocale }]}
-                    >
-                      <Input />
-                    </Form.Item>
-                    <Form.Item
-                      name={["translations", locale, "description"]}
-                      label={t("catalog.categories.fields.description")}
-                    >
-                      <Input.TextArea rows={3} />
-                    </Form.Item>
-                  </>
-                ),
-              }))}
-            />
-            <Form.Item name="slug" label={t("catalog.categories.fields.slug")}>
-              <Input />
-            </Form.Item>
-            <Form.Item name="sortOrder" label={t("catalog.categories.fields.sortOrder")}>
-              <InputNumber style={{ width: "100%" }} />
-            </Form.Item>
-            <Form.Item
-              name="isActive"
-              label={t("catalog.categories.fields.isActive")}
-              valuePropName="checked"
-            >
-              <Switch />
-            </Form.Item>
-          </Form>
+          <CategoryDrawerForm
+            key={
+              drawer.type === "edit"
+                ? `edit-${drawer.category.id}`
+                : `create-${drawer.parentId ?? "root"}`
+            }
+            ref={formRef}
+            drawer={drawer}
+            defaultLocale={me.shop.defaultLocale}
+            onFinish={(values, form) => saveMutation.mutate({ values, form })}
+          />
         )}
       </Drawer>
     </Card>
