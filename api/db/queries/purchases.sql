@@ -31,13 +31,22 @@ SELECT * FROM purchase_items
 WHERE shop_id = $1 AND purchase_id = $2
 ORDER BY created_at, id;
 
--- name: DeletePurchaseItems :exec
+-- name: DeletePurchaseItems :execrows
 -- Join rows, hard-deleted (§ 04-DATA-MODEL.md rule 7); used by the service
--- to replace a draft's item list (delete then re-CreatePurchaseItem), never
--- on a received purchase (the service enforces status = 'draft' before
--- calling this).
+-- to replace a draft's item list (delete then re-CreatePurchaseItem). The
+-- USING join guards status = 'draft' at the SQL level too (defense in
+-- depth alongside the service's own GetPurchaseForUpdate check): on a
+-- received/cancelled purchase this affects 0 rows, same signal shape as
+-- UpdatePurchaseHeader/SetPurchaseReceived/SetPurchaseCancelled. The
+-- affected-row count is not on its own a reliable "was it draft" check —
+-- a draft with no items yet also affects 0 rows — the service still reads
+-- status from GetPurchaseForUpdate first.
 DELETE FROM purchase_items
-WHERE shop_id = $1 AND purchase_id = $2;
+USING purchases
+WHERE purchase_items.purchase_id = purchases.id
+    AND purchase_items.shop_id = $1
+    AND purchase_items.purchase_id = $2
+    AND purchases.status = 'draft';
 
 -- name: GetPurchase :one
 SELECT * FROM purchases

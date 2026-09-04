@@ -107,9 +107,13 @@ func (q *Queries) CreatePurchaseItem(ctx context.Context, arg CreatePurchaseItem
 	return i, err
 }
 
-const deletePurchaseItems = `-- name: DeletePurchaseItems :exec
+const deletePurchaseItems = `-- name: DeletePurchaseItems :execrows
 DELETE FROM purchase_items
-WHERE shop_id = $1 AND purchase_id = $2
+USING purchases
+WHERE purchase_items.purchase_id = purchases.id
+    AND purchase_items.shop_id = $1
+    AND purchase_items.purchase_id = $2
+    AND purchases.status = 'draft'
 `
 
 type DeletePurchaseItemsParams struct {
@@ -118,12 +122,20 @@ type DeletePurchaseItemsParams struct {
 }
 
 // Join rows, hard-deleted (§ 04-DATA-MODEL.md rule 7); used by the service
-// to replace a draft's item list (delete then re-CreatePurchaseItem), never
-// on a received purchase (the service enforces status = 'draft' before
-// calling this).
-func (q *Queries) DeletePurchaseItems(ctx context.Context, arg DeletePurchaseItemsParams) error {
-	_, err := q.db.Exec(ctx, deletePurchaseItems, arg.ShopID, arg.PurchaseID)
-	return err
+// to replace a draft's item list (delete then re-CreatePurchaseItem). The
+// USING join guards status = 'draft' at the SQL level too (defense in
+// depth alongside the service's own GetPurchaseForUpdate check): on a
+// received/cancelled purchase this affects 0 rows, same signal shape as
+// UpdatePurchaseHeader/SetPurchaseReceived/SetPurchaseCancelled. The
+// affected-row count is not on its own a reliable "was it draft" check —
+// a draft with no items yet also affects 0 rows — the service still reads
+// status from GetPurchaseForUpdate first.
+func (q *Queries) DeletePurchaseItems(ctx context.Context, arg DeletePurchaseItemsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deletePurchaseItems, arg.ShopID, arg.PurchaseID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const getPurchase = `-- name: GetPurchase :one
