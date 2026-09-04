@@ -39,7 +39,8 @@ if [ -z "$go_files" ]; then
   check_pass "float64/money check (no Go files yet)"
 else
   money_hits="$(printf '%s\n' "$go_files" | xargs -r grep -inE -B3 -A3 'float64' \
-    | grep -inE '\b(price|cost|total|amount)\b' || true)"
+    | grep -inE 'price|cost|total|amount' \
+    | grep -vE 'TotalAlloc|HeapAlloc|Mallocs' || true)"
   if [ -z "$money_hits" ]; then
     check_pass "no float64 within 3 lines of a money field"
   else
