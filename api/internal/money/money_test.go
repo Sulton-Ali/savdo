@@ -1,8 +1,11 @@
 package money_test
 
 import (
+	"errors"
+	"fmt"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/shopspring/decimal"
 
@@ -77,6 +80,9 @@ func TestParseAmount(t *testing.T) {
 		{"1.2.3", true, ""},
 		{" 5.00", true, ""},
 		{"5.00 ", true, ""},
+		{"999999999999.99", false, "999999999999.99"}, // exactly NUMERIC(14,2)'s max
+		{"1000000000000.00", true, ""},                // one cent over the max
+		{"9999999999999.99", true, ""},                // 13 integer digits: far over
 	}
 	for _, tt := range tests {
 		t.Run(tt.in, func(t *testing.T) {
@@ -101,5 +107,26 @@ func TestString_fixesTwoDecimals(t *testing.T) {
 	d := decimal.RequireFromString("5")
 	if got := money.String(d); got != "5.00" {
 		t.Fatalf("String(5) = %q, want %q", got, "5.00")
+	}
+}
+
+func TestIsOutOfRange(t *testing.T) {
+	if money.IsOutOfRange(nil) {
+		t.Error("IsOutOfRange(nil) = true, want false")
+	}
+	if money.IsOutOfRange(errors.New("boom")) {
+		t.Error("IsOutOfRange(plain error) = true, want false")
+	}
+	pgErr := &pgconn.PgError{Code: money.OutOfRangeSQLState}
+	if !money.IsOutOfRange(pgErr) {
+		t.Error("IsOutOfRange(22003) = false, want true")
+	}
+	wrapped := fmt.Errorf("wrapped: %w", pgErr)
+	if !money.IsOutOfRange(wrapped) {
+		t.Error("IsOutOfRange(wrapped 22003) = false, want true")
+	}
+	other := &pgconn.PgError{Code: "23505"}
+	if money.IsOutOfRange(other) {
+		t.Error("IsOutOfRange(23505) = true, want false")
 	}
 }

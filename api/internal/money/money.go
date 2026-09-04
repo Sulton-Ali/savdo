@@ -8,9 +8,11 @@
 package money
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/shopspring/decimal"
 
@@ -25,6 +27,25 @@ import (
 // decimal.Decimal's own parsing rules) so the accepted wire format is
 // exactly this, not "whatever the decimal library happens to tolerate".
 var amountPattern = regexp.MustCompile(`^\d+(\.\d{1,2})?$`)
+
+// maxAmount is the largest value a `NUMERIC(14,2)` column can hold: 14
+// total digits, 2 of them fractional, so 12 integer digits.
+var maxAmount = decimal.RequireFromString("999999999999.99")
+
+// OutOfRangeSQLState is Postgres' "numeric_value_out_of_range" SQLSTATE
+// (22003). ParseAmount already rejects anything that would overflow
+// NUMERIC(14,2) before it ever reaches a query, so IsOutOfRange exists
+// purely as a defense-in-depth backstop for a write path that somehow
+// still produced an out-of-range value.
+const OutOfRangeSQLState = "22003"
+
+// IsOutOfRange reports whether err is a Postgres numeric_value_out_of_range
+// error (SQLSTATE 22003), for callers mapping it to a 400 VALIDATION_FAILED
+// `invalid` alongside ParseAmount's own bound.
+func IsOutOfRange(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == OutOfRangeSQLState
+}
 
 // FromNumeric converts a scanned `NUMERIC` column to a Decimal. n must be
 // Valid (callers check n.Valid themselves — a NULL column has no decimal
@@ -57,16 +78,20 @@ func ToNumeric(d decimal.Decimal) pgtype.Numeric {
 }
 
 // ParseAmount parses s as a non-negative decimal string with at most two
-// decimal places — the shape every money and quantity field on the wire
-// must have (ADR-007). Returns a *apierr.Error with reason "invalid" for
-// anything else: malformed input, a negative amount, or more than two
-// decimal digits (so "12.345" is rejected, never silently rounded).
+// decimal places and a magnitude that fits `NUMERIC(14,2)` — the shape
+// every money and quantity field on the wire must have (ADR-007). Returns
+// a *apierr.Error with reason "invalid" for anything else: malformed
+// input, a negative amount, more than two decimal digits (so "12.345" is
+// rejected, never silently rounded), or a value over 999999999999.99.
 func ParseAmount(s string) (decimal.Decimal, *apierr.Error) {
 	if !amountPattern.MatchString(s) {
 		return decimal.Decimal{}, invalidAmount()
 	}
 	d, err := decimal.NewFromString(s)
 	if err != nil {
+		return decimal.Decimal{}, invalidAmount()
+	}
+	if d.GreaterThan(maxAmount) {
 		return decimal.Decimal{}, invalidAmount()
 	}
 	return d, nil
