@@ -150,6 +150,42 @@ entries are added by `/phase-done` when a review catches one.
   that order — a positional match had silently tagged a shirt's 2nd image with the wrong
   size (`c0b1689`). Any future list ordered by a timestamp shared across same-transaction
   inserts needs an explicit tiebreaker or a natural-key match, not positional trust.
+- **A shared helper that opens its own connection while holding the caller's.** The
+  idempotency wrapper took a pool connection for its transaction/advisory lock and then
+  called the wrapped handler, which opened a *second* connection of its own — under a
+  small pool this deadlocks the API. Run the wrapped handler on the helper's own
+  transaction instead of letting it grab a fresh connection (T3 Opus review, BLOCKER,
+  fixed `cf3cf4e`).
+- **A contract field wired in the module that owns the column but not the module that
+  serves the resource.** `lowStockThreshold` was correctly added to the schema and the
+  `catalog`/`shop` tables, but `GetShop`/`UpdateShop` never touched the column (always
+  reported 0) and `CreateProduct`/`UpdateProduct` never read or emitted the per-product
+  override (`PATCH` silently no-opped) — each branch reviewed its own diff and neither
+  caught it. An integration check against the live API, not just per-branch review, is
+  needed whenever the admin was built against contract stubs ahead of the service that
+  fills them in (Phase 3 phase review, fixed `592991b`).
+- **Implementers reporting before running the formatter and linter.** T3 was bounced
+  twice by the merger on the same branch: once for `gofmt` on files touched by a late
+  fix commit, once for `golangci-lint` (errcheck, gosec, revive) on code the branch
+  itself introduced. `make format-check` and `make lint` are cheap and local — run both
+  before reporting done, not after the merger finds them.
+- **Random v4 ids in test fixtures make ordering-dependent assertions vacuous.** A
+  purchase-cancel test picked "the last item" by relying on insertion order, but the
+  item ids were random v4s with no guaranteed relationship to that order — sort and
+  pick deliberately, or match by a natural key (T4 cancel test, fixed `8cd31b6`).
+- **Concurrency tests without a barrier pass sequentially, proving nothing.** Two
+  goroutines started back-to-back with no synchronisation usually just run one after
+  the other on a fast local Postgres — a "concurrent" test like that is green whether
+  or not the lock actually works. Use a lock-held, channel-driven interleaving so the
+  second actor provably starts while the first still holds the row lock (T3
+  `move_test.go`).
+- **A CLI's `--shop-slug` typo silently creates a new shop.** `savdo seed` is
+  idempotent by design (create-if-missing, so `make seed` is safe to rerun), but that
+  same design means a *misspelled* slug given to any `savdo` subcommand on the seeding
+  path does not error — it creates a brand-new shop with its own ledger data, which the
+  append-only trigger then makes impossible to cleanly delete (Phase 3 close, while
+  probing `--shop-slug` validation). Treat any `--shop-slug` argument as a real,
+  deliberate value, never a throwaway one used just to see an error message.
 
 ## Tooling
 
@@ -181,3 +217,5 @@ Tracked honestly in the phase log, including the numbers that look bad:
 **Phase 1 actuals (closed 2026-09-04):** human-written production lines = 0. Review catch rate > 0: T7's guard redirected on any error, not just `401`; T4's client-trusted `X-Forwarded-For` first hop (CRITICAL), a case-sensitive limiter key on a `citext` column, unbounded limiter keys and no request body limit; T8's stale sidebar after a settings save; T9's wrong incident dates; T5's default-location race surfacing as a 500, a blank phone stored non-`NULL`, a first-location-inference bug introduced by the first fix, and an auth password sentence that broke ADR-013's machine-readable-code rule. Escalations: Q-19 (rate-limit abuse horizon) and Q-20 (nullable `PATCH` fields), both still open; D-31 amended mid-phase for `dayjs`; one-heavy-gate-at-a-time (O-13). Correctness-critical defects reaching `main` = 0. Rework rate: T4 needed 2 rounds, T5 needed 3, T7 needed 1, T8 needed 2, T9 needed 1.
 
 **Phase 2 actuals (closed 2026-09-04):** human-written production lines = 0. Review catch rate > 0: T1's role-shaped parallel product schemas collapsed into one permission-gated schema, missing locale/`translationFallback` on `Unit`/`AttributeDefinition`, a missing 409 on `addProductImage`; T2's uncoalesced locale fallback columns, shop-unscoped `CountActiveVariants`/`CountProductImages`, `GetCategoryDepth` not defaulting to 0; T3 (correctness-critical, two independent sessions on different models — Sonnet + Opus — across 3 rounds) caught a decompression bomb, unbounded decode/spool concurrency, EXIF-bearing originals served instead of derivatives only (O-16), a symlink traversal in dev media serving, an oversized-upload 500 instead of 400, and a relative `MEDIA_DIR` silently accepted in prod; T6a's edit-drawer cross-locale bleed and inactive categories reaching cashiers. Two more defects surfaced only after merge, both from the same root cause: `ListVariantsForStaff`/`ListVariantsForCashier` ordered variants by `created_at` alone, which every variant of one product shares (same-transaction inserts, transaction-time `now()`) — fixed with an `, id` tiebreaker (`408adad`) — and the seed's `attachImages` had used that same unstable order positionally, confirmed to have tagged a shirt's 2nd image with the wrong size (`c0b1689`); see the new failure-mode entry above. Escalations: Q-03/Q-04/Q-12/Q-16/Q-20 answered as D-32..D-37; Q-21 (image retag `PATCH`) opened and deferred, not built this phase. Correctness-critical defects reaching `main` = 0 (T3's findings were all caught pre-merge). Rework rate: T1 1 round, T2 1 round, T3 3 rounds, T6a 1 round; T4, T5, T6b, T8 merged with no fix-round detail recorded in the merge body (smoke-tested at merge; browser acceptance still pending from the owner).
+
+**Phase 3 actuals (closed 2026-09-05):** human-written production lines = 0. 16 merges landed on `main` in this phase's range (14 phase-3-scoped, plus 2 leftover Phase 2 acceptance-fix merges). Review catch rate > 0, concentrated in the correctness-critical stock modules as intended: T2 schema — Sonnet found a MAJOR (missing suppliers/purchases/audit/idempotency tests) and a MINOR (migration bundling); Opus found a MAJOR (the append-only guard only caught `UPDATE`, not `DELETE`) plus indexing/rebuild-equality/cursor MINORs — all fixed, re-checked, approved. T3 stock-core — Sonnet approved with no findings; Opus found a BLOCKER (the idempotency helper held one pool connection while its wrapped handler opened a second, deadlocking the API under load) and a MAJOR (the domain write and the idempotency key row could commit separately, letting a retry double-write), both fixed by running the handler on the helper's own transaction, plus a run of MINOR/NIT findings (non-deterministic concurrency test, transfer lock ordering, `--shop-slug` made required, etc.) — all fixed, re-checked, approved; the branch was bounced twice by the merger on gate steps alone (`gofmt`, then `golangci-lint`) before its first fully green `make verify`. T4 purchases — Sonnet approved with 2 MINORs fixed; Opus found 2 MAJORs (purchase item `productName` ignored the caller's `Accept-Language`; no test exercised a multi-item purchase) plus several MINORs, all fixed, with a small tail of residual findings closed in the branch's last commit (`8cd31b6`, which also fixed a random-v4-id ordering assumption in the cancel test). The phase review (Opus) itself caught 2 MAJORs post-merge-order: `lowStockThreshold` silently dropped by `shop`'s and `catalog`'s own services despite being correctly added to the schema and the contract — fixed on `phase-3/t9-threshold-wiring` (`592991b`), the branch this session used as its starting point. Escalations: Q-02 answered as D-40 (cashier stock visibility); the Phase 3 interview recorded D-40..D-47 up front, with D-48..D-51 following mid-phase as scope questions came up (idempotency-key shape, ListLow ruling, seed reset policy, purchase-cancel ledger rule) — all answered same-day, none left open past this phase's close. Correctness-critical defects reaching `main` = 0 (every BLOCKER/MAJOR above was caught and fixed pre-merge; the two threshold-wiring MAJORs were an ordinary-module gap, not stock/ledger). Rework rate: T1 1 round (2 MINORs, 1 deferred); T2 1 round each from two reviewers; T3 3 rounds plus 2 gate bounces; T4 2 rounds; T5 1 round (2 MAJOR + 1 MINOR, ordinary module); T6a 1 round; T6b 1 round; T6c 0 rounds (no findings); T7 0 rounds (no findings); T9/phase-review 1 round (2 MAJOR). Sessions: 1 interview + 13 phase-3 task branches + 1 phase-review pass + this close session. New failure modes added above: a shared idempotency helper deadlocking by opening a second pool connection under the caller's own transaction; a contract field wired in the schema-owning module but not the resource-serving module, needing a live-API integration check beyond per-branch review; implementers skipping `make format-check`/`make lint` before reporting; random v4 test-fixture ids defeating ordering-dependent assertions; concurrency tests with no goroutine barrier passing vacuously; and a seeding-path CLI's `--shop-slug` silently creating an unwanted shop when given a typo.
