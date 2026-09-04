@@ -24,9 +24,10 @@ RETURNING *;
 
 -- name: UpdateShop :one
 -- Patch: every settings field is optional via sqlc.narg + COALESCE, so a
--- caller only supplies the fields it wants to change. next_sale_number is
--- deliberately not here: it is only ever advanced under FOR UPDATE by the
--- sales flow (Phase 4), never by a settings update.
+-- caller only supplies the fields it wants to change. next_sale_number and
+-- next_purchase_number are deliberately not here: they are only ever
+-- advanced under row lock by the sales/purchases flows, never by a
+-- settings update.
 UPDATE shops
 SET
     name = COALESCE(sqlc.narg('name'), name),
@@ -35,6 +36,7 @@ SET
     default_locale = COALESCE(sqlc.narg('default_locale'), default_locale),
     allow_negative_stock = COALESCE(sqlc.narg('allow_negative_stock'), allow_negative_stock),
     update_cost_on_purchase = COALESCE(sqlc.narg('update_cost_on_purchase'), update_cost_on_purchase),
+    low_stock_threshold = COALESCE(sqlc.narg('low_stock_threshold'), low_stock_threshold),
     ai_daily_token_budget = COALESCE(sqlc.narg('ai_daily_token_budget'), ai_daily_token_budget),
     updated_at = now()
 WHERE id = sqlc.arg('id')

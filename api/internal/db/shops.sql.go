@@ -14,7 +14,7 @@ import (
 const createShop = `-- name: CreateShop :one
 INSERT INTO shops (id, slug, name)
 VALUES ($1, $2, $3)
-RETURNING id, slug, name, currency, timezone, default_locale, allow_negative_stock, update_cost_on_purchase, next_sale_number, ai_daily_token_budget, created_at, updated_at
+RETURNING id, slug, name, currency, timezone, default_locale, allow_negative_stock, update_cost_on_purchase, next_sale_number, ai_daily_token_budget, created_at, updated_at, next_purchase_number, low_stock_threshold
 `
 
 type CreateShopParams struct {
@@ -42,12 +42,14 @@ func (q *Queries) CreateShop(ctx context.Context, arg CreateShopParams) (Shop, e
 		&i.AiDailyTokenBudget,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.NextPurchaseNumber,
+		&i.LowStockThreshold,
 	)
 	return i, err
 }
 
 const getShop = `-- name: GetShop :one
-SELECT id, slug, name, currency, timezone, default_locale, allow_negative_stock, update_cost_on_purchase, next_sale_number, ai_daily_token_budget, created_at, updated_at FROM shops
+SELECT id, slug, name, currency, timezone, default_locale, allow_negative_stock, update_cost_on_purchase, next_sale_number, ai_daily_token_budget, created_at, updated_at, next_purchase_number, low_stock_threshold FROM shops
 WHERE id = $1
 `
 
@@ -67,12 +69,14 @@ func (q *Queries) GetShop(ctx context.Context, id uuid.UUID) (Shop, error) {
 		&i.AiDailyTokenBudget,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.NextPurchaseNumber,
+		&i.LowStockThreshold,
 	)
 	return i, err
 }
 
 const getShopBySlug = `-- name: GetShopBySlug :one
-SELECT id, slug, name, currency, timezone, default_locale, allow_negative_stock, update_cost_on_purchase, next_sale_number, ai_daily_token_budget, created_at, updated_at FROM shops
+SELECT id, slug, name, currency, timezone, default_locale, allow_negative_stock, update_cost_on_purchase, next_sale_number, ai_daily_token_budget, created_at, updated_at, next_purchase_number, low_stock_threshold FROM shops
 WHERE slug = $1
 `
 
@@ -92,6 +96,8 @@ func (q *Queries) GetShopBySlug(ctx context.Context, slug string) (Shop, error) 
 		&i.AiDailyTokenBudget,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.NextPurchaseNumber,
+		&i.LowStockThreshold,
 	)
 	return i, err
 }
@@ -121,10 +127,11 @@ SET
     default_locale = COALESCE($4, default_locale),
     allow_negative_stock = COALESCE($5, allow_negative_stock),
     update_cost_on_purchase = COALESCE($6, update_cost_on_purchase),
-    ai_daily_token_budget = COALESCE($7, ai_daily_token_budget),
+    low_stock_threshold = COALESCE($7, low_stock_threshold),
+    ai_daily_token_budget = COALESCE($8, ai_daily_token_budget),
     updated_at = now()
-WHERE id = $8
-RETURNING id, slug, name, currency, timezone, default_locale, allow_negative_stock, update_cost_on_purchase, next_sale_number, ai_daily_token_budget, created_at, updated_at
+WHERE id = $9
+RETURNING id, slug, name, currency, timezone, default_locale, allow_negative_stock, update_cost_on_purchase, next_sale_number, ai_daily_token_budget, created_at, updated_at, next_purchase_number, low_stock_threshold
 `
 
 type UpdateShopParams struct {
@@ -134,14 +141,16 @@ type UpdateShopParams struct {
 	DefaultLocale        *string   `json:"default_locale"`
 	AllowNegativeStock   *bool     `json:"allow_negative_stock"`
 	UpdateCostOnPurchase *bool     `json:"update_cost_on_purchase"`
+	LowStockThreshold    *int32    `json:"low_stock_threshold"`
 	AiDailyTokenBudget   *int32    `json:"ai_daily_token_budget"`
 	ID                   uuid.UUID `json:"id"`
 }
 
 // Patch: every settings field is optional via sqlc.narg + COALESCE, so a
-// caller only supplies the fields it wants to change. next_sale_number is
-// deliberately not here: it is only ever advanced under FOR UPDATE by the
-// sales flow (Phase 4), never by a settings update.
+// caller only supplies the fields it wants to change. next_sale_number and
+// next_purchase_number are deliberately not here: they are only ever
+// advanced under row lock by the sales/purchases flows, never by a
+// settings update.
 func (q *Queries) UpdateShop(ctx context.Context, arg UpdateShopParams) (Shop, error) {
 	row := q.db.QueryRow(ctx, updateShop,
 		arg.Name,
@@ -150,6 +159,7 @@ func (q *Queries) UpdateShop(ctx context.Context, arg UpdateShopParams) (Shop, e
 		arg.DefaultLocale,
 		arg.AllowNegativeStock,
 		arg.UpdateCostOnPurchase,
+		arg.LowStockThreshold,
 		arg.AiDailyTokenBudget,
 		arg.ID,
 	)
@@ -167,6 +177,8 @@ func (q *Queries) UpdateShop(ctx context.Context, arg UpdateShopParams) (Shop, e
 		&i.AiDailyTokenBudget,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.NextPurchaseNumber,
+		&i.LowStockThreshold,
 	)
 	return i, err
 }

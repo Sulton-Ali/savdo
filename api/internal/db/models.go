@@ -15,6 +15,51 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type AdjustmentReason string
+
+const (
+	AdjustmentReasonCountCorrection AdjustmentReason = "count_correction"
+	AdjustmentReasonDamaged         AdjustmentReason = "damaged"
+	AdjustmentReasonLost            AdjustmentReason = "lost"
+	AdjustmentReasonFound           AdjustmentReason = "found"
+	AdjustmentReasonOther           AdjustmentReason = "other"
+)
+
+func (e *AdjustmentReason) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = AdjustmentReason(s)
+	case string:
+		*e = AdjustmentReason(s)
+	default:
+		return fmt.Errorf("unsupported scan type for AdjustmentReason: %T", src)
+	}
+	return nil
+}
+
+type NullAdjustmentReason struct {
+	AdjustmentReason AdjustmentReason `json:"adjustment_reason"`
+	Valid            bool             `json:"valid"` // Valid is true if AdjustmentReason is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullAdjustmentReason) Scan(value interface{}) error {
+	if value == nil {
+		ns.AdjustmentReason, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.AdjustmentReason.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullAdjustmentReason) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.AdjustmentReason), nil
+}
+
 type LocationKind string
 
 const (
@@ -57,6 +102,49 @@ func (ns NullLocationKind) Value() (driver.Value, error) {
 	return string(ns.LocationKind), nil
 }
 
+type PurchaseStatus string
+
+const (
+	PurchaseStatusDraft     PurchaseStatus = "draft"
+	PurchaseStatusReceived  PurchaseStatus = "received"
+	PurchaseStatusCancelled PurchaseStatus = "cancelled"
+)
+
+func (e *PurchaseStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = PurchaseStatus(s)
+	case string:
+		*e = PurchaseStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for PurchaseStatus: %T", src)
+	}
+	return nil
+}
+
+type NullPurchaseStatus struct {
+	PurchaseStatus PurchaseStatus `json:"purchase_status"`
+	Valid          bool           `json:"valid"` // Valid is true if PurchaseStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullPurchaseStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.PurchaseStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.PurchaseStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullPurchaseStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.PurchaseStatus), nil
+}
+
 type SessionClient string
 
 const (
@@ -97,6 +185,53 @@ func (ns NullSessionClient) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.SessionClient), nil
+}
+
+type StockMovementKind string
+
+const (
+	StockMovementKindPurchaseIn  StockMovementKind = "purchase_in"
+	StockMovementKindSaleOut     StockMovementKind = "sale_out"
+	StockMovementKindSaleVoidIn  StockMovementKind = "sale_void_in"
+	StockMovementKindReturnIn    StockMovementKind = "return_in"
+	StockMovementKindAdjustment  StockMovementKind = "adjustment"
+	StockMovementKindTransferOut StockMovementKind = "transfer_out"
+	StockMovementKindTransferIn  StockMovementKind = "transfer_in"
+)
+
+func (e *StockMovementKind) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = StockMovementKind(s)
+	case string:
+		*e = StockMovementKind(s)
+	default:
+		return fmt.Errorf("unsupported scan type for StockMovementKind: %T", src)
+	}
+	return nil
+}
+
+type NullStockMovementKind struct {
+	StockMovementKind StockMovementKind `json:"stock_movement_kind"`
+	Valid             bool              `json:"valid"` // Valid is true if StockMovementKind is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullStockMovementKind) Scan(value interface{}) error {
+	if value == nil {
+		ns.StockMovementKind, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.StockMovementKind.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullStockMovementKind) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.StockMovementKind), nil
 }
 
 type UserRole string
@@ -157,6 +292,18 @@ type AttributeDefinitionTranslation struct {
 	Name                  string    `json:"name"`
 }
 
+type AuditLog struct {
+	ID         uuid.UUID `json:"id"`
+	ShopID     uuid.UUID `json:"shop_id"`
+	ActorID    uuid.UUID `json:"actor_id"`
+	Action     string    `json:"action"`
+	EntityType string    `json:"entity_type"`
+	EntityID   uuid.UUID `json:"entity_id"`
+	Before     []byte    `json:"before"`
+	After      []byte    `json:"after"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
 type Category struct {
 	ID        uuid.UUID  `json:"id"`
 	ShopID    uuid.UUID  `json:"shop_id"`
@@ -175,6 +322,15 @@ type CategoryTranslation struct {
 	Locale      string    `json:"locale"`
 	Name        string    `json:"name"`
 	Description *string   `json:"description"`
+}
+
+type IdempotencyKey struct {
+	ShopID         uuid.UUID `json:"shop_id"`
+	Key            string    `json:"key"`
+	RequestHash    string    `json:"request_hash"`
+	ResponseStatus int32     `json:"response_status"`
+	ResponseBody   []byte    `json:"response_body"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 type Location struct {
@@ -203,23 +359,24 @@ type MediaFile struct {
 }
 
 type Product struct {
-	ID          uuid.UUID      `json:"id"`
-	ShopID      uuid.UUID      `json:"shop_id"`
-	CategoryID  *uuid.UUID     `json:"category_id"`
-	UnitID      uuid.UUID      `json:"unit_id"`
-	Slug        string         `json:"slug"`
-	Sku         *string        `json:"sku"`
-	BasePrice   pgtype.Numeric `json:"base_price"`
-	CostPrice   pgtype.Numeric `json:"cost_price"`
-	PromoPrice  pgtype.Numeric `json:"promo_price"`
-	PromoFrom   *time.Time     `json:"promo_from"`
-	PromoTo     *time.Time     `json:"promo_to"`
-	IsActive    bool           `json:"is_active"`
-	IsFeatured  bool           `json:"is_featured"`
-	HasVariants bool           `json:"has_variants"`
-	DeletedAt   *time.Time     `json:"deleted_at"`
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
+	ID                uuid.UUID      `json:"id"`
+	ShopID            uuid.UUID      `json:"shop_id"`
+	CategoryID        *uuid.UUID     `json:"category_id"`
+	UnitID            uuid.UUID      `json:"unit_id"`
+	Slug              string         `json:"slug"`
+	Sku               *string        `json:"sku"`
+	BasePrice         pgtype.Numeric `json:"base_price"`
+	CostPrice         pgtype.Numeric `json:"cost_price"`
+	PromoPrice        pgtype.Numeric `json:"promo_price"`
+	PromoFrom         *time.Time     `json:"promo_from"`
+	PromoTo           *time.Time     `json:"promo_to"`
+	IsActive          bool           `json:"is_active"`
+	IsFeatured        bool           `json:"is_featured"`
+	HasVariants       bool           `json:"has_variants"`
+	DeletedAt         *time.Time     `json:"deleted_at"`
+	CreatedAt         time.Time      `json:"created_at"`
+	UpdatedAt         time.Time      `json:"updated_at"`
+	LowStockThreshold *int32         `json:"low_stock_threshold"`
 }
 
 type ProductImage struct {
@@ -256,6 +413,35 @@ type ProductVariant struct {
 	UpdatedAt     time.Time       `json:"updated_at"`
 }
 
+type Purchase struct {
+	ID                uuid.UUID      `json:"id"`
+	ShopID            uuid.UUID      `json:"shop_id"`
+	SupplierID        uuid.UUID      `json:"supplier_id"`
+	LocationID        uuid.UUID      `json:"location_id"`
+	Number            string         `json:"number"`
+	SupplierInvoiceNo *string        `json:"supplier_invoice_no"`
+	Status            PurchaseStatus `json:"status"`
+	ReceivedAt        *time.Time     `json:"received_at"`
+	Note              *string        `json:"note"`
+	TotalCost         pgtype.Numeric `json:"total_cost"`
+	CreatedBy         *uuid.UUID     `json:"created_by"`
+	CancelledAt       *time.Time     `json:"cancelled_at"`
+	CreatedAt         time.Time      `json:"created_at"`
+	UpdatedAt         time.Time      `json:"updated_at"`
+}
+
+type PurchaseItem struct {
+	ID         uuid.UUID      `json:"id"`
+	ShopID     uuid.UUID      `json:"shop_id"`
+	PurchaseID uuid.UUID      `json:"purchase_id"`
+	VariantID  uuid.UUID      `json:"variant_id"`
+	Qty        pgtype.Numeric `json:"qty"`
+	UnitCost   pgtype.Numeric `json:"unit_cost"`
+	LineTotal  pgtype.Numeric `json:"line_total"`
+	CreatedAt  time.Time      `json:"created_at"`
+	UpdatedAt  time.Time      `json:"updated_at"`
+}
+
 type Session struct {
 	ID         uuid.UUID     `json:"id"`
 	ShopID     uuid.UUID     `json:"shop_id"`
@@ -283,6 +469,45 @@ type Shop struct {
 	AiDailyTokenBudget   *int32    `json:"ai_daily_token_budget"`
 	CreatedAt            time.Time `json:"created_at"`
 	UpdatedAt            time.Time `json:"updated_at"`
+	NextPurchaseNumber   int64     `json:"next_purchase_number"`
+	LowStockThreshold    int32     `json:"low_stock_threshold"`
+}
+
+type StockLevel struct {
+	ShopID     uuid.UUID      `json:"shop_id"`
+	VariantID  uuid.UUID      `json:"variant_id"`
+	LocationID uuid.UUID      `json:"location_id"`
+	Qty        pgtype.Numeric `json:"qty"`
+	UpdatedAt  time.Time      `json:"updated_at"`
+}
+
+type StockMovement struct {
+	ID               uuid.UUID         `json:"id"`
+	ShopID           uuid.UUID         `json:"shop_id"`
+	VariantID        uuid.UUID         `json:"variant_id"`
+	LocationID       uuid.UUID         `json:"location_id"`
+	Kind             StockMovementKind `json:"kind"`
+	Qty              pgtype.Numeric    `json:"qty"`
+	UnitCost         pgtype.Numeric    `json:"unit_cost"`
+	RefType          *string           `json:"ref_type"`
+	RefID            *uuid.UUID        `json:"ref_id"`
+	AdjustmentReason *AdjustmentReason `json:"adjustment_reason"`
+	Reason           *string           `json:"reason"`
+	CreatedBy        *uuid.UUID        `json:"created_by"`
+	CreatedAt        time.Time         `json:"created_at"`
+}
+
+type Supplier struct {
+	ID               uuid.UUID  `json:"id"`
+	ShopID           uuid.UUID  `json:"shop_id"`
+	Name             string     `json:"name"`
+	ContactName      *string    `json:"contact_name"`
+	Phone            *string    `json:"phone"`
+	TelegramUsername *string    `json:"telegram_username"`
+	Note             *string    `json:"note"`
+	DeletedAt        *time.Time `json:"deleted_at"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
 }
 
 type Unit struct {
