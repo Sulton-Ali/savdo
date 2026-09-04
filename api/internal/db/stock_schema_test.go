@@ -540,6 +540,29 @@ func TestListMovements_cursorPagination(t *testing.T) {
 		}
 	}
 
+	// A batch inserted inside one transaction shares that transaction's
+	// start time for every now() call, so these rows tie on created_at —
+	// the exact case ListMovements' (created_at, id) tiebreaker exists for.
+	// Without this, every row above got its own implicit transaction and a
+	// distinct timestamp, and the tiebreaker was never actually exercised.
+	const batchN = 4
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	qtx := db.New(tx)
+	for i := 0; i < batchN; i++ {
+		if _, err := insertMovement(ctx, qtx, db.InsertMovementParams{
+			ShopID: shop.ID, VariantID: variant.ID, LocationID: loc.ID,
+			Kind: db.StockMovementKindPurchaseIn, Qty: numeric(t, "1.000"),
+		}); err != nil {
+			t.Fatalf("InsertMovement (batch) %d: %v", i, err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("Commit (batch): %v", err)
+	}
+
 	base := db.ListMovementsParams{ShopID: shop.ID}
 	refParams := base
 	refParams.Limit = 100
@@ -547,8 +570,20 @@ func TestListMovements_cursorPagination(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListMovements (reference): %v", err)
 	}
-	if len(reference) != n {
-		t.Fatalf("want %d movements, got %d", n, len(reference))
+	if len(reference) != n+batchN {
+		t.Fatalf("want %d movements, got %d", n+batchN, len(reference))
+	}
+	// Confirm the tie is actually present in this run, or the assertion
+	// above is only exercising the untied path by luck.
+	tied := false
+	for i := 1; i < len(reference); i++ {
+		if reference[i-1].CreatedAt.Equal(reference[i].CreatedAt) {
+			tied = true
+			break
+		}
+	}
+	if !tied {
+		t.Fatal("want at least one created_at tie among the reference rows (the batch insert should produce one), got none")
 	}
 
 	paginated := paginateAllMovements(ctx, t, q, base, 2)
