@@ -3,6 +3,7 @@ package shop
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -91,6 +92,14 @@ func (h *Handler) UpdateShop(ctx context.Context, req gen.UpdateShopRequestObjec
 		}
 	}
 
+	// D-44: the shop-wide default must be non-negative and fit the int32
+	// column behind it — an absent field leaves the stored value
+	// unchanged (UpdateShopInput.LowStockThreshold nil skips the COALESCE
+	// narg entirely, same as every other field here).
+	if body.LowStockThreshold != nil && (*body.LowStockThreshold < 0 || *body.LowStockThreshold > math.MaxInt32) {
+		fields["lowStockThreshold"] = "invalid"
+	}
+
 	if len(fields) > 0 {
 		return nil, apierr.Validation(fields)
 	}
@@ -101,6 +110,7 @@ func (h *Handler) UpdateShop(ctx context.Context, req gen.UpdateShopRequestObjec
 		DefaultLocale:        defaultLocale,
 		AllowNegativeStock:   body.AllowNegativeStock,
 		UpdateCostOnPurchase: body.UpdateCostOnPurchase,
+		LowStockThreshold:    body.LowStockThreshold,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("shop: update shop: %w", err)

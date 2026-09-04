@@ -576,3 +576,140 @@ func TestListProducts_searchEscapedWildcardDoesNotMatchAsSQLWildcard(t *testing.
 		t.Fatalf("ListProducts with an over-long q: %v", err)
 	}
 }
+
+// TestCreateProduct_lowStockThreshold is D-44/D-50's create-time wiring: a
+// product created with an explicit override reports it back, both from
+// the create response and a subsequent GET.
+func TestCreateProduct_lowStockThreshold(t *testing.T) {
+	h, q, _ := newTestHandler(t)
+	ctx := context.Background()
+	shopRow := seedShop(ctx, t, q, "shop-a")
+	unit := seedUnit(ctx, t, q, shopRow.ID, "pcs")
+
+	five := 5
+	resp, err := h.CreateProduct(owner(shopRow.ID), gen.CreateProductRequestObject{
+		Body: &gen.CreateProductJSONRequestBody{
+			UnitId: unit.ID, BasePrice: "100.00", Translations: uzTranslations("X"), LowStockThreshold: &five,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateProduct: %v", err)
+	}
+	created := gen.Product(resp.(gen.CreateProduct201JSONResponse))
+	if !created.LowStockThreshold.IsSpecified() || created.LowStockThreshold.IsNull() || created.LowStockThreshold.MustGet() != 5 {
+		t.Fatalf("created.LowStockThreshold = %+v, want present 5", created.LowStockThreshold)
+	}
+
+	getResp, err := h.GetProduct(owner(shopRow.ID), gen.GetProductRequestObject{Id: created.Id})
+	if err != nil {
+		t.Fatalf("GetProduct: %v", err)
+	}
+	got := gen.Product(getResp.(gen.GetProduct200JSONResponse))
+	if !got.LowStockThreshold.IsSpecified() || got.LowStockThreshold.IsNull() || got.LowStockThreshold.MustGet() != 5 {
+		t.Fatalf("GetProduct().LowStockThreshold = %+v, want present 5", got.LowStockThreshold)
+	}
+}
+
+// TestCreateProduct_lowStockThresholdNegativeIs400 rejects a negative
+// override before any write, same vocabulary as every other field error.
+func TestCreateProduct_lowStockThresholdNegativeIs400(t *testing.T) {
+	h, q, _ := newTestHandler(t)
+	ctx := context.Background()
+	shopRow := seedShop(ctx, t, q, "shop-a")
+	unit := seedUnit(ctx, t, q, shopRow.ID, "pcs")
+
+	negative := -1
+	_, err := h.CreateProduct(owner(shopRow.ID), gen.CreateProductRequestObject{
+		Body: &gen.CreateProductJSONRequestBody{
+			UnitId: unit.ID, BasePrice: "100.00", Translations: uzTranslations("X"), LowStockThreshold: &negative,
+		},
+	})
+	apiErr, ok := err.(*apierr.Error)
+	if !ok || apiErr.Code != gen.VALIDATIONFAILED {
+		t.Fatalf("err = %#v, want 400 VALIDATION_FAILED", err)
+	}
+	fields := apiErr.Details["fields"].(map[string]string)
+	if fields["lowStockThreshold"] != "invalid" {
+		t.Fatalf("fields = %+v, want lowStockThreshold=invalid", fields)
+	}
+}
+
+// TestUpdateProduct_lowStockThreshold covers D-35's three PATCH states for
+// Product.LowStockThreshold: absent leaves it unchanged, explicit `null`
+// clears it (both in the response and the database column), and a value
+// sets it. A negative value is rejected as a field error.
+func TestUpdateProduct_lowStockThreshold(t *testing.T) {
+	h, q, _ := newTestHandler(t)
+	ctx := context.Background()
+	shopRow := seedShop(ctx, t, q, "shop-a")
+	unit := seedUnit(ctx, t, q, shopRow.ID, "pcs")
+
+	five := 5
+	createResp, err := h.CreateProduct(owner(shopRow.ID), gen.CreateProductRequestObject{
+		Body: &gen.CreateProductJSONRequestBody{
+			UnitId: unit.ID, BasePrice: "100.00", Translations: uzTranslations("X"), LowStockThreshold: &five,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateProduct: %v", err)
+	}
+	product := gen.Product(createResp.(gen.CreateProduct201JSONResponse))
+
+	// Absent: patching an unrelated field leaves lowStockThreshold at 5.
+	newName := "Renamed"
+	patchResp, err := h.UpdateProduct(owner(shopRow.ID), gen.UpdateProductRequestObject{
+		Id: product.Id, Body: &gen.UpdateProductJSONRequestBody{Translations: &gen.Translations{Uz: &gen.TranslationEntry{Name: newName}}},
+	})
+	if err != nil {
+		t.Fatalf("UpdateProduct(absent): %v", err)
+	}
+	unchanged := gen.Product(patchResp.(gen.UpdateProduct200JSONResponse))
+	if !unchanged.LowStockThreshold.IsSpecified() || unchanged.LowStockThreshold.IsNull() || unchanged.LowStockThreshold.MustGet() != 5 {
+		t.Fatalf("UpdateProduct(absent).LowStockThreshold = %+v, want unchanged 5", unchanged.LowStockThreshold)
+	}
+
+	// Value: patching to 3 sets it.
+	patchResp, err = h.UpdateProduct(owner(shopRow.ID), gen.UpdateProductRequestObject{
+		Id: product.Id, Body: &gen.UpdateProductJSONRequestBody{LowStockThreshold: nullable.NewNullableWithValue(3)},
+	})
+	if err != nil {
+		t.Fatalf("UpdateProduct(3): %v", err)
+	}
+	toThree := gen.Product(patchResp.(gen.UpdateProduct200JSONResponse))
+	if !toThree.LowStockThreshold.IsSpecified() || toThree.LowStockThreshold.IsNull() || toThree.LowStockThreshold.MustGet() != 3 {
+		t.Fatalf("UpdateProduct(3).LowStockThreshold = %+v, want present 3", toThree.LowStockThreshold)
+	}
+
+	// null: clears it, both in the response and the raw column.
+	patchResp, err = h.UpdateProduct(owner(shopRow.ID), gen.UpdateProductRequestObject{
+		Id: product.Id, Body: &gen.UpdateProductJSONRequestBody{LowStockThreshold: nullable.NewNullNullable[int]()},
+	})
+	if err != nil {
+		t.Fatalf("UpdateProduct(null): %v", err)
+	}
+	cleared := gen.Product(patchResp.(gen.UpdateProduct200JSONResponse))
+	if !cleared.LowStockThreshold.IsSpecified() || !cleared.LowStockThreshold.IsNull() {
+		t.Fatalf("UpdateProduct(null).LowStockThreshold = %+v, want present-and-null", cleared.LowStockThreshold)
+	}
+	row, err := q.GetProductForStaff(ctx, db.GetProductForStaffParams{Locale: "uz", ShopID: shopRow.ID, ID: product.Id})
+	if err != nil {
+		t.Fatalf("GetProductForStaff: %v", err)
+	}
+	if row.LowStockThreshold != nil {
+		t.Fatalf("products.low_stock_threshold = %v, want NULL after PATCH null", *row.LowStockThreshold)
+	}
+
+	// Negative: rejected as a field error, nothing written.
+	negative := -1
+	_, err = h.UpdateProduct(owner(shopRow.ID), gen.UpdateProductRequestObject{
+		Id: product.Id, Body: &gen.UpdateProductJSONRequestBody{LowStockThreshold: nullable.NewNullableWithValue(negative)},
+	})
+	apiErr, ok := err.(*apierr.Error)
+	if !ok || apiErr.Code != gen.VALIDATIONFAILED {
+		t.Fatalf("UpdateProduct(-1) err = %#v, want 400 VALIDATION_FAILED", err)
+	}
+	fields := apiErr.Details["fields"].(map[string]string)
+	if fields["lowStockThreshold"] != "invalid" {
+		t.Fatalf("fields = %+v, want lowStockThreshold=invalid", fields)
+	}
+}
