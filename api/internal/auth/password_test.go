@@ -93,8 +93,27 @@ func TestHashRejectsShortPasswords(t *testing.T) {
 	if apiErr.Status != 400 {
 		t.Fatalf("Hash() error status = %d, want 400", apiErr.Status)
 	}
-	if _, hasField := apiErr.Details["fields"].(map[string]string)["password"]; !hasField {
-		t.Fatalf("Hash() error details = %+v, want a \"password\" field", apiErr.Details)
+	// ADR-013: a machine-readable vocabulary reason, never a human
+	// sentence — "must be at least N characters" is a review finding.
+	if reason := apiErr.Details["fields"].(map[string]string)["password"]; reason != "too_short" {
+		t.Fatalf("Hash() error details = %+v, want fields.password = \"too_short\"", apiErr.Details)
+	}
+}
+
+func TestHashRejectsLongPasswords(t *testing.T) {
+	_, err := Hash(strings.Repeat("a", MaxPasswordLength+1))
+	if err == nil {
+		t.Fatal("Hash() error = nil, want a validation error for a password over MaxPasswordLength")
+	}
+	apiErr, ok := err.(*apierr.Error)
+	if !ok {
+		t.Fatalf("Hash() error type = %T, want *apierr.Error", err)
+	}
+	if apiErr.Status != 400 {
+		t.Fatalf("Hash() error status = %d, want 400", apiErr.Status)
+	}
+	if reason := apiErr.Details["fields"].(map[string]string)["password"]; reason != "too_long" {
+		t.Fatalf("Hash() error details = %+v, want fields.password = \"too_long\"", apiErr.Details)
 	}
 }
 

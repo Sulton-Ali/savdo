@@ -16,6 +16,7 @@ import (
 	"github.com/Sulton-Ali/savdo/api/gen"
 	"github.com/Sulton-Ali/savdo/api/internal/apierr"
 	"github.com/Sulton-Ali/savdo/api/internal/auth"
+	"github.com/Sulton-Ali/savdo/api/internal/shop"
 )
 
 // NewRouter builds the API's http.Handler: routes registered by the
@@ -26,12 +27,14 @@ import (
 // check; it may be nil in tests that never exercise that route. authSvc
 // backs both auth.Service.Middleware — run for every operation, allow-
 // listing only GetHealthz/GetReadyz/Login (internal/auth/middleware.go) —
-// and the five `/auth/*` operations via auth.NewHandler.
-func NewRouter(logger *slog.Logger, pool *pgxpool.Pool, authSvc *auth.Service) http.Handler {
+// and the five `/auth/*` operations via auth.NewHandler. shopSvc backs
+// the nine `/shop`, `/locations` and `/staff` operations via
+// shop.NewHandler, forwarded from server's own methods (shop.go).
+func NewRouter(logger *slog.Logger, pool *pgxpool.Pool, authSvc *auth.Service, shopSvc *shop.Service) http.Handler {
 	mux := http.NewServeMux()
 
 	strictHandler := gen.NewStrictHandlerWithOptions(
-		server{pool: pool, Handler: auth.NewHandler(authSvc)},
+		server{pool: pool, Handler: auth.NewHandler(authSvc), shop: shop.NewHandler(shopSvc)},
 		[]gen.StrictMiddlewareFunc{authSvc.Middleware},
 		gen.StrictHTTPServerOptions{
 			RequestErrorHandlerFunc:  writeRequestError,

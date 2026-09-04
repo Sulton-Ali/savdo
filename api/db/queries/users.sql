@@ -55,6 +55,13 @@ UPDATE users
 SET password_hash = $3, updated_at = now()
 WHERE shop_id = $1 AND id = $2;
 
+-- name: ClearUserPhone :exec
+-- UpdateUser's COALESCE cannot express "set to NULL"; this is the
+-- single-purpose statement for clearing a user's phone.
+UPDATE users
+SET phone = NULL, updated_at = now()
+WHERE shop_id = $1 AND id = $2;
+
 -- name: SetUserLastLogin :exec
 UPDATE users
 SET last_login_at = now()

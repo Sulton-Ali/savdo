@@ -90,6 +90,33 @@ func (q *Queries) GetLocation(ctx context.Context, arg GetLocationParams) (Locat
 	return i, err
 }
 
+const getLocationForUpdate = `-- name: GetLocationForUpdate :one
+SELECT id, shop_id, name, kind, is_default, is_active, created_at, updated_at FROM locations
+WHERE shop_id = $1 AND id = $2
+FOR UPDATE
+`
+
+type GetLocationForUpdateParams struct {
+	ShopID uuid.UUID `json:"shop_id"`
+	ID     uuid.UUID `json:"id"`
+}
+
+func (q *Queries) GetLocationForUpdate(ctx context.Context, arg GetLocationForUpdateParams) (Location, error) {
+	row := q.db.QueryRow(ctx, getLocationForUpdate, arg.ShopID, arg.ID)
+	var i Location
+	err := row.Scan(
+		&i.ID,
+		&i.ShopID,
+		&i.Name,
+		&i.Kind,
+		&i.IsDefault,
+		&i.IsActive,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const listLocations = `-- name: ListLocations :many
 SELECT id, shop_id, name, kind, is_default, is_active, created_at, updated_at FROM locations
 WHERE shop_id = $1
@@ -142,6 +169,19 @@ func (q *Queries) ListLocations(ctx context.Context, arg ListLocationsParams) ([
 		return nil, err
 	}
 	return items, nil
+}
+
+const shopHasLocations = `-- name: ShopHasLocations :one
+SELECT EXISTS (SELECT 1 FROM locations WHERE shop_id = $1)
+`
+
+// Used inside the transaction after LockShop to decide whether a location
+// about to be created is the shop's first (and therefore its default).
+func (q *Queries) ShopHasLocations(ctx context.Context, shopID uuid.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, shopHasLocations, shopID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }
 
 const updateLocation = `-- name: UpdateLocation :one

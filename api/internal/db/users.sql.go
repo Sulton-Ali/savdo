@@ -12,6 +12,24 @@ import (
 	"github.com/google/uuid"
 )
 
+const clearUserPhone = `-- name: ClearUserPhone :exec
+UPDATE users
+SET phone = NULL, updated_at = now()
+WHERE shop_id = $1 AND id = $2
+`
+
+type ClearUserPhoneParams struct {
+	ShopID uuid.UUID `json:"shop_id"`
+	ID     uuid.UUID `json:"id"`
+}
+
+// UpdateUser's COALESCE cannot express "set to NULL"; this is the
+// single-purpose statement for clearing a user's phone.
+func (q *Queries) ClearUserPhone(ctx context.Context, arg ClearUserPhoneParams) error {
+	_, err := q.db.Exec(ctx, clearUserPhone, arg.ShopID, arg.ID)
+	return err
+}
+
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (id, shop_id, username, password_hash, full_name, phone, role, locale)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)

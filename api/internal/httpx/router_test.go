@@ -14,6 +14,7 @@ import (
 	"github.com/Sulton-Ali/savdo/api/gen"
 	"github.com/Sulton-Ali/savdo/api/internal/auth"
 	"github.com/Sulton-Ali/savdo/api/internal/config"
+	"github.com/Sulton-Ali/savdo/api/internal/shop"
 )
 
 func testLogger() *slog.Logger {
@@ -28,6 +29,13 @@ func testLogger() *slog.Logger {
 // call), so a nil *db.Queries is never dereferenced.
 func testAuthService() *auth.Service {
 	return auth.NewService(nil, config.Config{}, uuid.New())
+}
+
+// testShopService builds a shop.Service safe to wire into NewRouter for
+// tests that never exercise a `/shop`, `/locations` or `/staff` route — a
+// nil pool and nil *db.Queries are never dereferenced in that case.
+func testShopService() *shop.Service {
+	return shop.NewService(nil, nil)
 }
 
 func TestHealthz(t *testing.T) {
@@ -55,7 +63,7 @@ func TestHealthz(t *testing.T) {
 		},
 	}
 
-	router := NewRouter(testLogger(), nil, testAuthService())
+	router := NewRouter(testLogger(), nil, testAuthService(), testShopService())
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

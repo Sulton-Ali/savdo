@@ -96,6 +96,22 @@ func (q *Queries) GetShopBySlug(ctx context.Context, slug string) (Shop, error) 
 	return i, err
 }
 
+const lockShop = `-- name: LockShop :one
+SELECT id FROM shops
+WHERE id = $1
+FOR UPDATE
+`
+
+// Per-tenant serialization point for default-location changes: acquire this
+// lock first, then decide/update location defaults within the same
+// transaction.
+func (q *Queries) LockShop(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, lockShop, id)
+	var id_2 uuid.UUID
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
 const updateShop = `-- name: UpdateShop :one
 UPDATE shops
 SET

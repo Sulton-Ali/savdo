@@ -60,24 +60,33 @@ const (
 // not left to each caller — so every path that ever sets a password
 // (login has none to set; staff creation and password reset do) gets the
 // same boundary validation for free (docs/03-ARCHITECTURE.md § Auth spec:
-// "reject passwords < 8 chars at the API boundary").
+// "reject passwords < 8 chars at the API boundary"). Exported so callers
+// with their own field-shape validation (shop.validatePassword) reference
+// this one value instead of redeclaring it.
 const MinPasswordLength = 8
+
+// MaxPasswordLength is the longest password Hash accepts, matching the
+// contract's `maxLength: 128` on StaffCreate.password/SetStaffPassword.
+// Exported for the same reason as MinPasswordLength.
+const MaxPasswordLength = 128
 
 // Hash returns password's argon2id hash encoded as a PHC string:
 // `$argon2id$v=19$m=65536,t=3,p=4$<salt>$<hash>`, salt and hash each
 // base64 (unpadded, standard alphabet — the PHC string format's own
 // convention) and freshly randomized per call (crypto/rand). It rejects a
-// password shorter than MinPasswordLength — counted in Unicode
-// characters (utf8.RuneCountInString), matching the contract's
+// password outside [MinPasswordLength, MaxPasswordLength] — counted in
+// Unicode characters (utf8.RuneCountInString), matching the contract's
 // `minLength`/`maxLength` semantics on StaffCreate/SetStaffPassword, not
 // bytes, so a password made of multi-byte characters isn't scored by an
-// unrelated byte count — with a *apierr.Error the caller can return
-// unwrapped as the request's response.
+// unrelated byte count — with a *apierr.Error carrying the ADR-013
+// vocabulary reason ("too_short"/"too_long", never a human sentence) the
+// caller can return unwrapped as the request's response.
 func Hash(password string) (string, error) {
-	if utf8.RuneCountInString(password) < MinPasswordLength {
-		return "", apierr.Validation(map[string]string{
-			"password": fmt.Sprintf("must be at least %d characters", MinPasswordLength),
-		})
+	switch n := utf8.RuneCountInString(password); {
+	case n < MinPasswordLength:
+		return "", apierr.Validation(map[string]string{"password": "too_short"})
+	case n > MaxPasswordLength:
+		return "", apierr.Validation(map[string]string{"password": "too_long"})
 	}
 
 	salt := make([]byte, saltLen)

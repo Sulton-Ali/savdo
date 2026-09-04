@@ -16,6 +16,7 @@ import (
 	"github.com/Sulton-Ali/savdo/api/internal/config"
 	"github.com/Sulton-Ali/savdo/api/internal/db"
 	"github.com/Sulton-Ali/savdo/api/internal/db/testdb"
+	shopmod "github.com/Sulton-Ali/savdo/api/internal/shop"
 )
 
 // authTestFixture wires a full router against a real (testcontainers)
@@ -68,9 +69,10 @@ func newAuthTestFixture(t *testing.T, cfgOverrides func(*config.Config)) authTes
 	}
 
 	authSvc := auth.NewService(q, cfg, shop.ID)
+	shopSvc := shopmod.NewService(pool, q)
 
 	return authTestFixture{
-		router:   NewRouter(testLogger(), pool, authSvc),
+		router:   NewRouter(testLogger(), pool, authSvc, shopSvc),
 		shopID:   shop.ID,
 		userID:   user.ID,
 		username: user.Username,

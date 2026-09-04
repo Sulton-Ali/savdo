@@ -14,6 +14,16 @@ LIMIT sqlc.arg('limit');
 SELECT * FROM locations
 WHERE shop_id = $1 AND id = $2;
 
+-- name: GetLocationForUpdate :one
+SELECT * FROM locations
+WHERE shop_id = $1 AND id = $2
+FOR UPDATE;
+
+-- name: ShopHasLocations :one
+-- Used inside the transaction after LockShop to decide whether a location
+-- about to be created is the shop's first (and therefore its default).
+SELECT EXISTS (SELECT 1 FROM locations WHERE shop_id = $1);
+
 -- name: CreateLocation :one
 INSERT INTO locations (id, shop_id, name, kind, is_default, is_active)
 VALUES ($1, $2, $3, $4, $5, $6)
