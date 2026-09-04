@@ -62,6 +62,32 @@ var errTransferDeadlock = &apierr.Error{
 	Details: map[string]any{"reason": "deadlock"},
 }
 
+// errPurchaseNotDraft is PURCHASE_NOT_DRAFT (409): UpdatePurchase was
+// called on a purchase that is no longer `draft` (contracts/openapi.yaml's
+// PATCH /purchases/{id} 409).
+var errPurchaseNotDraft = &apierr.Error{Status: http.StatusConflict, Code: gen.PURCHASENOTDRAFT}
+
+// errPurchaseAlreadyReceived is PURCHASE_ALREADY_RECEIVED (409):
+// ReceivePurchase was called on a purchase already `received`.
+var errPurchaseAlreadyReceived = &apierr.Error{Status: http.StatusConflict, Code: gen.PURCHASEALREADYRECEIVED}
+
+// errPurchaseAlreadyCancelled is PURCHASE_ALREADY_CANCELLED (409):
+// ReceivePurchase or CancelPurchase was called on a purchase already
+// `cancelled`.
+var errPurchaseAlreadyCancelled = &apierr.Error{Status: http.StatusConflict, Code: gen.PURCHASEALREADYCANCELLED}
+
+// purchaseRefType/purchaseCancelRefType are the ref_type Move writes on a
+// purchase's stock_movements rows: "purchase" for the original receive,
+// "purchase_cancel" for a cancelled-after-received purchase's reversing
+// movements (both kind purchase_in, ADR-006 — there is no separate enum
+// value for a cancellation; ref_type is what tells the two apart in
+// history, per the pre-emptive ruling on T4's cancel-of-received
+// ambiguity).
+const (
+	purchaseRefType       = "purchase"
+	purchaseCancelRefType = "purchase_cancel"
+)
+
 // qtyPattern is the wire shape a quantity field (docs/05-API.md §
 // Conventions: "Quantities: decimal strings") must have: an optional sign,
 // an unsigned integer part, an optional up-to-three-digit fractional part
