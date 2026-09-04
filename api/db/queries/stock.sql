@@ -126,3 +126,41 @@ GROUP BY m.shop_id, m.variant_id, m.location_id;
 SELECT COALESCE(SUM(qty), 0::numeric)::numeric(12,3) AS qty
 FROM stock_movements
 WHERE shop_id = $1 AND variant_id = $2 AND location_id = $3;
+
+-- name: ListMovementsWithCreatedByName :many
+-- GET /stock/movements' own read: same filters and (created_at, id) cursor
+-- as ListMovements, plus the creating user's display name (contract's
+-- additive `createdByName`, T3) so the admin never has to look the user up
+-- itself. LEFT JOIN, not JOIN: created_by is nullable (a seed or a future
+-- system-written movement may carry no actor), and a user row could in
+-- principle be gone later — either case must still return the movement,
+-- with created_by_name simply NULL. u.shop_id = m.shop_id is belt-and-
+-- braces tenant scoping on the join (hard rule 1), even though created_by
+-- already only ever holds an id from the movement's own shop.
+SELECT m.id, m.shop_id, m.variant_id, m.location_id, m.kind, m.qty, m.unit_cost,
+    m.ref_type, m.ref_id, m.adjustment_reason, m.reason, m.created_by, m.created_at,
+    u.full_name AS created_by_name
+FROM stock_movements m
+LEFT JOIN users u ON u.id = m.created_by AND u.shop_id = m.shop_id
+WHERE m.shop_id = sqlc.arg('shop_id')
+    AND (sqlc.narg('variant_id')::uuid IS NULL OR m.variant_id = sqlc.narg('variant_id'))
+    AND (sqlc.narg('location_id')::uuid IS NULL OR m.location_id = sqlc.narg('location_id'))
+    AND (sqlc.narg('kind')::stock_movement_kind IS NULL OR m.kind = sqlc.narg('kind'))
+    AND (sqlc.narg('from')::timestamptz IS NULL OR m.created_at >= sqlc.narg('from'))
+    AND (sqlc.narg('to')::timestamptz IS NULL OR m.created_at <= sqlc.narg('to'))
+    AND (
+        sqlc.narg('cursor_created_at')::timestamptz IS NULL
+        OR (m.created_at, m.id) < (sqlc.narg('cursor_created_at')::timestamptz, sqlc.narg('cursor_id')::uuid)
+    )
+ORDER BY m.created_at DESC, m.id DESC
+LIMIT sqlc.arg('limit');
+
+-- name: CountLevelsForShop :one
+-- `savdo stock rebuild`'s summary line: how many stock_levels rows the
+-- shop has after the rebuild.
+SELECT count(*) FROM stock_levels WHERE shop_id = $1;
+
+-- name: CountMovementsForShop :one
+-- `savdo stock rebuild`'s summary line: how many stock_movements rows the
+-- rebuild's sum was computed from.
+SELECT count(*) FROM stock_movements WHERE shop_id = $1;
