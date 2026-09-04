@@ -369,9 +369,9 @@ func TestUpload_rejectsDecompressionBombWithoutFullDecode(t *testing.T) {
 
 	allocated := after.TotalAlloc - before.TotalAlloc
 	const tooMuch = 50 << 20 // 50 MiB — a real decode would need ~3.6 GB
-	t.Logf("TotalAlloc grew by %d bytes (%.2f MB) rejecting a 30000x30000 header", allocated, float64(allocated)/(1<<20))
+	t.Logf("TotalAlloc grew by %d bytes (%d MiB) rejecting a 30000x30000 header", allocated, allocated>>20)
 	if allocated > tooMuch {
-		t.Fatalf("TotalAlloc grew by %d bytes (%.1f MB), want < %d MB — looks like the full image.Decode ran", allocated, float64(allocated)/(1<<20), tooMuch>>20)
+		t.Fatalf("TotalAlloc grew by %d bytes (%d MiB), want < %d MiB — looks like the full image.Decode ran", allocated, allocated>>20, tooMuch>>20)
 	}
 }
 
