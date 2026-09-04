@@ -199,16 +199,17 @@
       }
     },
     "variants": {
-      "title": "Variantlar",
       "saveFirst": "Variantlar va rasmlarni boshqarish uchun avval mahsulotni saqlang.",
       "matrix": {
         "title": "Variantlarni generatsiya qilish",
-        "attribute": "Atribut",
-        "values": "Qiymatlar",
         "valuesPlaceholder": "Qiymatni yozing va Enter tugmasini bosing",
+        "invalidValue": "Qiymat 1-64 belgidan iborat bo‘lishi kerak — qolganlari e’tiborga olinmadi.",
         "preview": "Yaratiladigan kombinatsiyalar",
         "noNew": "Barcha kombinatsiyalar uchun variant allaqachon mavjud.",
-        "generate": "{{count}} ta variant yaratish",
+        "generate_one": "1 ta variant yaratish",
+        "generate_other": "{{count}} ta variant yaratish",
+        "generate_few": "{{count}} ta variant yaratish",
+        "generate_many": "{{count}} ta variant yaratish",
         "created": "{{count}} ta variant yaratildi.",
         "partial": "Xatolik yuz berguncha {{total}} tadan {{created}} tasi yaratildi."
       },
@@ -249,6 +250,7 @@
       "tooLarge": "Rasm hajmi 10 MB dan katta.",
       "alreadyAttached": "Bu rasm mahsulotga allaqachon biriktirilgan.",
       "uploaded": "Rasm yuklandi.",
+      "tooManyUploads": "Juda ko‘p yuklash. Birozdan so‘ng qayta urinib ko‘ring.",
       "crop": {
         "title": "Rasmni kesish",
         "apply": "Qo‘llash",

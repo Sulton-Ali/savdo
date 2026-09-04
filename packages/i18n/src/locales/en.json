@@ -199,16 +199,17 @@
       }
     },
     "variants": {
-      "title": "Variants",
       "saveFirst": "Save the product first to manage its variants and images.",
       "matrix": {
         "title": "Generate variants",
-        "attribute": "Attribute",
-        "values": "Values",
         "valuesPlaceholder": "Type a value and press Enter",
+        "invalidValue": "Values must be 1-64 characters — the rest were ignored.",
         "preview": "Combinations to create",
         "noNew": "Every combination already has a variant.",
-        "generate": "Create {{count}} variants",
+        "generate_one": "Create 1 variant",
+        "generate_other": "Create {{count}} variants",
+        "generate_few": "Create {{count}} variants",
+        "generate_many": "Create {{count}} variants",
         "created": "{{count}} variant(s) created.",
         "partial": "Created {{created}} of {{total}} before an error stopped the rest."
       },
@@ -249,6 +250,7 @@
       "tooLarge": "Image is larger than 10 MB.",
       "alreadyAttached": "This image is already attached to this product.",
       "uploaded": "Image uploaded.",
+      "tooManyUploads": "Too many uploads. Please try again shortly.",
       "crop": {
         "title": "Crop image",
         "apply": "Apply",
