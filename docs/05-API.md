@@ -40,12 +40,18 @@ Base path `/v1`. JSON only. Server: Go, `api/cmd/api`, port 8080 behind Caddy.
 - **List vs get asymmetry**: `GET /products` returns all fields except `description` and
   `translations` (to reduce response size); `GET /products/{id}` returns the full schema
   including translations. Same applies to variants, categories and other entities.
-- **Promo pricing** (Q-05): `promoPrice`, `promoFrom` and `promoTo` (ISO 8601 dates) form
-  an atomic triple — they are set together via POST/PATCH and cleared together (absent
-  all three). Partial updates are rejected (`400 VALIDATION_FAILED`). A variant's promo
-  overrides the product's promo for that variant; the product's promo is fallback.
-- **Role-shaped responses**: `Product` and `Variant` have optional fields `cost_price`,
-  `unit_cost`, and margins (visible only to staff with edit permission, not to cashier
+  `translations`, like `costPrice`/`costOverride`, is present only for a caller with the
+  matching permission (`catalog.write` for translations, `cost.read` for cost fields) —
+  a cashier or public caller never receives it, regardless of endpoint.
+- **Promo pricing** (Q-05): `promoPrice`, `promoFrom` and `promoTo` (ISO 8601 dates) are
+  independent fields on the product; a PATCH may set any subset of them. Sending an
+  explicit `null` for any one of the three clears all three together (D-35's
+  `ClearPromo`), since a promo without one of its parts is not valid. `promoFrom` must
+  not be after `promoTo`; on a partial PATCH naming only one of the pair, the other side
+  is checked against the value already stored, not against nothing. Variants have no
+  promo fields — promo pricing is product-level only.
+- **Role-shaped responses**: `Product` has an optional `costPrice` field and `Variant` an
+  optional `costOverride` field (visible only to callers with `cost.read`, not to cashier
   or public). The same schema models all roles; permissions are enforced server-side at
   serialization, not through separate types. `ProductPublic`/`VariantPublic` remain
   separate schemas for Phase 6's public catalogue.
