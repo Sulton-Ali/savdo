@@ -1,6 +1,6 @@
 import type { components } from "@savdo/api-client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { App as AntApp, ConfigProvider } from "antd";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -186,13 +186,9 @@ describe("CategoriesPage", () => {
     await screen.findByText("Category A");
     fireEvent.click(screen.getByTitle("Edit category"));
 
-    fireEvent.click(await screen.findByRole("tab", { name: "Русский" }));
-    // Both locale tabs visited so far ("uz" from the initial active tab,
-    // "ru" just clicked) stay in the DOM (AntD Tabs doesn't destroy a
-    // visited pane), so scope to the active tabpanel to reach the right
-    // "Name" input.
-    const activePanel = await screen.findByRole("tabpanel");
-    fireEvent.change(within(activePanel).getByLabelText("Name"), {
+    // D-38: all three locales' name fields render together, labelled with
+    // the language, instead of behind per-locale tabs.
+    fireEvent.change(await screen.findByLabelText("Name (Русский)"), {
       target: { value: "Категория А" },
     });
 

@@ -12,7 +12,6 @@ import {
   Popconfirm,
   Space,
   Switch,
-  Tabs,
   Tag,
   Tooltip,
   Tree,
@@ -99,29 +98,31 @@ const CategoryDrawerForm = forwardRef<
       initialValues={initialValues}
       onFinish={(values) => onFinish(values, form)}
     >
-      <Tabs
-        items={locales.map((locale) => ({
-          key: locale,
-          label: t(`lang.${locale}`),
-          children: (
-            <>
-              <Form.Item
-                name={["translations", locale, "name"]}
-                label={t("catalog.categories.fields.name")}
-                rules={[{ required: locale === defaultLocale }]}
-              >
-                <Input />
-              </Form.Item>
-              <Form.Item
-                name={["translations", locale, "description"]}
-                label={t("catalog.categories.fields.description")}
-              >
-                <Input.TextArea rows={3} />
-              </Form.Item>
-            </>
-          ),
-        }))}
-      />
+      {locales.map((locale) => (
+        <Form.Item
+          key={`name-${locale}`}
+          name={["translations", locale, "name"]}
+          label={t("common.fieldWithLang", {
+            field: t("catalog.categories.fields.name"),
+            lang: t(`lang.${locale}`),
+          })}
+          rules={[{ required: locale === defaultLocale }]}
+        >
+          <Input />
+        </Form.Item>
+      ))}
+      {locales.map((locale) => (
+        <Form.Item
+          key={`description-${locale}`}
+          name={["translations", locale, "description"]}
+          label={t("common.fieldWithLang", {
+            field: t("catalog.categories.fields.description"),
+            lang: t(`lang.${locale}`),
+          })}
+        >
+          <Input.TextArea rows={3} />
+        </Form.Item>
+      ))}
       <Form.Item name="slug" label={t("catalog.categories.fields.slug")}>
         <Input />
       </Form.Item>

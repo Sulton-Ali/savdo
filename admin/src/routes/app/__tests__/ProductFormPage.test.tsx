@@ -135,9 +135,10 @@ describe("ProductFormPage", () => {
 
     renderForm(undefined);
 
-    // The "uz" locale tab is active by default (shop default locale, first
-    // in `locales`) — its name field is required and already mounted.
-    fireEvent.change(await screen.findByLabelText("Name"), {
+    // D-38: all three locales' name fields render together, labelled with
+    // the language — "uz" is the shop default locale, so only its name is
+    // required.
+    fireEvent.change(await screen.findByLabelText("Name (Oʻzbekcha)"), {
       target: { value: "T-Shirt" },
     });
 
@@ -236,7 +237,7 @@ describe("ProductFormPage", () => {
 
     renderForm(undefined);
 
-    fireEvent.change(await screen.findByLabelText("Name"), {
+    fireEvent.change(await screen.findByLabelText("Name (Oʻzbekcha)"), {
       target: { value: "T-Shirt" },
     });
     fireEvent.mouseDown(screen.getByLabelText("Unit"));
@@ -269,7 +270,7 @@ describe("ProductFormPage", () => {
 
     renderForm(undefined);
 
-    fireEvent.change(await screen.findByLabelText("Name"), {
+    fireEvent.change(await screen.findByLabelText("Name (Oʻzbekcha)"), {
       target: { value: "T-Shirt" },
     });
     fireEvent.mouseDown(screen.getByLabelText("Unit"));

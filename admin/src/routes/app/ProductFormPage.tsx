@@ -54,10 +54,12 @@ interface ProductFormValues {
 }
 
 /** Shared by `productNewRoute` (`productId` undefined) and `productEditRoute`
- * (`productId` set). General/Prices/Variants tabs, translation tabs nested
- * inside General (T6a spec). The Variants tab is disabled in create mode —
- * variants and images both hang off a product id, so it only renders
- * `VariantsImagesTab` once the product exists (T6b spec). */
+ * (`productId` set). General/Prices/Variants tabs; the General tab shows all
+ * three locales' name and description fields together, each labelled with
+ * its language, rather than behind nested per-locale tabs (D-38). The
+ * Variants tab is disabled in create mode — variants and images both hang
+ * off a product id, so it only renders `VariantsImagesTab` once the product
+ * exists (T6b spec). */
 export function ProductFormPage({ productId }: { productId?: string }) {
   const { t } = useTranslation();
   const { notification } = App.useApp();
@@ -279,29 +281,31 @@ export function ProductFormPage({ productId }: { productId?: string }) {
               label: t("catalog.products.tabs.general"),
               children: (
                 <>
-                  <Tabs
-                    items={locales.map((locale) => ({
-                      key: locale,
-                      label: t(`lang.${locale}`),
-                      children: (
-                        <>
-                          <Form.Item
-                            name={["translations", locale, "name"]}
-                            label={t("catalog.products.fields.name")}
-                            rules={[{ required: locale === me.shop.defaultLocale }]}
-                          >
-                            <Input />
-                          </Form.Item>
-                          <Form.Item
-                            name={["translations", locale, "description"]}
-                            label={t("catalog.products.fields.description")}
-                          >
-                            <Input.TextArea rows={3} />
-                          </Form.Item>
-                        </>
-                      ),
-                    }))}
-                  />
+                  {locales.map((locale) => (
+                    <Form.Item
+                      key={`name-${locale}`}
+                      name={["translations", locale, "name"]}
+                      label={t("common.fieldWithLang", {
+                        field: t("catalog.products.fields.name"),
+                        lang: t(`lang.${locale}`),
+                      })}
+                      rules={[{ required: locale === me.shop.defaultLocale }]}
+                    >
+                      <Input />
+                    </Form.Item>
+                  ))}
+                  {locales.map((locale) => (
+                    <Form.Item
+                      key={`description-${locale}`}
+                      name={["translations", locale, "description"]}
+                      label={t("common.fieldWithLang", {
+                        field: t("catalog.products.fields.description"),
+                        lang: t(`lang.${locale}`),
+                      })}
+                    >
+                      <Input.TextArea rows={3} />
+                    </Form.Item>
+                  ))}
                   <Form.Item name="categoryId" label={t("catalog.products.fields.category")}>
                     <TreeSelect allowClear treeData={categoryOptions} treeDefaultExpandAll />
                   </Form.Item>

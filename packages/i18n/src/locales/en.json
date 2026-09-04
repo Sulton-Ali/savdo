@@ -12,7 +12,8 @@
     "retry": "Retry",
     "loadMore": "Load more",
     "search": "Search",
-    "showInactive": "Show inactive"
+    "showInactive": "Show inactive",
+    "fieldWithLang": "{{field}} ({{lang}})"
   },
   "errors": {
     "serviceUnavailable": "Service unavailable. Please try again.",
