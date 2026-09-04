@@ -2910,7 +2910,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description `409 PURCHASE_ALREADY_RECEIVED` or `409 PURCHASE_ALREADY_CANCELLED` when the purchase is not `draft`; `409 IDEMPOTENCY_KEY_REUSED` when the same key was already used for a different request. */
+            /** @description `409 PURCHASE_ALREADY_RECEIVED` or `409 PURCHASE_ALREADY_CANCELLED` when the purchase is not `draft`; `409 IDEMPOTENCY_KEY_REUSED` when the same key was already used for a different request; `409 CONFLICT details.reason: "deadlock"` when a concurrent write could not be serialized — safe to retry. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -2944,7 +2944,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description `409 PURCHASE_ALREADY_CANCELLED` when already cancelled; `409 STOCK_INSUFFICIENT details.variantId/locationId/available` when reversing would take a level below zero. */
+            /** @description `409 PURCHASE_ALREADY_CANCELLED` when already cancelled; `409 STOCK_INSUFFICIENT details.variantId/locationId/available` when reversing would take a level below zero; `409 CONFLICT details.reason: "deadlock"` when a concurrent write could not be serialized — safe to retry. */
             409: {
                 headers: {
                     [name: string]: unknown;

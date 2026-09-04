@@ -1437,7 +1437,9 @@ paths:
             `409 PURCHASE_ALREADY_RECEIVED` or `409
             PURCHASE_ALREADY_CANCELLED` when the purchase is not
             `draft`; `409 IDEMPOTENCY_KEY_REUSED` when the same key was
-            already used for a different request.
+            already used for a different request; `409 CONFLICT
+            details.reason: "deadlock"` when a concurrent write could
+            not be serialized — safe to retry.
           content:
             application/json:
               schema:
@@ -1478,7 +1480,9 @@ paths:
           description: >
             `409 PURCHASE_ALREADY_CANCELLED` when already cancelled;
             `409 STOCK_INSUFFICIENT details.variantId/locationId/available`
-            when reversing would take a level below zero.
+            when reversing would take a level below zero; `409 CONFLICT
+            details.reason: "deadlock"` when a concurrent write could
+            not be serialized — safe to retry.
           content:
             application/json:
               schema:
@@ -3081,6 +3085,7 @@ components:
         items:
           type: array
           minItems: 1
+          maxItems: 200
           items:
             $ref: "#/components/schemas/PurchaseItemCreate"
 
@@ -3106,6 +3111,7 @@ components:
         items:
           type: array
           minItems: 1
+          maxItems: 200
           items:
             $ref: "#/components/schemas/PurchaseItemCreate"
 
