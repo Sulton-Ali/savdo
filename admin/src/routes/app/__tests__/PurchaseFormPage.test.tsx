@@ -210,6 +210,23 @@ describe("PurchaseFormPage", () => {
     });
   });
 
+  it("disables Save and shows a message when there are no item rows", async () => {
+    mockCommonEndpoints();
+
+    renderForm(undefined);
+
+    fireEvent.mouseDown(await screen.findByLabelText("Supplier"));
+    fireEvent.click(await screen.findByText("Acme Textiles"));
+
+    fireEvent.mouseDown(screen.getByLabelText("Location"));
+    fireEvent.click(await screen.findByText("Main store"));
+
+    const saveButton = screen.getByRole("button", { name: "Save" }) as HTMLButtonElement;
+    expect(saveButton.disabled).toBe(true);
+    expect(await screen.findByText("Add at least one item before saving.")).toBeTruthy();
+    expect(mockedApi.POST).not.toHaveBeenCalled();
+  });
+
   it("sends Idempotency-Key on receive and reuses the same key on retry", async () => {
     mockCommonEndpoints();
     mockedApi.GET.mockImplementation(((path: string) => {

@@ -187,6 +187,7 @@
         "unitCost": "Birlik tannarxi",
         "noLabel": "Standart variant",
         "empty": "Hali qator yo‘q — qo‘shish uchun yuqorida mahsulot qidiring.",
+        "required": "Saqlashdan oldin kamida bitta qator qo‘shing.",
         "unresolvedVariant": "Variant {{id}}",
         "columns": {
           "product": "Mahsulot",

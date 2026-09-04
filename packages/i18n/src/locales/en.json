@@ -187,6 +187,7 @@
         "unitCost": "Unit cost",
         "noLabel": "Default variant",
         "empty": "No items yet — search for a product above to add one.",
+        "required": "Add at least one item before saving.",
         "unresolvedVariant": "Variant {{id}}",
         "columns": {
           "product": "Product",

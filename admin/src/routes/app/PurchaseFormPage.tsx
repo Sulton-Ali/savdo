@@ -250,6 +250,15 @@ export function PurchaseFormPage({ purchaseId }: { purchaseId?: string }) {
   }
 
   function handleFinish(values: PurchaseMainFormValues) {
+    // The contract requires at least one item (`minItems: 1`) — the Save
+    // button is disabled for this case too, but a form can also submit via
+    // Enter in a text field, bypassing that; guard here so no request with
+    // an empty `items` array is ever sent.
+    if (items.length === 0) {
+      notification.error({ message: t("purchases.form.items.required") });
+      return;
+    }
+
     if (!isEdit) {
       const body: PurchaseCreate = {
         supplierId: values.supplierId as string,
@@ -308,9 +317,9 @@ export function PurchaseFormPage({ purchaseId }: { purchaseId?: string }) {
 
   const receiveMutation = useMutation({
     mutationFn: () => receivePurchase(purchaseId as string, receiveKey as string),
-    onSuccess: (updated) => {
+    onSuccess: async (updated) => {
       queryClient.setQueryData(["purchase", purchaseId], updated);
-      queryClient.invalidateQueries({ queryKey: ["purchases"] });
+      await queryClient.invalidateQueries({ queryKey: ["purchases"] });
       setReceiveOpen(false);
       notification.success({ message: t("purchases.receive.success") });
     },
@@ -322,9 +331,9 @@ export function PurchaseFormPage({ purchaseId }: { purchaseId?: string }) {
 
   const cancelMutation = useMutation({
     mutationFn: () => cancelPurchase(purchaseId as string),
-    onSuccess: (updated) => {
+    onSuccess: async (updated) => {
       queryClient.setQueryData(["purchase", purchaseId], updated);
-      queryClient.invalidateQueries({ queryKey: ["purchases"] });
+      await queryClient.invalidateQueries({ queryKey: ["purchases"] });
       notification.success({ message: t("purchases.cancel.success") });
     },
     onError: (error) => {
@@ -474,7 +483,12 @@ export function PurchaseFormPage({ purchaseId }: { purchaseId?: string }) {
             </Popconfirm>
           )}
           {editable && (
-            <Button type="primary" loading={saving} onClick={() => form.submit()}>
+            <Button
+              type="primary"
+              loading={saving}
+              disabled={items.length === 0}
+              onClick={() => form.submit()}
+            >
               {t("common.save")}
             </Button>
           )}
@@ -587,6 +601,11 @@ export function PurchaseFormPage({ purchaseId }: { purchaseId?: string }) {
           locale={{ emptyText: t("purchases.form.items.empty") }}
           columns={itemColumns}
         />
+        {editable && items.length === 0 && (
+          <p style={{ color: "#ff4d4f", marginTop: 12, marginBottom: 0 }}>
+            {t("purchases.form.items.required")}
+          </p>
+        )}
       </Card>
 
       <Modal
