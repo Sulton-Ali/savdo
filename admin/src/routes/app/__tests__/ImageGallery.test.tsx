@@ -74,6 +74,41 @@ function apiError(code: string, details: Record<string, unknown> = {}, status = 
   } as never;
 }
 
+/** A promise whose resolution the test controls from the outside. */
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
+/** Whether an antd `Select`'s search input is currently disabled — checked
+ * via the wrapper's class rather than the input's own `disabled` attribute,
+ * which rc-select does not always set on the input itself. */
+function isSelectDisabled(input: HTMLElement): boolean {
+  return input.closest(".ant-select")?.classList.contains("ant-select-disabled") ?? false;
+}
+
+/**
+ * Clicks the most recently opened dropdown's option. A closed `Select`'s
+ * dropdown portal can linger in `document.body` (rc-select hides rather
+ * than unmounts it), so with more than one `Select` on the page the
+ * *last* `.ant-select-item-option` node — the most recently appended
+ * portal — is the one actually open, not necessarily the first.
+ */
+async function clickOpenDropdownOption(): Promise<void> {
+  const option = await waitFor(() => {
+    const options = document.querySelectorAll(".ant-select-item-option");
+    const last = options[options.length - 1];
+    if (!last) {
+      throw new Error("dropdown option not rendered yet");
+    }
+    return last;
+  });
+  fireEvent.click(option);
+}
+
 function renderGallery(
   images: ProductImage[],
   options: { variants?: Variant[]; queryClient?: QueryClient } = {},
@@ -240,17 +275,7 @@ describe("ImageGallery", () => {
     });
 
     fireEvent.mouseDown(screen.getByLabelText("Variant"));
-    // The dropdown portals to `document.body`, outside the render
-    // `container`; two "v1" nodes render there (an ARIA-hidden
-    // accessibility mirror plus the visible option) — target the latter.
-    const option = await waitFor(() => {
-      const el = document.querySelector(".ant-select-item-option");
-      if (!el) {
-        throw new Error("dropdown option not rendered yet");
-      }
-      return el;
-    });
-    fireEvent.click(option);
+    await clickOpenDropdownOption();
 
     await waitFor(() => {
       expect(mockedApi.DELETE).toHaveBeenCalledWith("/products/{id}/images/{imageId}", {
@@ -264,5 +289,61 @@ describe("ImageGallery", () => {
 
     expect(await screen.findByText("Something went wrong. Please try again.")).toBeTruthy();
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["product", "p1"] });
+  });
+
+  // Review follow-up: locking must key off a Set of in-flight image ids,
+  // not the single `retagMutation`'s `variables` (which only ever reflects
+  // the most recent `.mutate()` call) — otherwise starting a second retag
+  // while a first is still pending would silently unlock the first.
+  it("keeps each image's controls locked independently when two retags overlap", async () => {
+    const deletes = [deferred<unknown>(), deferred<unknown>()];
+    let deleteCall = 0;
+    mockedApi.DELETE.mockImplementation((() => {
+      const call = deletes[deleteCall];
+      deleteCall += 1;
+      return call?.promise;
+    }) as never);
+    // The retag flow's later steps (reattach, reorder) — not under test
+    // here, just needed so each mutation runs to completion once its
+    // DELETE resolves.
+    mockedApi.POST.mockResolvedValue(apiResult(image("recreated", 0), 201));
+    mockedApi.PATCH.mockResolvedValue(apiResult({ items: [] }));
+
+    renderGallery([image("a", 0), image("b", 1)], { variants: [variant({ id: "v1" })] });
+
+    const selects = screen.getAllByLabelText("Variant") as HTMLInputElement[];
+    expect(selects).toHaveLength(2);
+
+    fireEvent.mouseDown(selects[0] as HTMLInputElement);
+    await clickOpenDropdownOption();
+    fireEvent.mouseDown(selects[1] as HTMLInputElement);
+    await clickOpenDropdownOption();
+
+    // Both retags are now in flight (both DELETE calls pending) — both
+    // Selects must stay locked, not just the most recently started one.
+    await waitFor(() => {
+      expect(isSelectDisabled(selects[0] as HTMLInputElement)).toBe(true);
+      expect(isSelectDisabled(selects[1] as HTMLInputElement)).toBe(true);
+    });
+
+    deletes[0]?.resolve({
+      data: undefined,
+      error: undefined,
+      response: new Response(null, { status: 204 }),
+    });
+    // image "a"'s retag still has its POST/PATCH steps to finish, and "b"'s
+    // DELETE hasn't resolved yet — "b" must remain locked throughout.
+    expect(isSelectDisabled(selects[1] as HTMLInputElement)).toBe(true);
+
+    deletes[1]?.resolve({
+      data: undefined,
+      error: undefined,
+      response: new Response(null, { status: 204 }),
+    });
+
+    await waitFor(() => {
+      expect(isSelectDisabled(selects[0] as HTMLInputElement)).toBe(false);
+      expect(isSelectDisabled(selects[1] as HTMLInputElement)).toBe(false);
+    });
   });
 });

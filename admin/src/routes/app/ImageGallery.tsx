@@ -52,6 +52,11 @@ export function ImageGallery({
   const { notification } = App.useApp();
   const queryClient = useQueryClient();
   const [pendingImageSrc, setPendingImageSrc] = useState<string | null>(null);
+  // Every image currently mid-retag — a `Set`, not the single active
+  // mutation's `variables`, so two rapid retags on different images (each
+  // its own `mutate` call against the same `useMutation`) both stay locked
+  // rather than the second overwriting the first's in-flight marker.
+  const [retaggingIds, setRetaggingIds] = useState<Set<string>>(new Set());
 
   const sorted = [...images].sort((a, b) => a.sortOrder - b.sortOrder);
   const atCap = sorted.length >= MAX_PRODUCT_IMAGES;
@@ -128,6 +133,9 @@ export function ImageGallery({
         ...(image.isCover ? { coverImageId: created.id } : {}),
       });
     },
+    onMutate: ({ image }) => {
+      setRetaggingIds((current) => new Set(current).add(image.id));
+    },
     onSuccess: () => invalidate(),
     onError: (error) => {
       // The mutation may have already removed the old attachment (and even
@@ -136,10 +144,14 @@ export function ImageGallery({
       invalidate();
       handleImageError(error);
     },
+    onSettled: (_data, _error, { image }) => {
+      setRetaggingIds((current) => {
+        const next = new Set(current);
+        next.delete(image.id);
+        return next;
+      });
+    },
   });
-  const retaggingImageId = retagMutation.isPending
-    ? (retagMutation.variables?.image.id ?? null)
-    : null;
 
   function beforeUpload(file: RcFile): boolean | string {
     if (!ACCEPTED_MIME.includes(file.type)) {
@@ -215,7 +227,7 @@ export function ImageGallery({
         ) : (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
             {sorted.map((image, index) => {
-              const isRetagging = retaggingImageId === image.id;
+              const isRetagging = retaggingIds.has(image.id);
               return (
                 <Card
                   key={image.id}

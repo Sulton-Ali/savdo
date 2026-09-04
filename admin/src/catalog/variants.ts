@@ -1,15 +1,24 @@
 import { formatMoney } from "../lib/money";
 import type { AttributeDefinition, AttributeValues, Variant, VariantPatch } from "./api";
 
-/** A sorted, key-order-independent string key for an `AttributeValues`
+/**
+ * A sorted, key-order-independent string key for an `AttributeValues`
  * object — two variants with the same values in a different key order (or a
  * matrix combination built in a different attribute order) must compare
- * equal (`docs/04-DATA-MODEL.md` § 2, unique `(product_id, attributes)`). */
+ * equal (`docs/04-DATA-MODEL.md` § 2, unique `(product_id, attributes)`).
+ *
+ * Serializes as JSON `[key, value]` pairs rather than a delimited string:
+ * a plain `"key=value"` join can collide across different attribute sets
+ * that happen to contain the same characters (e.g. a single `color`
+ * attribute valued `"size=M"` versus separate `color`/`size` attributes),
+ * which JSON's own escaping and structural nesting rules out.
+ */
 export function canonicalAttributesKey(attributes: AttributeValues): string {
-  return Object.keys(attributes)
-    .sort()
-    .map((key) => `${key}=${attributes[key]}`)
-    .join(" ");
+  return JSON.stringify(
+    Object.keys(attributes)
+      .sort()
+      .map((key) => [key, attributes[key]]),
+  );
 }
 
 /** The Cartesian product of each attribute code's selected values, e.g.

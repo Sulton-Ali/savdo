@@ -50,6 +50,16 @@ describe("canonicalAttributesKey", () => {
       canonicalAttributesKey({ color: "blue", size: "S" }),
     );
   });
+
+  // review follow-up: a delimited "key=value" join can collide across
+  // different attribute sets that happen to share characters with the
+  // delimiter — {color: "blue", size: "M"} and {color: "blue size=M"}
+  // both joined to "color=blue size=M" under the old scheme.
+  it("does not collide across different attribute sets that share delimiter characters", () => {
+    expect(canonicalAttributesKey({ color: "blue", size: "M" })).not.toBe(
+      canonicalAttributesKey({ color: "blue size=M" }),
+    );
+  });
 });
 
 describe("combinationsToCreate", () => {
