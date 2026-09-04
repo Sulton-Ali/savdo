@@ -15,6 +15,7 @@ func newTestStorage(t *testing.T) (*LocalStorage, string) {
 	if err != nil {
 		t.Fatalf("NewLocalStorage: %v", err)
 	}
+	t.Cleanup(func() { _ = s.Close() })
 	return s, root
 }
 
@@ -124,17 +125,19 @@ func TestDevHandler_rejectsDotSegments(t *testing.T) {
 	}
 }
 
-// TestDevHandler_rejectsSymlink proves a symlink under the media root is
-// never followed and served, even when it points at a legitimate file
-// within the same root (Review B MINOR 6/7) — os.Lstat, not os.Stat, is
-// what makes this hold regardless of the link's target.
-func TestDevHandler_rejectsSymlink(t *testing.T) {
+// TestDevHandler_rejectsEscapingSymlinkedFile proves a symlink under the
+// media root whose target escapes the root is never followed and served
+// (Review B MINOR 6) — os.Root.Open refuses this at open time, regardless
+// of the leaf's own file mode, which is what lets DevHandler serve
+// through http.ServeContent without an Lstat-based check of its own.
+func TestDevHandler_rejectsEscapingSymlinkedFile(t *testing.T) {
 	storage, root := newTestStorage(t)
 	if err := os.MkdirAll(filepath.Join(root, "shop-1"), 0o750); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	target := filepath.Join(root, "shop-1", "real.webp")
-	if err := os.WriteFile(target, []byte("real bytes"), 0o600); err != nil {
+	outside := t.TempDir()
+	target := filepath.Join(outside, "escaped.webp")
+	if err := os.WriteFile(target, []byte("do not serve me"), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 	link := filepath.Join(root, "shop-1", "link.webp")
@@ -148,6 +151,37 @@ func TestDevHandler_rejectsSymlink(t *testing.T) {
 	h.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404 (symlink rejected); body: %s", rec.Code, rec.Body.String())
+		t.Fatalf("status = %d, want 404 (escaping symlink rejected); body: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestDevHandler_rejectsEscapingSymlinkedIntermediateDirectory is Review B
+// MINOR 6's named case: the escaping symlink is an intermediate path
+// *directory*, not the requested file itself — os.Root.Open re-resolves
+// every path component against the root, so this is refused the same way
+// a directly-symlinked file is, even though the final path segment
+// ("real.webp") is an entirely ordinary regular file once you follow the
+// link.
+func TestDevHandler_rejectsEscapingSymlinkedIntermediateDirectory(t *testing.T) {
+	storage, root := newTestStorage(t)
+	outside := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(outside, "secret"), 0o750); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(outside, "secret", "real.webp"), []byte("do not serve me"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	linkedDir := filepath.Join(root, "shop-1")
+	if err := os.Symlink(filepath.Join(outside, "secret"), linkedDir); err != nil {
+		t.Skipf("symlinks unsupported on this filesystem: %v", err)
+	}
+
+	h := DevHandler(storage)
+	req := httptest.NewRequest(http.MethodGet, "/shop-1/real.webp", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 (escaping symlinked intermediate directory rejected); body: %s", rec.Code, rec.Body.String())
 	}
 }

@@ -48,17 +48,32 @@ type Service struct {
 	baseURL  string
 	maxBytes int64
 
+	// queue is a non-blocking admission gate acquired BEFORE spooling a
+	// single byte to disk, held for the entire Upload call (Review B
+	// follow-up MAJOR): without it, an unbounded number of requests could
+	// each spool up to MediaMaxBytes into TempDir() and then queue up
+	// behind sem below, filling MEDIA_DIR/.tmp under sustained
+	// concurrency even though only a bounded number can ever be actively
+	// decoding at once. A full queue means "the server already has as
+	// many uploads in flight as it's willing to hold" — Upload rejects
+	// immediately with 429 RATE_LIMITED rather than spooling and then
+	// blocking, so a client sees back-pressure instead of the request
+	// just hanging.
+	queue chan struct{}
+
 	// sem bounds how many uploads may be decoding/deriving at once
 	// (Review B MAJOR 4 — image.Decode and the resize/WebP-encode pass
 	// are the CPU- and memory-heavy part of an upload; without a cap,
 	// concurrent requests each allocating a decoded-image-sized buffer
 	// can drive the process's memory far past what any single upload's
-	// own size and dimension limits suggest). A field rather than a
-	// literal package-level variable: this process constructs exactly
-	// one Service, so the two are equivalent in production, but a field
-	// keeps every test's Service — and its concurrency limit — isolated
-	// from every other test's, instead of every test in this package
-	// contending over one shared global channel.
+	// own size and dimension limits suggest). Smaller than queue: queue
+	// bounds how many uploads may be spooled/waiting at all, sem bounds
+	// how many of those may actually be decoding at once. A field rather
+	// than a literal package-level variable: this process constructs
+	// exactly one Service, so the two are equivalent in production, but a
+	// field keeps every test's Service — and its limits — isolated from
+	// every other test's, instead of every test in this package
+	// contending over shared global channels.
 	sem chan struct{}
 
 	// inFlight and maxInFlight track how many goroutines are inside sem's
@@ -73,15 +88,22 @@ type Service struct {
 
 // NewService builds a Service. maxBytes is Config.MediaMaxBytes; baseURL
 // is Config.MediaBaseURL (used to build the MediaUrls a caller of
-// toGenMediaFile gets back); concurrency is Config.MediaConcurrency (at
-// least 1 — a non-positive value is treated as 1 rather than creating an
-// unusable zero-capacity semaphore that would block every upload
-// forever).
-func NewService(q *db.Queries, storage Storage, baseURL string, maxBytes int64, concurrency int) *Service {
+// toGenMediaFile gets back); concurrency is Config.MediaConcurrency and
+// queueSize is Config.MediaQueue (both at least 1 — a non-positive value
+// is treated as 1 rather than creating an unusable zero-capacity channel
+// that would reject or block every upload).
+func NewService(q *db.Queries, storage Storage, baseURL string, maxBytes int64, concurrency int, queueSize int) *Service {
 	if concurrency < 1 {
 		concurrency = 1
 	}
-	return &Service{q: q, storage: storage, baseURL: baseURL, maxBytes: maxBytes, sem: make(chan struct{}, concurrency)}
+	if queueSize < 1 {
+		queueSize = 1
+	}
+	return &Service{
+		q: q, storage: storage, baseURL: baseURL, maxBytes: maxBytes,
+		sem:   make(chan struct{}, concurrency),
+		queue: make(chan struct{}, queueSize),
+	}
 }
 
 // BaseURL returns the configured media base URL, for Handler.
@@ -108,13 +130,26 @@ func newID() uuid.UUID {
 // existing row is returned unchanged instead — no new files, no new row
 // (sha256 dedupe, docs/06-ROADMAP.md Phase 2 T3 spec).
 //
-// Every returned *apierr.Error is one of the two the spec calls for:
-// fields.file: too_long (over MediaMaxBytes) or fields.file: invalid
-// (unsupported/undecodable format, a dimension over 8000px, or more than
-// 24 megapixels — Review B CRITICAL 1). Any other error is wrapped for
-// the caller to turn into a 500.
+// Every returned *apierr.Error is one of the three the spec (and its
+// Review B follow-up) calls for: fields.file: too_long (over
+// MediaMaxBytes), fields.file: invalid (unsupported/undecodable format, a
+// dimension over 8000px, or more than 24 megapixels — Review B CRITICAL
+// 1), or a 429 RATE_LIMITED when the admission queue is full (Review B
+// follow-up MAJOR). Any other error is wrapped for the caller to turn
+// into a 500.
 func (s *Service) Upload(ctx context.Context, shopID, userID uuid.UUID, part io.Reader) (db.MediaFile, error) {
-	tmp, size, err := s.spool(ctx, part)
+	// Admission gate, tried before a single byte is spooled to disk: a
+	// full queue means back-pressure now (429, Retry-After: 5s), never a
+	// request that spools its whole file and then blocks indefinitely
+	// waiting for a decode slot (Review B follow-up MAJOR).
+	select {
+	case s.queue <- struct{}{}:
+	default:
+		return db.MediaFile{}, apierr.RateLimited(5)
+	}
+	defer func() { <-s.queue }()
+
+	tmp, _, err := s.spool(ctx, part)
 	if err != nil {
 		return db.MediaFile{}, err
 	}
@@ -176,7 +211,7 @@ func (s *Service) Upload(ctx context.Context, shopID, userID uuid.UUID, part io.
 	if err := acquireDeriveSlot(ctx, s.sem); err != nil {
 		return db.MediaFile{}, fmt.Errorf("media: wait for a decode slot: %w", err)
 	}
-	derived, err := func() (map[string][]byte, error) {
+	derived, err := func() (map[string]derivative, error) {
 		defer func() { <-s.sem }()
 
 		cur := s.inFlight.Add(1)
@@ -202,15 +237,17 @@ func (s *Service) Upload(ctx context.Context, shopID, userID uuid.UUID, part io.
 			return nil, apierr.Validation(map[string]string{"file": "invalid"})
 		}
 
-		bufs := make(map[string][]byte, len(derivativeSizes))
+		result := make(map[string]derivative, len(derivativeSizes))
 		for _, d := range derivativeSizes {
-			buf, err := encodeWebP(resize(img, d.side))
+			resized := resize(img, d.side)
+			buf, err := encodeWebP(resized)
 			if err != nil {
 				return nil, fmt.Errorf("media: build derivative: %w", err)
 			}
-			bufs[d.suffix] = buf
+			b := resized.Bounds()
+			result[d.suffix] = derivative{data: buf, width: b.Dx(), height: b.Dy()}
 		}
-		return bufs, nil
+		return result, nil
 	}()
 	if err != nil {
 		return db.MediaFile{}, err
@@ -228,23 +265,28 @@ func (s *Service) Upload(ctx context.Context, shopID, userID uuid.UUID, part io.
 	}
 
 	for _, d := range derivativeSizes {
-		buf := derived[d.suffix]
+		dv := derived[d.suffix]
 		dKey := derivativeKey(stem, d.suffix)
-		if err := s.storage.Put(ctx, dKey, bytes.NewReader(buf), int64(len(buf)), "image/webp"); err != nil {
+		if err := s.storage.Put(ctx, dKey, bytes.NewReader(dv.data), int64(len(dv.data)), "image/webp"); err != nil {
 			cleanup()
 			return db.MediaFile{}, fmt.Errorf("media: store derivative: %w", err)
 		}
 		written = append(written, dKey)
 	}
 
-	width := dimensionToInt32(imgCfg.Width)
-	height := dimensionToInt32(imgCfg.Height)
+	// media_files records the "_full" derivative's own mime/size/
+	// dimensions, not the original's (Review B follow-up MINOR, after
+	// O-16): "_full" is what a GET actually serves, and the original's
+	// bytes never reach disk to measure in the first place.
+	full := derived[suffixFull]
+	width := dimensionToInt32(full.width)
+	height := dimensionToInt32(full.height)
 	row, err := s.q.CreateMediaFile(ctx, db.CreateMediaFileParams{
 		ID:         id,
 		ShopID:     shopID,
 		StorageKey: stem,
-		Mime:       mime,
-		SizeBytes:  size,
+		Mime:       "image/webp",
+		SizeBytes:  int64(len(full.data)),
 		Width:      &width,
 		Height:     &height,
 		Sha256:     sum,
@@ -276,6 +318,17 @@ var derivativeSizes = []struct {
 	{suffixThumb, thumbLongestSide},
 	{suffixCard, cardLongestSide},
 	{suffixFull, fullLongestSide},
+}
+
+// derivative is one built WebP derivative's bytes and actual pixel
+// dimensions (which may be smaller than the original's — resize scales
+// down, never up). media_files' mime/size_bytes/width/height are recorded
+// from the "_full" derivative specifically (see Upload), not the
+// original: it's what GET requests actually receive, and per O-16 the
+// original's own bytes never reach disk to measure at all.
+type derivative struct {
+	data          []byte
+	width, height int
 }
 
 // acquireDeriveSlot blocks until a slot in sem is free or ctx is done,

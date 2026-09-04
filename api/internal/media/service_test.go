@@ -10,6 +10,7 @@ import (
 	"image/jpeg"
 	"image/png"
 	"io"
+	"net/http"
 	"runtime"
 	"strings"
 	"sync"
@@ -136,7 +137,18 @@ func newTestService(t *testing.T) (*Service, *db.Queries, db.Shop, db.User) {
 	return newTestServiceWithConcurrency(t, 2)
 }
 
+// newTestServiceWithConcurrency uses a generously large admission queue
+// (10) — plenty of headroom above any test in this file's own concurrent
+// goroutine count — so tests exercising the decode semaphore (sem) don't
+// incidentally also hit the outer admission gate (queue) and get an
+// unexpected 429. TestUpload_admissionQueueRejectsWhenFull, below, is the
+// one test that deliberately wants a small queue and uses
+// newTestServiceWithLimits directly instead.
 func newTestServiceWithConcurrency(t *testing.T, concurrency int) (*Service, *db.Queries, db.Shop, db.User) {
+	return newTestServiceWithLimits(t, concurrency, 10)
+}
+
+func newTestServiceWithLimits(t *testing.T, concurrency, queueSize int) (*Service, *db.Queries, db.Shop, db.User) {
 	t.Helper()
 	pool := testdb.New(t)
 	testdb.Truncate(t, pool)
@@ -149,7 +161,8 @@ func newTestServiceWithConcurrency(t *testing.T, concurrency int) (*Service, *db
 	if err != nil {
 		t.Fatalf("NewLocalStorage: %v", err)
 	}
-	svc := NewService(q, storage, "/media", 10<<20, concurrency)
+	t.Cleanup(func() { _ = storage.Close() })
+	svc := NewService(q, storage, "/media", 10<<20, concurrency, queueSize)
 	return svc, q, shopRow, userRow
 }
 
@@ -163,14 +176,18 @@ func TestUpload_pngCreatesThreeDerivativesOnly(t *testing.T) {
 		t.Fatalf("Upload: %v", err)
 	}
 
-	if row.Mime != "image/png" {
-		t.Errorf("Mime = %q, want image/png", row.Mime)
+	// Review B follow-up MINOR (after O-16): the row records the "_full"
+	// derivative's own mime/size/dimensions — what a GET actually
+	// serves — not the original PNG's. Source is 800x600, under the full
+	// derivative's 1600px target, so its dimensions stay 800x600 (never
+	// upscale, docs/06-ROADMAP.md Phase 2 T3 spec); its byte size is
+	// whatever WebP re-encoding produced, checked below against the
+	// actual stored bytes rather than a hardcoded number.
+	if row.Mime != "image/webp" {
+		t.Errorf("Mime = %q, want image/webp", row.Mime)
 	}
 	if row.Width == nil || *row.Width != 800 || row.Height == nil || *row.Height != 600 {
 		t.Errorf("dimensions = %+v/%+v, want 800/600", row.Width, row.Height)
-	}
-	if row.SizeBytes != int64(len(data)) {
-		t.Errorf("SizeBytes = %d, want %d", row.SizeBytes, len(data))
 	}
 
 	// The row is actually persisted (not just returned in memory).
@@ -204,8 +221,12 @@ func TestUpload_pngCreatesThreeDerivativesOnly(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Open derivative %s: %v", suffix, err)
 		}
-		img, format, err := image.Decode(rc)
+		raw, err := io.ReadAll(rc)
 		_ = rc.Close()
+		if err != nil {
+			t.Fatalf("read derivative %s: %v", suffix, err)
+		}
+		img, format, err := image.Decode(bytes.NewReader(raw))
 		if err != nil {
 			t.Fatalf("decode derivative %s: %v", suffix, err)
 		}
@@ -215,6 +236,9 @@ func TestUpload_pngCreatesThreeDerivativesOnly(t *testing.T) {
 		b := img.Bounds()
 		if b.Dx() != want.w || b.Dy() != want.h {
 			t.Errorf("derivative %s bounds = %dx%d, want %dx%d", suffix, b.Dx(), b.Dy(), want.w, want.h)
+		}
+		if suffix == suffixFull && row.SizeBytes != int64(len(raw)) {
+			t.Errorf("row.SizeBytes = %d, want %d (the _full derivative's actual byte size)", row.SizeBytes, len(raw))
 		}
 	}
 }
@@ -471,6 +495,71 @@ func TestUpload_respectsCtxCancellationWhileWaitingForASlot(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("Upload did not return within 2s of its context expiring while waiting for a decode slot")
+	}
+}
+
+// TestUpload_admissionQueueRejectsWhenFull is the Review B follow-up
+// MAJOR's test: with the admission queue and the decode semaphore both
+// forced to size 1, a second upload attempted while the first is still
+// in flight (spooled, admitted, but blocked waiting for the — already
+// held — decode slot) must be rejected immediately with 429
+// RATE_LIMITED, never spool its own bytes and block. Once the first
+// upload's decode slot frees up and it finishes, further uploads must
+// succeed again sequentially — the queue slot the rejected second
+// upload never held is not somehow left stuck.
+func TestUpload_admissionQueueRejectsWhenFull(t *testing.T) {
+	svc, _, shopRow, userRow := newTestServiceWithLimits(t, 1, 1)
+	ctx := context.Background()
+
+	// Hold the only decode slot so the first upload's real Upload call
+	// gets past admission (occupying the only queue slot) and then
+	// blocks waiting for a decode slot — keeping that queue slot
+	// occupied for as long as this test wants, deterministically.
+	svc.sem <- struct{}{}
+
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := svc.Upload(ctx, shopRow.ID, userRow.ID, bytes.NewReader(pngBytes(t, 64, 64)))
+		firstDone <- err
+	}()
+
+	// Wait until the first upload has actually taken the queue slot
+	// (fast — admission happens before spooling — but still
+	// asynchronous relative to this goroutine) before asserting the
+	// second is rejected; poll rather than a fixed sleep.
+	deadline := time.Now().Add(2 * time.Second)
+	for len(svc.queue) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("first upload never occupied the admission queue within 2s")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	_, err := svc.Upload(ctx, shopRow.ID, userRow.ID, bytes.NewReader(pngBytes(t, 65, 64)))
+	var apiErr *apierr.Error
+	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusTooManyRequests {
+		t.Fatalf("second concurrent upload err = %v, want a 429 RATE_LIMITED *apierr.Error", err)
+	}
+
+	// Release the artificially-held decode slot so the first upload can
+	// proceed and finish.
+	<-svc.sem
+	select {
+	case err := <-firstDone:
+		if err != nil {
+			t.Fatalf("first upload: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("first upload did not finish within 2s of its decode slot freeing up")
+	}
+
+	// Sequential uploads after that must all succeed — the rejected
+	// second upload never held (and so never leaked) a queue slot.
+	if _, err := svc.Upload(ctx, shopRow.ID, userRow.ID, bytes.NewReader(pngBytes(t, 66, 64))); err != nil {
+		t.Fatalf("sequential upload 1: %v", err)
+	}
+	if _, err := svc.Upload(ctx, shopRow.ID, userRow.ID, bytes.NewReader(pngBytes(t, 67, 64))); err != nil {
+		t.Fatalf("sequential upload 2: %v", err)
 	}
 }
 

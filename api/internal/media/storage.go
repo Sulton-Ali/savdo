@@ -82,6 +82,18 @@ const tempDirName = ".tmp"
 type LocalStorage struct {
 	root    string
 	baseURL string
+
+	// osRoot is an os.Root opened on root, held for this LocalStorage's
+	// whole lifetime and used only by the dev static handler
+	// (dev_serve.go) to open a file for serving: os.Root re-resolves
+	// every path component against the root directory itself rather than
+	// trusting an assembled path string, so a symlink anywhere in the
+	// chain (including an intermediate directory) that would escape root
+	// is refused at open time — a stronger guarantee than checking the
+	// leaf file alone (Review B MINOR 6). Put/Open/Delete don't use it:
+	// their keys are always ones this package generated, never a
+	// client-supplied URL path.
+	osRoot *os.Root
 }
 
 // NewLocalStorage builds a LocalStorage rooted at root, whose URL method
@@ -99,7 +111,25 @@ func NewLocalStorage(root, baseURL string) (*LocalStorage, error) {
 	if _, err := s.TempDir(context.Background()); err != nil {
 		return nil, err
 	}
+	osRoot, err := os.OpenRoot(s.root)
+	if err != nil {
+		return nil, fmt.Errorf("media: open root %s: %w", s.root, err)
+	}
+	s.osRoot = osRoot
 	return s, nil
+}
+
+// Close releases the os.Root handle DevHandler uses. Not part of the
+// Storage interface — Put/Open/Delete/URL/TempDir all work without it —
+// and cmd/api never calls it either, since the running process holds one
+// LocalStorage for its entire lifetime. It exists so a test constructing
+// many LocalStorage values in one process doesn't accumulate open file
+// descriptors across the whole binary's run.
+func (s *LocalStorage) Close() error {
+	if s.osRoot == nil {
+		return nil
+	}
+	return s.osRoot.Close()
 }
 
 // resolve validates key and returns the absolute filesystem path it maps
