@@ -34,6 +34,8 @@ seed` directly needs `DATABASE_URL` and `MEDIA_DIR` in the environment, same as 
 
 Media files in dev go to `infra/data/media/` (gitignored).
 
+Phase 3 (D-49): `make seed` then creates three suppliers and opening stock through the services, never by writing `stock_levels` or `stock_movements` directly (ADR-006): one received purchase per catalogue category (6 purchases, one line per variant, 135 lines for the demo catalogue), quantities 3–12 derived from a stable hash of the SKU, `unitCost` equal to the variant's effective cost so receiving leaves the catalogue's cost numbers unchanged (D-42), then one transfer of 2 units for the first 10 variants by SKU from the shop floor to the storeroom. The step is skipped when the shop already has a purchase (`stock already seeded`). The seed is additive-only and has no destructive reset; a full local reset is `make dev-infra-down && make dev-infra && make migrate && make seed`, which recreates the database (the ledger's append-only trigger blocks per-shop deletes by design).
+
 ### Stock rebuild
 
 `cd api && go run ./cmd/savdo stock rebuild --shop-slug savdo-demo` recomputes `stock_levels` from `stock_movements` for one shop inside a single transaction under a shop-scoped advisory lock (ADR-006). The flag is required. Stop the API (or make sure nothing writes stock) while it runs: a concurrent movement blocks on the rebuild or makes it abort with a unique violation; levels are never silently overwritten. Prints movement and level counts.
