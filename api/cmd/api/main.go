@@ -18,6 +18,7 @@ import (
 	"github.com/Sulton-Ali/savdo/api/internal/config"
 	"github.com/Sulton-Ali/savdo/api/internal/db"
 	"github.com/Sulton-Ali/savdo/api/internal/httpx"
+	"github.com/Sulton-Ali/savdo/api/internal/shop"
 )
 
 func main() {
@@ -58,7 +59,7 @@ func run() error {
 	// now, failing fast here — rather than lazily on the first request —
 	// means a misconfigured or unseeded deployment never serves traffic
 	// at all.
-	shop, err := queries.GetShopBySlug(ctx, cfg.ShopSlug)
+	shopRow, err := queries.GetShopBySlug(ctx, cfg.ShopSlug)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("no shop with slug %q — run `savdo seed`", cfg.ShopSlug)
@@ -66,11 +67,12 @@ func run() error {
 		return fmt.Errorf("load shop %q: %w", cfg.ShopSlug, err)
 	}
 
-	authSvc := auth.NewService(queries, cfg, shop.ID)
+	authSvc := auth.NewService(queries, cfg, shopRow.ID)
+	shopSvc := shop.NewService(pool, queries)
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           httpx.NewRouter(logger, pool, authSvc),
+		Handler:           httpx.NewRouter(logger, pool, authSvc, shopSvc),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      15 * time.Second,
