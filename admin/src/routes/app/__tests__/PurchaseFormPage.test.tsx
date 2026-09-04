@@ -81,7 +81,17 @@ function draftPurchase() {
     receivedAt: null,
     note: null,
     totalCost: "0.00",
-    items: [{ id: "item1", variantId: "var1", qty: "2.000", unitCost: "5000.00" }],
+    items: [
+      {
+        id: "item1",
+        variantId: "var1",
+        qty: "2.000",
+        unitCost: "5000.00",
+        productName: "Shirt",
+        variantLabel: "SKU1-M — M",
+        sku: "SKU1-M",
+      },
+    ],
     createdAt: "2026-01-01T00:00:00Z",
   };
 }
@@ -153,7 +163,17 @@ describe("PurchaseFormPage", () => {
           receivedAt: null,
           note: null,
           totalCost: "10000.00",
-          items: [{ id: "item1", variantId: "var1", qty: "2.000", unitCost: "5000.00" }],
+          items: [
+            {
+              id: "item1",
+              variantId: "var1",
+              qty: "2.000",
+              unitCost: "5000.00",
+              productName: "Shirt",
+              variantLabel: "SKU1-M — M",
+              sku: "SKU1-M",
+            },
+          ],
           createdAt: "2026-01-01T00:00:00Z",
         },
         201,
@@ -302,8 +322,55 @@ describe("PurchaseFormPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Cancel purchase" }));
     fireEvent.click(await screen.findByRole("button", { name: "OK" }));
 
+    // Uses the item's own server-resolved `productName` ("Shirt", from
+    // `draftPurchase()`), not the variantId or the client-side session
+    // cache.
     expect(
-      await screen.findByText(/Not enough stock to cancel: only 1\.000 available/),
+      await screen.findByText(/Not enough stock to cancel: only 1\.000 available for Shirt\./),
     ).toBeTruthy();
+  });
+
+  it("renders productName/variantLabel/sku from the server for items loaded on an existing purchase, without any product search", async () => {
+    mockedApi.GET.mockImplementation(((path: string) => {
+      if (path === "/purchases/{id}") {
+        return Promise.resolve(
+          apiResult({
+            ...draftPurchase(),
+            items: [
+              {
+                id: "item2",
+                variantId: "var2",
+                qty: "3.000",
+                unitCost: "20000.00",
+                productName: "Blue Jacket",
+                variantLabel: "L / Blue",
+                sku: "SKU2-LB",
+              },
+            ],
+          }),
+        );
+      }
+      if (path === "/suppliers") {
+        return Promise.resolve(apiResult({ items: [supplier], nextCursor: null }));
+      }
+      if (path === "/locations") {
+        return Promise.resolve(apiResult({ items: [location], nextCursor: null }));
+      }
+      return Promise.resolve(apiResult({ items: [], nextCursor: null }));
+    }) as never);
+
+    renderForm("pur1");
+
+    expect(await screen.findByText("Blue Jacket")).toBeTruthy();
+    expect(await screen.findByText("L / Blue")).toBeTruthy();
+    expect(screen.getByText("(SKU2-LB)")).toBeTruthy();
+
+    // No fallback text and no product/variant search was needed to label
+    // this already-saved item.
+    expect(screen.queryByText(/Variant var2/)).toBeNull();
+    expect(mockedApi.GET.mock.calls.some((call) => call[0] === "/products")).toBe(false);
+    expect(mockedApi.GET.mock.calls.some((call) => call[0] === "/products/{id}/variants")).toBe(
+      false,
+    );
   });
 });
