@@ -1,7 +1,7 @@
 import type { components } from "@savdo/api-client";
 
 import { api } from "../lib/api";
-import { ApiError } from "../lib/errors";
+import { ApiError, parseRetryAfterSeconds } from "../lib/errors";
 import type { CursorPage } from "../lib/useCursorList";
 
 export type Unit = components["schemas"]["Unit"];
@@ -242,7 +242,7 @@ export async function deleteVariant(id: string): Promise<void> {
  * a `FormData` body through untouched so the browser sets the
  * `Content-Type` boundary itself (never set it by hand). */
 export async function uploadMedia(file: File | Blob): Promise<MediaFile> {
-  const { data, error } = await api.POST("/media", {
+  const { data, error, response } = await api.POST("/media", {
     body: { file } as unknown as { file: string },
     bodySerializer(body) {
       const formData = new FormData();
@@ -251,7 +251,9 @@ export async function uploadMedia(file: File | Blob): Promise<MediaFile> {
     },
   });
   if (error) {
-    throw new ApiError(error);
+    // The admission queue returns 429 RATE_LIMITED with Retry-After when
+    // full (`api/internal/media/service.go`); surface it to the caller.
+    throw new ApiError(error, parseRetryAfterSeconds(response));
   }
   return data;
 }

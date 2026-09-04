@@ -31,7 +31,7 @@ vi.mock("../ImageCropModal", () => ({
   ),
 }));
 
-import type { ProductImage } from "../../../catalog/api";
+import type { ProductImage, Variant } from "../../../catalog/api";
 import { i18next } from "../../../i18n";
 import { api } from "../../../lib/api";
 import { ImageGallery } from "../ImageGallery";
@@ -50,12 +50,36 @@ function image(id: string, sortOrder: number, overrides: Partial<ProductImage> =
   };
 }
 
+function variant(overrides: Partial<Variant> = {}): Variant {
+  return {
+    id: "v1",
+    sku: null,
+    barcode: null,
+    attributes: { color: "blue" },
+    priceOverride: null,
+    isActive: true,
+    ...overrides,
+  };
+}
+
 function apiResult(data: unknown, status = 200) {
   return { data, error: undefined, response: new Response(null, { status }) } as never;
 }
 
-function renderGallery(images: ProductImage[]) {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function apiError(code: string, details: Record<string, unknown> = {}, status = 400) {
+  return {
+    data: undefined,
+    error: { error: { code, details } },
+    response: new Response(null, { status }),
+  } as never;
+}
+
+function renderGallery(
+  images: ProductImage[],
+  options: { variants?: Variant[]; queryClient?: QueryClient } = {},
+) {
+  const queryClient =
+    options.queryClient ?? new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <ConfigProvider theme={{ token: { motion: false } }}>
       <QueryClientProvider client={queryClient}>
@@ -63,7 +87,7 @@ function renderGallery(images: ProductImage[]) {
           <ImageGallery
             productId="p1"
             images={images}
-            variants={[]}
+            variants={options.variants ?? []}
             attributeDefinitions={[]}
             canWrite
           />
@@ -192,5 +216,53 @@ describe("ImageGallery", () => {
       params: { path: { id: "p1" } },
       body: { mediaId: "media-new", isCover: true },
     });
+  });
+
+  // MAJOR 1 (phase-2/t6b review): retagging detaches then reattaches the
+  // image (no single-image update endpoint exists) — if the reattach step
+  // fails after the detach already succeeded, the gallery must refetch so
+  // it reflects what the server actually has, not the stale pre-mutation
+  // cache, and must tell the user something went wrong.
+  it("invalidates the product query and notifies on a failed retag (detach succeeded, reattach failed)", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+
+    mockedApi.DELETE.mockResolvedValueOnce({
+      data: undefined,
+      error: undefined,
+      response: new Response(null, { status: 204 }),
+    } as never);
+    mockedApi.POST.mockResolvedValueOnce(apiError("INTERNAL", {}, 500));
+
+    renderGallery([image("a", 0)], {
+      variants: [variant({ id: "v1" })],
+      queryClient,
+    });
+
+    fireEvent.mouseDown(screen.getByLabelText("Variant"));
+    // The dropdown portals to `document.body`, outside the render
+    // `container`; two "v1" nodes render there (an ARIA-hidden
+    // accessibility mirror plus the visible option) — target the latter.
+    const option = await waitFor(() => {
+      const el = document.querySelector(".ant-select-item-option");
+      if (!el) {
+        throw new Error("dropdown option not rendered yet");
+      }
+      return el;
+    });
+    fireEvent.click(option);
+
+    await waitFor(() => {
+      expect(mockedApi.DELETE).toHaveBeenCalledWith("/products/{id}/images/{imageId}", {
+        params: { path: { id: "p1", imageId: "a" } },
+      });
+    });
+    expect(mockedApi.POST).toHaveBeenCalledWith("/products/{id}/images", {
+      params: { path: { id: "p1" } },
+      body: { mediaId: "media-a", variantId: "v1", isCover: true },
+    });
+
+    expect(await screen.findByText("Something went wrong. Please try again.")).toBeTruthy();
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["product", "p1"] });
   });
 });

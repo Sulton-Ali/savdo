@@ -62,14 +62,25 @@ export function ImageGallery({
 
   function handleImageError(error: unknown) {
     if (error instanceof ApiError) {
+      if (error.code === "RATE_LIMITED") {
+        const message =
+          error.retryAfterSeconds != null
+            ? t("auth.errors.retryAfter", { seconds: error.retryAfterSeconds })
+            : t("catalog.images.tooManyUploads");
+        notification.error({ message });
+        return;
+      }
       const conflictField = (error.details as { field?: string }).field;
       if (error.code === "CONFLICT" && conflictField === "mediaId") {
         notification.error({ message: t("catalog.images.alreadyAttached") });
         return;
       }
       if (error.code === "VALIDATION_FAILED") {
+        // The merged contract's cap error is `fields.mediaId: invalid`
+        // only (`contracts/openapi.yaml` `addProductImage`) — no
+        // `fields.images` variant exists.
         const fields = (error.details as { fields?: Record<string, string> }).fields ?? {};
-        if (fields.mediaId === "invalid" || fields.images === "too_long") {
+        if (fields.mediaId === "invalid") {
           notification.error({ message: t("catalog.images.capReached") });
           return;
         }
@@ -118,8 +129,17 @@ export function ImageGallery({
       });
     },
     onSuccess: () => invalidate(),
-    onError: handleImageError,
+    onError: (error) => {
+      // The mutation may have already removed the old attachment (and even
+      // recreated it) before the failing step — refetch so the gallery
+      // reflects what the server actually has, not the pre-mutation cache.
+      invalidate();
+      handleImageError(error);
+    },
   });
+  const retaggingImageId = retagMutation.isPending
+    ? (retagMutation.variables?.image.id ?? null)
+    : null;
 
   function beforeUpload(file: RcFile): boolean | string {
     if (!ACCEPTED_MIME.includes(file.type)) {
@@ -162,6 +182,14 @@ export function ImageGallery({
     value: variant.id,
     label: variantLabel(variant, attributeDefinitions),
   }));
+  const variantById = new Map(variants.map((variant) => [variant.id, variant]));
+
+  /** The variant's label when the image is tagged to one, else the gallery
+   * title — always more meaningful than an empty `alt` for a product photo. */
+  function altTextFor(image: ProductImage): string {
+    const variant = image.variantId ? variantById.get(image.variantId) : undefined;
+    return variant ? variantLabel(variant, attributeDefinitions) : t("catalog.images.title");
+  }
 
   return (
     <Card title={t("catalog.images.title")} size="small">
@@ -186,73 +214,80 @@ export function ImageGallery({
           <Empty description={false} />
         ) : (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
-            {sorted.map((image, index) => (
-              <Card
-                key={image.id}
-                size="small"
-                style={{ width: 180 }}
-                cover={
-                  <img
-                    src={image.urls.card}
-                    alt=""
-                    style={{ objectFit: "cover", height: 140, width: "100%" }}
-                  />
-                }
-              >
-                {image.isCover && <Tag color="gold">{t("catalog.images.cover")}</Tag>}
-                {canWrite && (
-                  <Space direction="vertical" style={{ width: "100%", marginTop: 8 }}>
-                    <Select
-                      size="small"
-                      style={{ width: "100%" }}
-                      allowClear
-                      placeholder={t("catalog.images.noVariant")}
-                      aria-label={t("catalog.images.variantTag")}
-                      value={image.variantId ?? undefined}
-                      options={variantOptions}
-                      onChange={(value: string | undefined) =>
-                        retagMutation.mutate({ image, variantId: value ?? null })
-                      }
+            {sorted.map((image, index) => {
+              const isRetagging = retaggingImageId === image.id;
+              return (
+                <Card
+                  key={image.id}
+                  size="small"
+                  style={{ width: 180 }}
+                  cover={
+                    <img
+                      src={image.urls.card}
+                      alt={altTextFor(image)}
+                      style={{ objectFit: "cover", height: 140, width: "100%" }}
                     />
-                    <Space size={4}>
-                      <Button
+                  }
+                >
+                  {image.isCover && <Tag color="gold">{t("catalog.images.cover")}</Tag>}
+                  {canWrite && (
+                    <Space direction="vertical" style={{ width: "100%", marginTop: 8 }}>
+                      <Select
                         size="small"
-                        aria-label={t("catalog.images.moveUp")}
-                        disabled={index === 0}
-                        onClick={() => handleReorder(image.id, "up")}
-                        icon={<ArrowUp size={14} />}
+                        style={{ width: "100%" }}
+                        allowClear
+                        disabled={isRetagging}
+                        loading={isRetagging}
+                        placeholder={t("catalog.images.noVariant")}
+                        aria-label={t("catalog.images.variantTag")}
+                        value={image.variantId ?? undefined}
+                        options={variantOptions}
+                        onChange={(value: string | undefined) =>
+                          retagMutation.mutate({ image, variantId: value ?? null })
+                        }
                       />
-                      <Button
-                        size="small"
-                        aria-label={t("catalog.images.moveDown")}
-                        disabled={index === sorted.length - 1}
-                        onClick={() => handleReorder(image.id, "down")}
-                        icon={<ArrowDown size={14} />}
-                      />
-                      {!image.isCover && (
+                      <Space size={4}>
                         <Button
                           size="small"
-                          aria-label={t("catalog.images.setCover")}
-                          onClick={() => handleSetCover(image.id)}
-                          icon={<Star size={14} />}
+                          aria-label={t("catalog.images.moveUp")}
+                          disabled={isRetagging || index === 0}
+                          onClick={() => handleReorder(image.id, "up")}
+                          icon={<ArrowUp size={14} />}
                         />
-                      )}
-                      <Popconfirm
-                        title={t("catalog.images.confirmRemove")}
-                        onConfirm={() => removeMutation.mutate(image.id)}
-                      >
                         <Button
                           size="small"
-                          danger
-                          aria-label={t("catalog.images.remove")}
-                          icon={<Trash2 size={14} />}
+                          aria-label={t("catalog.images.moveDown")}
+                          disabled={isRetagging || index === sorted.length - 1}
+                          onClick={() => handleReorder(image.id, "down")}
+                          icon={<ArrowDown size={14} />}
                         />
-                      </Popconfirm>
+                        {!image.isCover && (
+                          <Button
+                            size="small"
+                            aria-label={t("catalog.images.setCover")}
+                            disabled={isRetagging}
+                            onClick={() => handleSetCover(image.id)}
+                            icon={<Star size={14} />}
+                          />
+                        )}
+                        <Popconfirm
+                          title={t("catalog.images.confirmRemove")}
+                          onConfirm={() => removeMutation.mutate(image.id)}
+                        >
+                          <Button
+                            size="small"
+                            danger
+                            disabled={isRetagging}
+                            aria-label={t("catalog.images.remove")}
+                            icon={<Trash2 size={14} />}
+                          />
+                        </Popconfirm>
+                      </Space>
                     </Space>
-                  </Space>
-                )}
-              </Card>
-            ))}
+                  )}
+                </Card>
+              );
+            })}
           </div>
         )}
       </Space>

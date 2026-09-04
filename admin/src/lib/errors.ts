@@ -31,13 +31,31 @@ interface ConflictDetails {
 export class ApiError extends Error {
   readonly code: ErrorCode;
   readonly details: Record<string, unknown>;
+  /** Seconds to wait before retrying, from the `Retry-After` response
+   * header on a `429 RATE_LIMITED` (mirrors `auth/api.ts`'s `ApiAuthError`).
+   * `undefined` for every other error, or when the header is absent. */
+  readonly retryAfterSeconds?: number;
 
-  constructor(body: ApiErrorBody) {
+  constructor(body: ApiErrorBody, retryAfterSeconds?: number) {
     super(`api request failed: ${body.error.code}`);
     this.name = "ApiError";
     this.code = body.error.code;
     this.details = (body.error.details ?? {}) as Record<string, unknown>;
+    this.retryAfterSeconds = retryAfterSeconds;
   }
+}
+
+/** Reads the `Retry-After` header (seconds) from a raw `Response`, e.g. for
+ * a `429 RATE_LIMITED` (`docs/05-API.md` § Conventions). Mirrors
+ * `auth/api.ts`'s identical helper — kept separate because that module has
+ * its own `ApiAuthError`, not this shared `ApiError`. */
+export function parseRetryAfterSeconds(response: Response): number | undefined {
+  const header = response.headers.get("Retry-After");
+  if (!header) {
+    return undefined;
+  }
+  const seconds = Number(header);
+  return Number.isFinite(seconds) ? seconds : undefined;
 }
 
 /**
