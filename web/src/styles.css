@@ -1,4 +1,8 @@
 @import "tailwindcss";
+@import "@savdo/ui-tokens/tokens.css";
+/* Self-hosted Inter Variable (D-36) — default axis (wght), no runtime
+ * Google Fonts request. */
+@import "@fontsource-variable/inter";
 
 * {
   box-sizing: border-box;
@@ -12,4 +16,5 @@ body,
 
 body {
   margin: 0;
+  font-family: var(--savdo-font-family);
 }
