@@ -80,7 +80,17 @@ type Config struct {
 	// sustained load. Default 8 (MediaConcurrency's own default × 4);
 	// the two aren't derived from each other at parse time — sizing
 	// MediaQueue relative to a non-default MediaConcurrency is an
-	// operator concern, not this struct's.
+	// operator concern, not this struct's (cmd/api logs a warning at
+	// startup if MediaQueue < MediaConcurrency, since that combination
+	// can never let every decode slot fill).
+	//
+	// This gate is process-wide, not per-shop: fine for the single-shop
+	// MVP this module ships for (docs/06-ROADMAP.md Phase 2), but a
+	// future multi-tenant deployment (ADR-004) sharing one process across
+	// shops would let one busy shop's uploads starve every other shop's
+	// out of the same queue. Splitting it per-shop is follow-up work for
+	// whenever ADR-004's tenant-ready design actually goes multi-process
+	// or multi-shop-per-process — not needed now.
 	MediaQueue int `env:"MEDIA_QUEUE" envDefault:"8"`
 }
 

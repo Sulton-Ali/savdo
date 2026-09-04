@@ -3227,6 +3227,20 @@ func (response UploadMedia403JSONResponse) VisitUploadMediaResponse(w http.Respo
 	return err
 }
 
+type UploadMedia429JSONResponse struct{ RateLimitedJSONResponse }
+
+func (response UploadMedia429JSONResponse) VisitUploadMediaResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListProductsRequestObject struct {
 	Params ListProductsParams
 }

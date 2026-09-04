@@ -941,7 +941,10 @@ paths:
         Requires `catalog.write` (manager+). Generates thumb/card/full
         sizes as WebP (ADR-008). `400 fields.file: invalid` for an
         unsupported format, `400 fields.file: too_long` over the size
-        limit.
+        limit. Decoding and deriving is bounded by a process-wide
+        admission queue; `429` means the server already has as many
+        uploads in flight as it's willing to hold — retry after the
+        given delay.
       requestBody:
         required: true
         content:
@@ -961,6 +964,8 @@ paths:
           $ref: "#/components/responses/Unauthenticated"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /products/{id}/images:
     post:

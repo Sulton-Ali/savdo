@@ -89,7 +89,7 @@ Phase numbers refer to `06-ROADMAP.md`.
 | GET/PATCH/DELETE | `/products/{id}`          | any / manager+  |
 | GET/POST | `/products/{id}/variants`         | any / manager+  |
 | PATCH/DELETE | `/variants/{id}`              | manager+        |
-| POST   | `/media`                            | manager+ (multipart) |
+| POST   | `/media`                            | manager+ (multipart; 429 when the upload admission queue is full) |
 | POST    | `/products/{id}/images`            | manager+        |
 | DELETE | `/products/{id}/images/{imageId}`   | manager+        |
 | PATCH  | `/products/{id}/images/order`       | manager+        |

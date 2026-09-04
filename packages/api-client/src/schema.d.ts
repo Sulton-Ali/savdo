@@ -485,7 +485,7 @@ export interface paths {
         put?: never;
         /**
          * Upload an image.
-         * @description Requires `catalog.write` (manager+). Generates thumb/card/full sizes as WebP (ADR-008). `400 fields.file: invalid` for an unsupported format, `400 fields.file: too_long` over the size limit.
+         * @description Requires `catalog.write` (manager+). Generates thumb/card/full sizes as WebP (ADR-008). `400 fields.file: invalid` for an unsupported format, `400 fields.file: too_long` over the size limit. Decoding and deriving is bounded by a process-wide admission queue; `429` means the server already has as many uploads in flight as it's willing to hold — retry after the given delay.
          */
         post: operations["uploadMedia"];
         delete?: never;
@@ -2053,6 +2053,7 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
         };
     };
     addProductImage: {

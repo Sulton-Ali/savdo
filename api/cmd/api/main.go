@@ -86,6 +86,14 @@ func run() error {
 	// correctness requirement — SweepTemp logs and continues past any
 	// single file it can't remove — so it never blocks startup.
 	mediaStorage.SweepTemp(time.Hour)
+	// A queue smaller than the concurrency it's supposed to feed can
+	// never let every decode slot fill — not a config error worth
+	// failing startup over (the server still works, just under-uses its
+	// own concurrency budget), but worth a loud warning.
+	if cfg.MediaQueue < cfg.MediaConcurrency {
+		logger.Warn("MEDIA_QUEUE is smaller than MEDIA_CONCURRENCY; some decode slots will never be reachable",
+			"media_queue", cfg.MediaQueue, "media_concurrency", cfg.MediaConcurrency)
+	}
 	mediaSvc := media.NewService(queries, mediaStorage, cfg.MediaBaseURL, cfg.MediaMaxBytes, cfg.MediaConcurrency, cfg.MediaQueue)
 	var devMedia http.Handler
 	if cfg.Env != "prod" {
