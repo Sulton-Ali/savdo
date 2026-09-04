@@ -13,6 +13,7 @@ import (
 
 	"github.com/Sulton-Ali/savdo/api/gen"
 	"github.com/Sulton-Ali/savdo/api/internal/auth"
+	"github.com/Sulton-Ali/savdo/api/internal/catalog"
 	"github.com/Sulton-Ali/savdo/api/internal/config"
 	"github.com/Sulton-Ali/savdo/api/internal/media"
 	"github.com/Sulton-Ali/savdo/api/internal/shop"
@@ -46,6 +47,13 @@ func testMediaService() *media.Service {
 	return media.NewService(nil, nil, "/media", 10<<20, 2, 10)
 }
 
+// testCatalogService builds a catalog.Service safe to wire into NewRouter
+// for tests that never exercise a catalogue/product-image route — a nil
+// pool and nil *db.Queries are never dereferenced in that case.
+func testCatalogService() *catalog.Service {
+	return catalog.NewService(nil, nil, "uz")
+}
+
 func TestHealthz(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -71,7 +79,7 @@ func TestHealthz(t *testing.T) {
 		},
 	}
 
-	router := NewRouter(testLogger(), nil, testAuthService(), testShopService(), testMediaService(), nil)
+	router := NewRouter(testLogger(), nil, testAuthService(), testShopService(), testMediaService(), nil, testCatalogService())
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

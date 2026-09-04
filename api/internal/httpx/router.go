@@ -16,6 +16,7 @@ import (
 	"github.com/Sulton-Ali/savdo/api/gen"
 	"github.com/Sulton-Ali/savdo/api/internal/apierr"
 	"github.com/Sulton-Ali/savdo/api/internal/auth"
+	"github.com/Sulton-Ali/savdo/api/internal/catalog"
 	"github.com/Sulton-Ali/savdo/api/internal/media"
 	"github.com/Sulton-Ali/savdo/api/internal/shop"
 )
@@ -40,13 +41,20 @@ import (
 // cmd/api hand over the exact same *media.LocalStorage instance mediaSvc
 // itself writes through, so DevHandler's path-confinement check
 // (LocalStorage.resolve) is guaranteed to agree with where files actually
-// are, not a second, independently-constructed root.
-func NewRouter(logger *slog.Logger, pool *pgxpool.Pool, authSvc *auth.Service, shopSvc *shop.Service, mediaSvc *media.Service, devMedia http.Handler) http.Handler {
+// are, not a second, independently-constructed root. catalogSvc backs the
+// 21 catalogue/product-image operations via catalog.NewHandler
+// (catalog.go); catalog.AcceptLanguageMiddleware runs alongside
+// authSvc.Middleware so those handlers can resolve `Accept-Language` (not
+// modelled as a per-operation parameter in the contract) off the context.
+func NewRouter(logger *slog.Logger, pool *pgxpool.Pool, authSvc *auth.Service, shopSvc *shop.Service, mediaSvc *media.Service, devMedia http.Handler, catalogSvc *catalog.Service) http.Handler {
 	mux := http.NewServeMux()
 
 	strictHandler := gen.NewStrictHandlerWithOptions(
-		server{pool: pool, Handler: auth.NewHandler(authSvc), shop: shop.NewHandler(shopSvc), media: media.NewHandler(mediaSvc)},
-		[]gen.StrictMiddlewareFunc{authSvc.Middleware},
+		server{
+			pool: pool, Handler: auth.NewHandler(authSvc), shop: shop.NewHandler(shopSvc),
+			media: media.NewHandler(mediaSvc), catalog: catalog.NewHandler(catalogSvc),
+		},
+		[]gen.StrictMiddlewareFunc{authSvc.Middleware, catalog.AcceptLanguageMiddleware},
 		gen.StrictHTTPServerOptions{
 			RequestErrorHandlerFunc:  writeRequestError,
 			ResponseErrorHandlerFunc: func(w http.ResponseWriter, _ *http.Request, err error) { apierr.Write(w, err) },
