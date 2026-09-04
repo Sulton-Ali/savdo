@@ -7,6 +7,7 @@ import {
   MapPin,
   Package,
   Settings,
+  ShoppingCart,
   Tags,
   Truck,
   Users,
@@ -88,6 +89,13 @@ function AppShell() {
       icon: <Truck size={16} />,
       label: <Link to="/suppliers">{t("nav.suppliers")}</Link>,
       permission: "suppliers.manage",
+    },
+    // Phase 3 T6a: purchases (manager+).
+    {
+      key: "/purchases",
+      icon: <ShoppingCart size={16} />,
+      label: <Link to="/purchases">{t("nav.purchases")}</Link>,
+      permission: "stock.write",
     },
     {
       key: "/settings",
