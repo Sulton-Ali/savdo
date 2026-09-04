@@ -27,6 +27,32 @@ without `--force`): shop `savdo-demo`; `owner` / `owner-dev-pass`, `manager` /
 
 Media files in dev go to `infra/data/media/` (gitignored).
 
+## Environment variables
+
+The API loads all of these via `config.Load()`. `savdo migrate` reads only
+`DATABASE_URL`; `savdo seed` reads `DATABASE_URL` and `ENV` directly, not via
+`config.Load()`. Defaults shown are from `api/internal/config/config.go`. `config.Load()`
+also enforces that, in **production, `MEDIA_DIR` must be an absolute path**; the dev
+default is relative, and `config.Load()` fails fast when `ENV=prod` and it isn't
+absolute (config.go L120-129).
+
+| Variable            | Default        | Notes                                                                                 |
+| ------------------- | -------------- | ------------------------------------------------------------------------------------- |
+| `ENV`               | `dev`          | Set to `prod` on the VPS; gates `COOKIE_SECURE` and the seed guard                   |
+| `API_ADDR`          | `:8080`        | TCP address the API binds on                                                          |
+| `DATABASE_URL`      | (required)     | PostgreSQL connection string, e.g. `postgres://user:pass@host/dbname?sslmode=require` |
+| `SHOP_SLUG`         | `savdo-demo`   | Single-shop MVP identifier; resolved to `shop_id` at startup (ADR-004)                |
+| `SESSION_WEB_TTL`   | `168h` (7 d)   | Web cookie sliding window (D-29)                                                      |
+| `SESSION_MOBILE_TTL`| `720h` (30 d)  | Mobile bearer token sliding window (D-29)                                             |
+| `LOGIN_RATE_IP_PER_MIN` | `10`       | Per-IP login attempts per minute                                                      |
+| `LOGIN_RATE_USER_PER_MIN` | `5`      | Per-username login attempts per minute                                                |
+| `COOKIE_SECURE`     | dev: `false`, prod: `true` | Forces HTTPS-only session cookies; explicit env var overrides the default |
+| `MEDIA_DIR`         | `../infra/data/media` | Absolute path in prod; local-disk root for media.LocalStorage (ADR-008). **In prod this is a Docker volume mounted at `/data/media`.** |
+| `MEDIA_BASE_URL`    | `/media`       | URL prefix for all media.Storage keys returned to clients                             |
+| `MEDIA_MAX_BYTES`   | `10485760`     | Single upload file part size cap (10 MB); checked before WebP encoding                |
+| `MEDIA_CONCURRENCY` | `2`            | Max WebP derivative encode tasks running concurrently (gated by a semaphore; Review B) |
+| `MEDIA_QUEUE`       | `8`            | Max uploads in flight (spooling + queued + encoding); admission gate outside encode queue |
+
 ## Shared local services during parallel work
 
 All worktrees share ONE Compose project (`infra-postgres-1`) and ONE API port (8080).
@@ -151,12 +177,22 @@ Caddy: automatic TLS, security headers (HSTS, CSP for admin and web, `X-Frame-Op
 gzip/zstd, `/api/*` → `api:8080`, `/media/*` → volume, `/admin/*` → static, `/*` →
 `web:3000`. Domain per Q-09.
 
+**Media on Caddy:** The `/media` location must include `@nosniff` header (`X-Content-Type-Options:
+nosniff`) to prevent browser MIME sniffing on derivative image URLs (O-16). Media derivatives
+are always WebP and served with content-type `image/webp`. **Storage sizing (estimate):** each
+upload file is spooled to disk, then derivative encoding happens in a semaphore-gated slot.
+`maxPixels` caps a decode at 24 megapixels, so the worst-case RGBA pixel buffer for one slot is
+≈96 MB (`media/derive.go`), plus ≈10 MB for the spooled file — roughly 110 MB per slot. With the
+default `MEDIA_CONCURRENCY=2`, that is roughly 220 MB worst case across both slots. `api` has
+`http.Server.WriteTimeout 15 s`; a slow client downloading a large derivative could block a
+write slot and eventually starve uploads if they saturate the queue.
+
 Secrets: `infra/.env` on the VPS only, never in git; CI holds `SSH_HOST`, `SSH_USER`,
 `SSH_KEY`, and the bot token/LLM key are set on the server.
 
 Required environment in production: `ENV=prod` (turns on `COOKIE_SECURE` by default and
-the seed guard), `SHOP_SLUG`, `DATABASE_URL`, `API_ADDR`. Caddy must declare
-`trusted_proxies` and forward the client address so the API can trust the **last**
+the seed guard), `SHOP_SLUG`, `DATABASE_URL`, `API_ADDR`, `MEDIA_DIR` (absolute path). Caddy
+must declare `trusted_proxies` and forward the client address so the API can trust the **last**
 `X-Forwarded-For` hop (the login rate limit and `sessions.ip` depend on it).
 
 ## Backups and restore

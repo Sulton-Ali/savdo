@@ -19,7 +19,8 @@ Base path `/v1`. JSON only. Server: Go, `api/cmd/api`, port 8080 behind Caddy.
   decimal strings. **Times**: RFC 3339 UTC.
 - **Pagination**: cursor-based on every collection: `?limit=50&cursor=…` →
   `{ items: [...], nextCursor: string | null }`. Never `?page=` / `?offset=`.
-  `limit` is 1–200 (default 50); an unparseable cursor is `400 VALIDATION_FAILED` with `fields.cursor: invalid`.
+  `limit` is clamped to 1–200 (default 50), never rejected; an unparseable cursor is
+  `400 VALIDATION_FAILED` with `details.fields.cursor: invalid`.
 - **Filtering/sorting**: explicit query params per endpoint, documented in the spec.
   Free-text search via `?q=` uses Postgres `ILIKE`/trigram; no external search engine.
 - **Idempotency**: `POST /sales`, `POST /purchases/{id}/receive` and stock adjustments
@@ -36,11 +37,36 @@ Base path `/v1`. JSON only. Server: Go, `api/cmd/api`, port 8080 behind Caddy.
   `DUPLICATE_SKU`, …), `429 RATE_LIMITED`, `500 INTERNAL`. The full enum lives in the
   spec under `components.schemas.ErrorCode`; adding a code means adding it there.
 - **Validation and conflict vocabulary** (O-12): `details.fields` maps field → one of `required`, `invalid`, `too_short`, `too_long`; a uniqueness violation is `409 CONFLICT` with `details.field` naming the field (`username`, `phone`, `name`). Clients translate these words; nothing else is used.
-- **Role-shaped responses**: the same endpoint returns fewer fields for `cashier`
-  (`costPrice`, `unitCost`, margin fields absent, not null). The spec models this as
-  the same schema with role-dependent optional fields (`ProductStaff`/`ProductCashier`
-  are not used); `ProductPublic`/`VariantPublic` remain separate schemas for Phase 6's
-  public catalogue.
+- **List vs get asymmetry**: `GET /products` returns all fields except `description` and
+  `translations` (to reduce response size); `GET /products/{id}` returns the full schema
+  including translations. Same applies to variants, categories and other entities.
+  `translations`, like `costPrice`/`costOverride`, is present only for a caller with the
+  matching permission (`catalog.write` for translations, `cost.read` for cost fields) —
+  a cashier or public caller never receives it, regardless of endpoint.
+- **Promo pricing** (Q-05): `promoPrice`, `promoFrom` and `promoTo` (ISO 8601 dates) are
+  independent fields on the product; a PATCH may set any subset of them. Sending an
+  explicit `null` for any one of the three clears all three together (D-35's
+  `ClearPromo`), since a promo without one of its parts is not valid. `promoFrom` must
+  not be after `promoTo`; on a partial PATCH naming only one of the pair, the other side
+  is checked against the value already stored, not against nothing. Variants have no
+  promo fields — promo pricing is product-level only.
+- **Role-shaped responses**: `Product` has an optional `costPrice` field and `Variant` an
+  optional `costOverride` field (visible only to callers with `cost.read`, not to cashier
+  or public). The same schema models all roles; permissions are enforced server-side at
+  serialization, not through separate types. `ProductPublic`/`VariantPublic` remain
+  separate schemas for Phase 6's public catalogue.
+- **Media uploads**: `POST /media` accepts a single file part in a multipart/form-data
+  request; the response includes the media id, URLs for derivatives (`_thumb`, `_card`,
+  `_full`), and details (O-16). The endpoint returns `429 RATE_LIMITED` when the upload
+  admission queue is full (`MEDIA_QUEUE`). **Max 8 images per product** (`image_count >= 8`
+  returns `400 VALIDATION_FAILED` with `details.fields.mediaId: invalid`).
+- **Soft-deleted vs inactive product visibility**: a soft-deleted product (`deleted_at`
+  set) is `404 NOT_FOUND` on `GET /products/{id}` for every role, and never appears in
+  `GET /products` for any role. A product with `isActive: false` (not deleted) is a
+  separate case: callers with `catalog.write` see it on `GET /products/{id}`, and on
+  `GET /products` only when the request passes `includeInactive=true`; a cashier gets
+  `404 NOT_FOUND` on `GET /products/{id}` for an inactive product and never sees it
+  listed, `includeInactive` or not.
 - **Versioning**: additive changes only within `/v1`. A breaking change is `/v2` and an
   owner decision.
 
@@ -89,10 +115,10 @@ Phase numbers refer to `06-ROADMAP.md`.
 | GET/PATCH/DELETE | `/products/{id}`          | any / manager+  |
 | GET/POST | `/products/{id}/variants`         | any / manager+  |
 | PATCH/DELETE | `/variants/{id}`              | manager+        |
-| POST   | `/media`                            | manager+ (multipart; 429 when the upload admission queue is full) |
-| POST    | `/products/{id}/images`            | manager+        |
-| DELETE | `/products/{id}/images/{imageId}`   | manager+        |
-| PATCH  | `/products/{id}/images/order`       | manager+        |
+| POST   | `/media`                            | manager+ (multipart; returns 429 `RATE_LIMITED` when admission queue is full) |
+| POST   | `/products/{id}/images`            | manager+ (max 8 per product; cap → `400 VALIDATION_FAILED`) |
+| DELETE | `/products/{id}/images/{imageId}`  | manager+        |
+| PATCH  | `/products/{id}/images/order`      | manager+ (reorder all)   |
 
 ### Stock, purchases, suppliers (Phase 3)
 
