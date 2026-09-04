@@ -72,20 +72,29 @@ func run() error {
 	shopSvc := shop.NewService(pool, queries)
 
 	// LocalStorage writes under Config.MediaDir (ADR-008); mediaSvc caps
-	// an upload's file part at Config.MediaMaxBytes and builds derivative
+	// an upload's file part at Config.MediaMaxBytes, bounds concurrent
+	// decode/derive work at Config.MediaConcurrency, and builds derivative
 	// URLs under Config.MediaBaseURL. In dev the API also serves the same
-	// directory itself (devMediaDir below); in prod Caddy does
-	// (docs/07-DEVOPS.md § Production), so devMediaDir stays empty there.
-	mediaStorage := media.NewLocalStorage(cfg.MediaDir, cfg.MediaBaseURL)
-	mediaSvc := media.NewService(queries, mediaStorage, cfg.MediaBaseURL, cfg.MediaMaxBytes)
-	var devMediaDir string
+	// directory itself (devMedia below); in prod Caddy does
+	// (docs/07-DEVOPS.md § Production), so devMedia stays nil there.
+	mediaStorage, err := media.NewLocalStorage(cfg.MediaDir, cfg.MediaBaseURL)
+	if err != nil {
+		return fmt.Errorf("init media storage: %w", err)
+	}
+	// Best-effort startup housekeeping: remove any spool or atomic-write
+	// temp file an earlier crash left behind (Review B MINOR 10). Not a
+	// correctness requirement — SweepTemp logs and continues past any
+	// single file it can't remove — so it never blocks startup.
+	mediaStorage.SweepTemp(time.Hour)
+	mediaSvc := media.NewService(queries, mediaStorage, cfg.MediaBaseURL, cfg.MediaMaxBytes, cfg.MediaConcurrency)
+	var devMedia http.Handler
 	if cfg.Env != "prod" {
-		devMediaDir = cfg.MediaDir
+		devMedia = media.DevHandler(mediaStorage)
 	}
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           httpx.NewRouter(logger, pool, authSvc, shopSvc, mediaSvc, devMediaDir),
+		Handler:           httpx.NewRouter(logger, pool, authSvc, shopSvc, mediaSvc, devMedia),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      15 * time.Second,

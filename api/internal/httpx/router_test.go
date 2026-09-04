@@ -43,7 +43,7 @@ func testShopService() *shop.Service {
 // tests that never exercise POST /media — a nil *db.Queries and a nil
 // Storage are never dereferenced in that case.
 func testMediaService() *media.Service {
-	return media.NewService(nil, nil, "/media", 10<<20)
+	return media.NewService(nil, nil, "/media", 10<<20, 2)
 }
 
 func TestHealthz(t *testing.T) {
@@ -71,7 +71,7 @@ func TestHealthz(t *testing.T) {
 		},
 	}
 
-	router := NewRouter(testLogger(), nil, testAuthService(), testShopService(), testMediaService(), "")
+	router := NewRouter(testLogger(), nil, testAuthService(), testShopService(), testMediaService(), nil)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

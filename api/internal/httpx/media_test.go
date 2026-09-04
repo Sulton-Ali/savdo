@@ -79,11 +79,14 @@ func newMediaTestFixture(t *testing.T, maxBytes int64) mediaTestFixture {
 	shopSvc := shop.NewService(pool, q)
 
 	mediaDir := t.TempDir()
-	storage := media.NewLocalStorage(mediaDir, "/media")
-	mediaSvc := media.NewService(q, storage, "/media", maxBytes)
+	storage, err := media.NewLocalStorage(mediaDir, "/media")
+	if err != nil {
+		t.Fatalf("NewLocalStorage: %v", err)
+	}
+	mediaSvc := media.NewService(q, storage, "/media", maxBytes, 2)
 
 	return mediaTestFixture{
-		router:          NewRouter(testLogger(), pool, authSvc, shopSvc, mediaSvc, mediaDir),
+		router:          NewRouter(testLogger(), pool, authSvc, shopSvc, mediaSvc, media.DevHandler(storage)),
 		shopID:          shopRow.ID,
 		ownerUsername:   "owner1",
 		ownerPassword:   password,
@@ -309,5 +312,122 @@ func TestUploadMedia_sameBytesDedupe(t *testing.T) {
 
 	if secondBody.Id != firstBody.Id {
 		t.Fatalf("second upload id = %s, want same id %s (sha256 dedupe)", secondBody.Id, firstBody.Id)
+	}
+}
+
+// multipartWithFiller builds a raw multipart/form-data body carrying a
+// "filler" field of fillerSize junk bytes ahead of a small real "file"
+// part — used by the two tests below to drive the *request body's* total
+// size independently of the uploaded image's own size (media.Service's
+// own MediaMaxBytes cap only ever looks at the "file" part's bytes;
+// these tests are about bodylimit.go's route-level cap on the whole
+// envelope instead).
+func multipartWithFiller(t *testing.T, fillerSize int) (*bytes.Buffer, string) {
+	t.Helper()
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	filler, err := w.CreateFormField("filler")
+	if err != nil {
+		t.Fatalf("CreateFormField: %v", err)
+	}
+	if _, err := filler.Write(bytes.Repeat([]byte{0xAB}, fillerSize)); err != nil {
+		t.Fatalf("write filler field: %v", err)
+	}
+	part, err := w.CreateFormFile("file", "a.png")
+	if err != nil {
+		t.Fatalf("CreateFormFile: %v", err)
+	}
+	if _, err := part.Write(pngBytesForTest(t, 64, 64)); err != nil {
+		t.Fatalf("write file part: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+	return &buf, w.FormDataContentType()
+}
+
+// TestUploadMedia_oversizedEnvelopeIs400BodyTooLarge is Review A MAJOR 1's
+// case (a): a multipart envelope whose *total* size exceeds the route's
+// 12 MiB limit — driven here by an oversized non-"file" field, not the
+// upload itself — must map to 400 VALIDATION_FAILED / body_too_large,
+// not the 500 an unmapped *http.MaxBytesError previously produced
+// (apierr.asError, write.go). findFilePart (handler.go) discards every
+// part that isn't named "file" via Part.Close(), which itself reads the
+// entire remaining part unbounded — exactly where an oversized filler
+// field's bytes run the shared http.MaxBytesReader-wrapped request body
+// past its cap before the real "file" part is ever reached.
+func TestUploadMedia_oversizedEnvelopeIs400BodyTooLarge(t *testing.T) {
+	f := newMediaTestFixture(t, 10<<20)
+	cookies := f.login(t, f.ownerUsername, f.ownerPassword)
+
+	body, contentType := multipartWithFiller(t, 13<<20) // 13 MiB > the 12 MiB route limit
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/media", body)
+	req.Header.Set("Content-Type", contentType)
+	req.Header.Set("X-Requested-With", "savdo")
+	for _, c := range cookies {
+		req.AddCookie(c)
+	}
+	rec := httptest.NewRecorder()
+	f.router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body = %s", rec.Code, rec.Body.String())
+	}
+	var errBody gen.Error
+	if err := json.Unmarshal(rec.Body.Bytes(), &errBody); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if errBody.Error.Code != gen.VALIDATIONFAILED {
+		t.Errorf("error.code = %q, want VALIDATION_FAILED", errBody.Error.Code)
+	}
+	if errBody.Error.Details == nil {
+		t.Fatalf("error has no details: %+v", errBody)
+	}
+	if reason, _ := (*errBody.Error.Details)["reason"].(string); reason != "body_too_large" {
+		t.Fatalf("details.reason = %v, want body_too_large", reason)
+	}
+}
+
+// TestUploadMedia_routeSpecificBodyLimit is Review A MAJOR 1's case (b):
+// proof that /v1/media's higher body limit (bodylimit.go: 12 MiB) is
+// actually route-specific, not a global bump — a 5 MiB total body to
+// /v1/media succeeds (well under 12 MiB), while the same style of
+// oversized body sent to /v1/auth/login (which stays under the default 1
+// MiB limit) is rejected.
+func TestUploadMedia_routeSpecificBodyLimit(t *testing.T) {
+	f := newMediaTestFixture(t, 10<<20)
+	cookies := f.login(t, f.ownerUsername, f.ownerPassword)
+
+	body, contentType := multipartWithFiller(t, 5<<20) // 5 MiB, under the 12 MiB route limit
+	req := httptest.NewRequest(http.MethodPost, "/v1/media", body)
+	req.Header.Set("Content-Type", contentType)
+	req.Header.Set("X-Requested-With", "savdo")
+	for _, c := range cookies {
+		req.AddCookie(c)
+	}
+	rec := httptest.NewRecorder()
+	f.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("5 MiB body to /v1/media: status = %d, want 201, body = %s", rec.Code, rec.Body.String())
+	}
+
+	loginBody, err := json.Marshal(map[string]string{
+		"username": f.ownerUsername,
+		// A 2 MiB password is nonsense as a real login, but the point of
+		// this half of the test is bodylimit.go's default 1 MiB cap
+		// firing before the JSON is ever decoded, not a credentials check.
+		"password": strings.Repeat("a", 2<<20),
+		"client":   "web",
+	})
+	if err != nil {
+		t.Fatalf("marshal login body: %v", err)
+	}
+	loginReq := httptest.NewRequest(http.MethodPost, "/v1/auth/login", bytes.NewReader(loginBody))
+	loginReq.Header.Set("Content-Type", "application/json")
+	loginRec := httptest.NewRecorder()
+	f.router.ServeHTTP(loginRec, loginReq)
+	if loginRec.Code != http.StatusBadRequest {
+		t.Fatalf("2 MiB body to /v1/auth/login: status = %d, want 400, body = %s", loginRec.Code, loginRec.Body.String())
 	}
 }

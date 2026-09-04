@@ -71,10 +71,10 @@ func newAuthTestFixture(t *testing.T, cfgOverrides func(*config.Config)) authTes
 
 	authSvc := auth.NewService(q, cfg, shop.ID)
 	shopSvc := shopmod.NewService(pool, q)
-	mediaSvc := mediamod.NewService(q, nil, "/media", 10<<20)
+	mediaSvc := mediamod.NewService(q, nil, "/media", 10<<20, 2)
 
 	return authTestFixture{
-		router:   NewRouter(testLogger(), pool, authSvc, shopSvc, mediaSvc, ""),
+		router:   NewRouter(testLogger(), pool, authSvc, shopSvc, mediaSvc, nil),
 		shopID:   shop.ID,
 		userID:   user.ID,
 		username: user.Username,

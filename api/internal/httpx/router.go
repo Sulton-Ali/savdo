@@ -32,12 +32,16 @@ import (
 // the nine `/shop`, `/locations` and `/staff` operations via
 // shop.NewHandler, forwarded from server's own methods (shop.go). mediaSvc
 // backs POST /media via media.NewHandler, forwarded from media.go.
-// devMediaDir, when non-empty, additionally mounts GET /media/ as a
-// direct static file server over that directory (media.DevHandler) — cmd/
-// api passes Config.MediaDir here only when Config.Env != "prod"
-// (docs/07-DEVOPS.md § Local development; § Production: Caddy serves the
-// same volume there instead, so this stays unmounted).
-func NewRouter(logger *slog.Logger, pool *pgxpool.Pool, authSvc *auth.Service, shopSvc *shop.Service, mediaSvc *media.Service, devMediaDir string) http.Handler {
+// devMedia, when non-nil, is additionally mounted at GET /media/ — cmd/api
+// passes media.DevHandler(mediaStorage) here only when Config.Env !=
+// "prod" (docs/07-DEVOPS.md § Local development; § Production: Caddy
+// serves the same volume there instead, so this stays nil and unmounted).
+// A caller-built http.Handler rather than a directory string: it lets
+// cmd/api hand over the exact same *media.LocalStorage instance mediaSvc
+// itself writes through, so DevHandler's path-confinement check
+// (LocalStorage.resolve) is guaranteed to agree with where files actually
+// are, not a second, independently-constructed root.
+func NewRouter(logger *slog.Logger, pool *pgxpool.Pool, authSvc *auth.Service, shopSvc *shop.Service, mediaSvc *media.Service, devMedia http.Handler) http.Handler {
 	mux := http.NewServeMux()
 
 	strictHandler := gen.NewStrictHandlerWithOptions(
@@ -55,8 +59,8 @@ func NewRouter(logger *slog.Logger, pool *pgxpool.Pool, authSvc *auth.Service, s
 		ErrorHandlerFunc: writeRequestError,
 	})
 
-	if devMediaDir != "" {
-		mux.Handle("/media/", http.StripPrefix("/media/", media.DevHandler(devMediaDir)))
+	if devMedia != nil {
+		mux.Handle("/media/", http.StripPrefix("/media/", devMedia))
 	}
 
 	var handler http.Handler = mux

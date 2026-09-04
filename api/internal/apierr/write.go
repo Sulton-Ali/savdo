@@ -47,12 +47,30 @@ func Write(w http.ResponseWriter, err error) {
 	_ = json.NewEncoder(w).Encode(body)
 }
 
-// asError unwraps err to a *Error when it (or something it wraps) is one;
-// anything else maps to a bare Internal().
+// asError unwraps err to a *Error when it (or something it wraps) is one.
+// A *http.MaxBytesError anywhere in the chain — reached whenever a
+// handler reads its own request body past the route's limit
+// (bodylimit.go), rather than the strict server's own pre-handler decode
+// step catching it first (router.go's writeRequestError, for a plain JSON
+// body) — maps to the same 400 VALIDATION_FAILED / body_too_large shape
+// writeRequestError uses, instead of falling through to a bare 500:
+// POST /media reads its multipart body itself (internal/media), so an
+// over-limit upload's *http.MaxBytesError only ever reaches Write, never
+// writeRequestError. Anything else maps to a bare Internal().
 func asError(err error) *Error {
 	var apiErr *Error
 	if errors.As(err, &apiErr) {
 		return apiErr
 	}
+
+	var maxBytesErr *http.MaxBytesError
+	if errors.As(err, &maxBytesErr) {
+		return &Error{
+			Status:  http.StatusBadRequest,
+			Code:    gen.VALIDATIONFAILED,
+			Details: map[string]any{"reason": "body_too_large"},
+		}
+	}
+
 	return Internal()
 }
