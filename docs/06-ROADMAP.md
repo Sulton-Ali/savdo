@@ -71,11 +71,12 @@ public schemas exist in the spec even though the landing is not built yet.
 ## Phase 3 — Stock ledger, purchases, suppliers + admin screens (correctness-critical)
 
 - [ ] Owner answers Q-02
-- [ ] Migrations: `suppliers`, `purchases`, `purchase_items`, `stock_movements` (+ append-only trigger), `stock_levels`
+- [ ] Migrations: `suppliers`, `purchases`, `purchase_items`, `stock_movements` (+ append-only trigger), `stock_levels`, `audit_log` (D-47)
 - [ ] `stock.Service.Move` with `FOR UPDATE` and negative-stock rule; `savdo stock rebuild`
 - [ ] Purchases: draft → receive → movements; cancel with reversal
 - [ ] Adjustments (with reason) and transfers between locations
 - [ ] Stock levels and movement history endpoints, low-stock endpoint
+- [ ] `PATCH /products/{id}/images/{imageId}` (variant retag / cover) and admin retag flow (Q-21, D-43)
 - [ ] Admin: suppliers, purchase form, receive flow, stock levels grid per location, movement history, adjustment and transfer forms
 - [ ] Tests: concurrent sales on the last unit (only one succeeds), rebuild equals levels, trigger blocks UPDATE/DELETE on movements
 - [ ] Two-model review (Sonnet + Opus) recorded in merge bodies
@@ -89,7 +90,7 @@ after truncating `stock_levels`; the concurrency test is green.
 ## Phase 4 — Sales, customers, discounts, reports + admin screens (correctness-critical)
 
 - [ ] Owner answers Q-05, Q-06, Q-07, Q-10
-- [ ] Migrations: `customers`, `sales`, `sale_items`, `sale_payments`, `discounts`, `audit_log`
+- [ ] Migrations: `customers`, `sales`, `sale_items`, `sale_payments`, `discounts`
 - [ ] Quick sale with server-side pricing, promo price, discount, idempotency key, per-shop sale number
 - [ ] Void and return with reversing movements; immutability enforced
 - [ ] Customers CRUD with purchase history; discounts CRUD
