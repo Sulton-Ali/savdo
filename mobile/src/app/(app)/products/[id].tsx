@@ -30,8 +30,8 @@ function variantAttributesLabel(variant: Variant): string {
  * Product detail (deliverable 4): cover image, price (promo price struck
  * through against the regular price when active, D-67/D-68), and a
  * variants × locations grid — every role can view (`docs/04-DATA-MODEL.md`
- * § 7); manager/owner additionally get an Edit entry to the placeholder at
- * `products/[id]/edit` (T3 fills it in). Pushed within
+ * § 7); `catalog.write` (D-81) additionally gets an Edit entry to
+ * `products/[id]/edit`. Pushed within
  * `products/_layout.tsx`'s Stack, so the header (title, back button) is
  * native — this screen only overrides the title once the product's name is
  * known and supplies the Edit button via `headerRight`.
@@ -40,8 +40,8 @@ export default function ProductDetailScreen() {
   const { t } = useTranslation();
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { role, shop } = useSession();
-  const canEdit = role === "owner" || role === "manager";
+  const { can, shop } = useSession();
+  const canEdit = can("catalog.write");
   const timeZone = shop?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
   const currency = shop?.currency ?? "UZS";
 
