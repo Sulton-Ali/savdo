@@ -182,13 +182,18 @@ func (q *Queries) SalesByProduct(ctx context.Context, arg SalesByProductParams) 
 
 const salesSummaryForCashier = `-- name: SalesSummaryForCashier :one
 WITH sf AS (
-    SELECT id, shop_id, number, kind, status, location_id, customer_id, cashier_id, original_sale_id, subtotal, discount_amount, discount_reason, total, note, completed_at, voided_at, voided_by, void_reason, created_at FROM sales
-    WHERE shop_id = $1
-        AND status = 'completed'
-        AND completed_at >= $2
-        AND completed_at < $3
-        AND ($4::uuid IS NULL OR location_id = $4)
-        AND ($5::uuid IS NULL OR cashier_id = $5)
+    SELECT sales.id, sales.shop_id, sales.number, sales.kind, sales.status, sales.location_id, sales.customer_id, sales.cashier_id, sales.original_sale_id, sales.subtotal, sales.discount_amount, sales.discount_reason, sales.total, sales.note, sales.completed_at, sales.voided_at, sales.voided_by, sales.void_reason, sales.created_at FROM sales
+    LEFT JOIN sales orig ON orig.id = sales.original_sale_id AND orig.shop_id = sales.shop_id
+    WHERE sales.shop_id = $1
+        AND sales.status = 'completed'
+        AND sales.completed_at >= $2
+        AND sales.completed_at < $3
+        AND ($4::uuid IS NULL OR sales.location_id = $4)
+        AND (
+            $5::uuid IS NULL
+            OR (sales.kind = 'sale' AND sales.cashier_id = $5)
+            OR (sales.kind = 'return' AND orig.cashier_id = $5)
+        )
 )
 SELECT
     count(*) FILTER (WHERE kind = 'sale')::bigint AS sales_count,
@@ -218,7 +223,10 @@ type SalesSummaryForCashierRow struct {
 // Same filters as SalesSummaryForStaff, no cost column (§ 04-DATA-MODEL.md
 // rule 8, D-63) — the permission matrix's "own-day sales only" for a
 // cashier is enforced by the service passing from/to and cashier_id, not
-// by this query.
+// by this query. cashier_id attribution follows SalesSummaryForStaff's
+// D-71 rule: a return-kind row matches orig.cashier_id (the original
+// sale's cashier), not its own, so a cashier's own-day summary is net of
+// refunds against their own sales.
 func (q *Queries) SalesSummaryForCashier(ctx context.Context, arg SalesSummaryForCashierParams) (SalesSummaryForCashierRow, error) {
 	row := q.db.QueryRow(ctx, salesSummaryForCashier,
 		arg.ShopID,
@@ -240,13 +248,18 @@ func (q *Queries) SalesSummaryForCashier(ctx context.Context, arg SalesSummaryFo
 
 const salesSummaryForStaff = `-- name: SalesSummaryForStaff :one
 WITH sf AS (
-    SELECT id, shop_id, number, kind, status, location_id, customer_id, cashier_id, original_sale_id, subtotal, discount_amount, discount_reason, total, note, completed_at, voided_at, voided_by, void_reason, created_at FROM sales sales_row
+    SELECT sales_row.id, sales_row.shop_id, sales_row.number, sales_row.kind, sales_row.status, sales_row.location_id, sales_row.customer_id, sales_row.cashier_id, sales_row.original_sale_id, sales_row.subtotal, sales_row.discount_amount, sales_row.discount_reason, sales_row.total, sales_row.note, sales_row.completed_at, sales_row.voided_at, sales_row.voided_by, sales_row.void_reason, sales_row.created_at FROM sales sales_row
+    LEFT JOIN sales orig ON orig.id = sales_row.original_sale_id AND orig.shop_id = sales_row.shop_id
     WHERE sales_row.shop_id = $1
         AND sales_row.status = 'completed'
         AND sales_row.completed_at >= $2
         AND sales_row.completed_at < $3
         AND ($4::uuid IS NULL OR sales_row.location_id = $4)
-        AND ($5::uuid IS NULL OR sales_row.cashier_id = $5)
+        AND (
+            $5::uuid IS NULL
+            OR (sales_row.kind = 'sale' AND sales_row.cashier_id = $5)
+            OR (sales_row.kind = 'return' AND orig.cashier_id = $5)
+        )
 ),
 sale_cost AS (
     SELECT sf.kind, sum(i.qty * i.unit_cost) AS total_cost
@@ -298,6 +311,16 @@ type SalesSummaryForStaffRow struct {
 // (net cost of goods actually kept by customers); staff only (§
 // 04-DATA-MODEL.md rule 8) — see SalesSummaryForCashier for the cashier
 // equivalent with no cost column.
+//
+// cashier_id attribution (D-71): a return is created by a manager
+// (D-58), so its own cashier_id is the manager's, not the original
+// cashier's. The LEFT JOIN to "orig" resolves each return's original
+// sale so that, when cashier_id is given, a sale-kind row matches its own
+// cashier_id but a return-kind row matches orig.cashier_id instead —
+// otherwise a cashier's own-day report would never see the refunds
+// against their own sales. This also scopes sale_cost's return-cost leg
+// below, since it joins on sf. Location filtering is unchanged: it still
+// applies to the row's own location_id, never the original sale's.
 func (q *Queries) SalesSummaryForStaff(ctx context.Context, arg SalesSummaryForStaffParams) (SalesSummaryForStaffRow, error) {
 	row := q.db.QueryRow(ctx, salesSummaryForStaff,
 		arg.ShopID,
