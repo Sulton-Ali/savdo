@@ -81,6 +81,7 @@ pattern; revisit if bundle size becomes a landing performance issue.
 | NativeWind    | v4.2.6   | Tailwind classes in RN. **Requires Tailwind 3.4.x** (peer `>3.3.0`), not Tailwind 4 — mobile pins `tailwindcss@3.4.19`; `react-native-css-interop` is a direct dep so Metro resolves it under pnpm isolation |
 | react-native-reusables | pin in Phase 5 | shadcn-style copy-in components on NativeWind (D-25); verify version at Phase 5      |
 | Android build | local | `expo prebuild` + Gradle release build on the dev machine, no EAS cloud (D-72); Android SDK + JDK prerequisites in `07-DEVOPS.md`; `expo-secure-store` for the session token |
+| Tests | Vitest (workspace) | Pure helpers under `mobile/src/lib` only (D-85); no jest-expo, no e2e (D-73/D-74) |
 
 ## Infrastructure
 
