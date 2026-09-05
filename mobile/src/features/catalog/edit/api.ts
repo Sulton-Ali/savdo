@@ -78,6 +78,13 @@ export async function updateVariant(
   return data;
 }
 
+/** Bounds `readAsBlob` below — a local file read should never hang; if it
+ * somehow does (a stuck picker cache, a permissions prompt swallowed by the
+ * OS, …), fail into the same `errorMessageFor` "generic" path a network
+ * error would rather than leave the screen's upload spinner spinning
+ * forever. */
+const READ_BLOB_TIMEOUT_MS = 20_000;
+
 /**
  * Reads a local `file://`/`content://` URI (from `expo-image-picker`) into a
  * real `Blob`, via `XMLHttpRequest`'s `responseType: "blob"` — the
@@ -95,8 +102,11 @@ function readAsBlob(uri: string): Promise<Blob> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.responseType = "blob";
+    xhr.timeout = READ_BLOB_TIMEOUT_MS;
     xhr.onload = () => resolve(xhr.response as Blob);
     xhr.onerror = () => reject(new Error(`readAsBlob: failed to read ${uri}`));
+    xhr.ontimeout = () => reject(new Error(`readAsBlob: timed out reading ${uri}`));
+    xhr.onabort = () => reject(new Error(`readAsBlob: aborted reading ${uri}`));
     xhr.open("GET", uri, true);
     xhr.send();
   });
@@ -117,7 +127,14 @@ function readAsBlob(uri: string): Promise<Blob> {
  * `file` as `string` (openapi-typescript's rendering of `format: binary`);
  * the wire body is real multipart, so this casts around that mismatch
  * rather than widening the contract by hand (ADR-002).
+ *
+ * Uses a longer `timeoutMs` (`lib/api.ts`'s per-call override) than the
+ * client's 15s default: a photo upload over a slow shop LAN/mobile link can
+ * legitimately take longer than that, and failing fast here would abort an
+ * upload that was about to succeed.
  */
+const MEDIA_UPLOAD_TIMEOUT_MS = 60_000;
+
 export async function uploadMedia(
   uri: string,
   mimeType: string,
@@ -137,7 +154,8 @@ export async function uploadMedia(
       formData.append("file", blob, fileName);
       return formData;
     },
-  });
+    timeoutMs: MEDIA_UPLOAD_TIMEOUT_MS,
+  } as Parameters<typeof api.POST>[1]);
   if (error) {
     // The admission queue returns 429 RATE_LIMITED with Retry-After when
     // full (`api/internal/media/service.go`); surface it to the caller.

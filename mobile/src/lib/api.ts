@@ -23,12 +23,15 @@ const raw = createClient("");
  */
 const REQUEST_TIMEOUT_MS = 15_000;
 
-function withTimeout(callerSignal?: AbortSignal | null): {
+function withTimeout(
+  callerSignal?: AbortSignal | null,
+  timeoutMs: number = REQUEST_TIMEOUT_MS,
+): {
   signal: AbortSignal;
   clear: () => void;
 } {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   const clear = () => clearTimeout(timer);
   controller.signal.addEventListener("abort", clear, { once: true });
   if (callerSignal) {
@@ -59,11 +62,21 @@ function withTimeout(callerSignal?: AbortSignal | null): {
  * gets this same resolved URL (D-81's token-URL binding), so the
  * destination and the binding check can never straddle a `setServerUrl` and
  * use two different URLs.
+ *
+ * A caller may override the 15s default via an optional `timeoutMs` on its
+ * per-call `init` (openapi-fetch has no such option itself — checked
+ * `openapi-fetch` 0.17's `FetchOptions` type directly, not training data;
+ * this is a Savdo-only extension read here and stripped before the rest of
+ * `init` is handed to the generated client, so it never reaches the actual
+ * `fetch`/`Request`). `POST /media` uploads pass a longer one: a picked
+ * photo can take longer than 15s to transfer over a slow shop LAN/mobile
+ * link, and failing that fast would abort uploads that were about to
+ * succeed.
  */
 async function withServerContext<Init extends Record<string, unknown> | undefined>(
   init: Init,
 ): Promise<{
-  init: Init & { baseUrl: string; headers: Headers; signal: AbortSignal };
+  init: Omit<Init, "timeoutMs"> & { baseUrl: string; headers: Headers; signal: AbortSignal };
   clearTimer: () => void;
 }> {
   const serverUrl = await getServerUrl();
@@ -73,9 +86,10 @@ async function withServerContext<Init extends Record<string, unknown> | undefine
     token ? { Authorization: `Bearer ${token}` } : undefined,
     init?.headers as HeadersOptions | undefined,
   );
-  const { signal, clear } = withTimeout(init?.signal as AbortSignal | null | undefined);
+  const { timeoutMs, ...rest } = (init ?? {}) as Record<string, unknown> & { timeoutMs?: number };
+  const { signal, clear } = withTimeout(init?.signal as AbortSignal | null | undefined, timeoutMs);
   return {
-    init: { ...init, baseUrl: serverUrl, headers, signal } as Init & {
+    init: { ...rest, baseUrl: serverUrl, headers, signal } as Omit<Init, "timeoutMs"> & {
       baseUrl: string;
       headers: Headers;
       signal: AbortSignal;
