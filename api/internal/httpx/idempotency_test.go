@@ -288,11 +288,11 @@ func TestRequestHash_sameLogicalBodySameHash(t *testing.T) {
 	}
 	actorID := uuid.New()
 
-	h1, err := RequestHash(http.MethodPost, "/stock/adjustments", actorID, body{Qty: "1.000", Reason: "found"})
+	h1, err := RequestHash(http.MethodPost, "/stock/adjustments", actorID, db.UserRoleManager, body{Qty: "1.000", Reason: "found"})
 	if err != nil {
 		t.Fatalf("RequestHash: %v", err)
 	}
-	h2, err := RequestHash(http.MethodPost, "/stock/adjustments", actorID, body{Qty: "1.000", Reason: "found"})
+	h2, err := RequestHash(http.MethodPost, "/stock/adjustments", actorID, db.UserRoleManager, body{Qty: "1.000", Reason: "found"})
 	if err != nil {
 		t.Fatalf("RequestHash: %v", err)
 	}
@@ -300,12 +300,38 @@ func TestRequestHash_sameLogicalBodySameHash(t *testing.T) {
 		t.Fatalf("RequestHash is not deterministic for the same logical body: %q != %q", h1, h2)
 	}
 
-	h3, err := RequestHash(http.MethodPost, "/stock/adjustments", actorID, body{Qty: "2.000", Reason: "found"})
+	h3, err := RequestHash(http.MethodPost, "/stock/adjustments", actorID, db.UserRoleManager, body{Qty: "2.000", Reason: "found"})
 	if err != nil {
 		t.Fatalf("RequestHash: %v", err)
 	}
 	if h1 == h3 {
 		t.Fatal("RequestHash produced the same hash for two different bodies")
+	}
+}
+
+// TestRequestHash_differentRoleSameActorAndBodyDifferentHash is MINOR 4's
+// own test (T3 review): the same actor and the same body, but a different
+// role (e.g. the actor was promoted between the first request and a
+// replay attempt), must not hash the same — a stored response is
+// role-shaped (RequestHash's own doc comment), so a role change must
+// force a fresh write, not a replay rendered for the old role.
+func TestRequestHash_differentRoleSameActorAndBodyDifferentHash(t *testing.T) {
+	type body struct {
+		Qty string `json:"qty"`
+	}
+	b := body{Qty: "1.000"}
+	actorID := uuid.New()
+
+	h1, err := RequestHash(http.MethodPost, "/stock/adjustments", actorID, db.UserRoleCashier, b)
+	if err != nil {
+		t.Fatalf("RequestHash: %v", err)
+	}
+	h2, err := RequestHash(http.MethodPost, "/stock/adjustments", actorID, db.UserRoleManager, b)
+	if err != nil {
+		t.Fatalf("RequestHash: %v", err)
+	}
+	if h1 == h2 {
+		t.Fatal("RequestHash produced the same hash for two different roles with the same actor and body")
 	}
 }
 
@@ -320,11 +346,11 @@ func TestRequestHash_differentActorSameBodyDifferentHash(t *testing.T) {
 	}
 	b := body{Qty: "1.000"}
 
-	h1, err := RequestHash(http.MethodPost, "/stock/adjustments", uuid.New(), b)
+	h1, err := RequestHash(http.MethodPost, "/stock/adjustments", uuid.New(), db.UserRoleManager, b)
 	if err != nil {
 		t.Fatalf("RequestHash: %v", err)
 	}
-	h2, err := RequestHash(http.MethodPost, "/stock/adjustments", uuid.New(), b)
+	h2, err := RequestHash(http.MethodPost, "/stock/adjustments", uuid.New(), db.UserRoleManager, b)
 	if err != nil {
 		t.Fatalf("RequestHash: %v", err)
 	}

@@ -44,6 +44,38 @@ INSERT INTO sale_payments (id, shop_id, sale_id, method, amount)
 VALUES (sqlc.arg('id'), sqlc.arg('shop_id'), sqlc.arg('sale_id'), sqlc.arg('method'), sqlc.arg('amount'))
 RETURNING *;
 
+-- name: GetVariantForSale :one
+-- Loads a variant plus its product's pricing/cost fields in one round
+-- trip, for CreateSale's per-line price resolution (D-56, T3): only a
+-- variant that belongs to the shop and is not soft-deleted, whose product
+-- is also not soft-deleted, resolves at all — deleted_at IS NULL on both,
+-- the same guard GetVariantForStaff/GetProductForStaff each already
+-- apply. The service additionally checks variant_is_active and
+-- product_is_active (both returned here) before selling: an inactive
+-- variant or product is not client-supplied pricing, so this is not a
+-- pricing rule, but "not for sale" is still this query's concern to
+-- surface, not a second round trip's. price_override/cost_override are
+-- the variant's own (§ 04-DATA-MODEL.md § 2); base_price/cost_price/
+-- promo_price/promo_from/promo_to are the product's — the caller combines
+-- them into one effective unit price and unit cost.
+--
+-- This query reads cost_price/cost_override on every CreateSale call,
+-- including a cashier's — not a rule 8 violation (orchestrator ruling):
+-- rule 8 governs response-shaping queries; an internal pricing query may
+-- read cost inside the write transaction as long as no cost value ever
+-- reaches a cashier response (CreateSaleTx freezes it into
+-- sale_items.unit_cost, which ListSaleItemsForCashier/GetSaleForCashier
+-- never select).
+SELECT
+    v.id AS variant_id, v.product_id, v.price_override, v.cost_override,
+    v.is_active AS variant_is_active,
+    p.base_price, p.cost_price, p.promo_price, p.promo_from, p.promo_to,
+    p.is_active AS product_is_active
+FROM product_variants v
+JOIN products p ON p.id = v.product_id AND p.shop_id = v.shop_id
+WHERE v.shop_id = sqlc.arg('shop_id') AND v.id = sqlc.arg('id')
+    AND v.deleted_at IS NULL AND p.deleted_at IS NULL;
+
 -- name: GetSaleForUpdate :one
 -- Locks the header row before a void or a return-against-it, so two
 -- concurrent requests cannot both observe status = 'completed' and race
@@ -142,16 +174,28 @@ WHERE s.shop_id = $1 AND s.id = $2;
 -- by the service (e.g. a shop-timezone calendar day, § 04-DATA-MODEL.md
 -- rule 9: timestamps are UTC, the shop timezone is applied in the
 -- service/reports layer, not here). location/cashier/customer/kind/status
--- are optional exact-match filters.
+-- are optional exact-match filters. payment_method backs SaleSummary's
+-- required `paymentMethod` field (T3 addition) — LEFT JOIN, same as
+-- GetSaleForStaff's own payment join, so a header still lists even in the
+-- — currently impossible, but defensive — case a payment row is missing.
+-- has_returns is the same EXISTS correlated subquery GetSaleForStaff
+-- already uses, backing SaleSummary's required `hasReturns` field.
 SELECT
     s.*,
     l.name AS location_name,
     c.full_name AS customer_name,
-    u.full_name AS cashier_name
+    u.full_name AS cashier_name,
+    p.method AS payment_method,
+    EXISTS (
+        SELECT 1 FROM sales r
+        WHERE r.shop_id = s.shop_id AND r.original_sale_id = s.id
+            AND r.kind = 'return' AND r.status = 'completed'
+    ) AS has_returns
 FROM sales s
 JOIN locations l ON l.id = s.location_id
 LEFT JOIN customers c ON c.id = s.customer_id
 JOIN users u ON u.id = s.cashier_id
+LEFT JOIN sale_payments p ON p.sale_id = s.id AND p.shop_id = s.shop_id
 WHERE s.shop_id = sqlc.arg('shop_id')
     AND (sqlc.narg('from')::timestamptz IS NULL OR s.completed_at >= sqlc.narg('from'))
     AND (sqlc.narg('to')::timestamptz IS NULL OR s.completed_at < sqlc.narg('to'))
@@ -175,11 +219,18 @@ SELECT
     s.*,
     l.name AS location_name,
     c.full_name AS customer_name,
-    u.full_name AS cashier_name
+    u.full_name AS cashier_name,
+    p.method AS payment_method,
+    EXISTS (
+        SELECT 1 FROM sales r
+        WHERE r.shop_id = s.shop_id AND r.original_sale_id = s.id
+            AND r.kind = 'return' AND r.status = 'completed'
+    ) AS has_returns
 FROM sales s
 JOIN locations l ON l.id = s.location_id
 LEFT JOIN customers c ON c.id = s.customer_id
 JOIN users u ON u.id = s.cashier_id
+LEFT JOIN sale_payments p ON p.sale_id = s.id AND p.shop_id = s.shop_id
 WHERE s.shop_id = sqlc.arg('shop_id')
     AND (sqlc.narg('from')::timestamptz IS NULL OR s.completed_at >= sqlc.narg('from'))
     AND (sqlc.narg('to')::timestamptz IS NULL OR s.completed_at < sqlc.narg('to'))
@@ -198,14 +249,15 @@ LIMIT sqlc.arg('limit');
 -- name: ListSaleItemsForStaff :many
 -- Mirrors ListPurchaseItemsWithLabels (purchases.sql): joins each
 -- sale_items row to its variant and product for the response-only
--- productName/variantLabel/sku fields, with the same locale fallback
--- (requested -> 'uz' -> any, ADR-012). returned_qty sums the qty of
--- return-kind items whose original_sale_item_id points back at this row,
--- counting only completed returns (a voided return never happened).
+-- productId/productName/variantLabel/sku fields, with the same locale
+-- fallback (requested -> 'uz' -> any, ADR-012). returned_qty sums the qty
+-- of return-kind items whose original_sale_item_id points back at this
+-- row, counting only completed returns (a voided return never happened).
 -- unit_cost is included — staff only (§ 04-DATA-MODEL.md rule 8).
 SELECT
     si.id, si.sale_id, si.variant_id, si.qty, si.unit_price, si.unit_cost, si.line_total,
     si.original_sale_item_id, si.created_at,
+    p.id AS product_id,
     v.sku AS variant_sku,
     v.attributes AS variant_attributes,
     COALESCE(t.locale, '') AS locale_used,
@@ -241,6 +293,7 @@ ORDER BY si.created_at, si.id;
 SELECT
     si.id, si.sale_id, si.variant_id, si.qty, si.unit_price, si.line_total,
     si.original_sale_item_id, si.created_at,
+    p.id AS product_id,
     v.sku AS variant_sku,
     v.attributes AS variant_attributes,
     COALESCE(t.locale, '') AS locale_used,

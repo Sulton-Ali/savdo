@@ -51,24 +51,6 @@ func (r notImplementedResponse) VisitCreateSaleReturnResponse(w http.ResponseWri
 	return r.write(w)
 }
 
-// ListSales lists the shop's sales.
-// Phase 4 T0: replaced once the sales module lands.
-func (server) ListSales(_ context.Context, _ gen.ListSalesRequestObject) (gen.ListSalesResponseObject, error) {
-	return notImplementedResponse{}, nil
-}
-
-// CreateSale completes a quick sale.
-// Phase 4 T0: replaced once the sales module lands.
-func (server) CreateSale(_ context.Context, _ gen.CreateSaleRequestObject) (gen.CreateSaleResponseObject, error) {
-	return notImplementedResponse{}, nil
-}
-
-// GetSale gets a sale.
-// Phase 4 T0: replaced once the sales module lands.
-func (server) GetSale(_ context.Context, _ gen.GetSaleRequestObject) (gen.GetSaleResponseObject, error) {
-	return notImplementedResponse{}, nil
-}
-
 // VoidSale voids a completed sale.
 // Phase 4 T0: replaced once the sales module lands.
 func (server) VoidSale(_ context.Context, _ gen.VoidSaleRequestObject) (gen.VoidSaleResponseObject, error) {

@@ -19,6 +19,7 @@ import (
 	"github.com/Sulton-Ali/savdo/api/internal/db"
 	"github.com/Sulton-Ali/savdo/api/internal/db/testdb"
 	"github.com/Sulton-Ali/savdo/api/internal/media"
+	"github.com/Sulton-Ali/savdo/api/internal/sales"
 	"github.com/Sulton-Ali/savdo/api/internal/shop"
 	"github.com/Sulton-Ali/savdo/api/internal/stock"
 )
@@ -74,9 +75,10 @@ func newShopTestFixture(t *testing.T) shopTestFixture {
 	catalogSvc := catalog.NewService(pool, q, "uz", "/media")
 	stockSvc := stock.NewService(pool, q)
 	crmSvc := crm.NewService(q)
+	salesSvc := sales.NewService(q)
 
 	return shopTestFixture{
-		router:        NewRouter(testLogger(), pool, authSvc, shopSvc, mediaSvc, nil, catalogSvc, stockSvc, crmSvc, testReportsService()),
+		router:        NewRouter(testLogger(), pool, authSvc, shopSvc, mediaSvc, nil, catalogSvc, stockSvc, crmSvc, testReportsService(), salesSvc),
 		q:             q,
 		shopID:        shopRow.ID,
 		ownerUsername: owner.Username,

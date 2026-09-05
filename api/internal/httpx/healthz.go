@@ -11,6 +11,7 @@ import (
 	"github.com/Sulton-Ali/savdo/api/internal/crm"
 	"github.com/Sulton-Ali/savdo/api/internal/media"
 	"github.com/Sulton-Ali/savdo/api/internal/reports"
+	"github.com/Sulton-Ali/savdo/api/internal/sales"
 	"github.com/Sulton-Ali/savdo/api/internal/shop"
 	"github.com/Sulton-Ali/savdo/api/internal/stock"
 )
@@ -22,23 +23,25 @@ import (
 // embedded *auth.Handler; shop's nine `/shop`, `/locations` and `/staff`
 // operations, media's `/media` operation, catalog's 21 catalogue/
 // product-image operations, crm's five `/suppliers` operations, stock's
-// `/stock/*` and `/purchases*` operations and reports' two
-// `/reports/sales/*` operations are forwarded to their named
-// *shop.Handler / *media.Handler / *catalog.Handler / *crm.Handler /
-// *stock.Handler / *reports.Handler fields (shop.go, media.go, catalog.go,
-// crm.go, stock.go, purchases.go, reports.go) — named, not embedded,
-// because every one of these handler types is called "Handler" and an
-// anonymous field's name is its type name, so embedding more than one
-// would collide; GetHealthz/GetReadyz are defined directly on server
-// (below and in readyz.go). CreateStockAdjustment and ReceivePurchase are
-// the two operations server implements itself rather than forwarding
-// (stock.go's/purchases.go's own doc comments): they need pool for
-// httpx.Idempotent, which stock.Handler.CreateAdjustmentTx and
-// stock.Handler.ReceivePurchaseTx do not take.
+// `/stock/*` and `/purchases*` operations, reports' two
+// `/reports/sales/*` operations and sales' GetSale/ListSales are forwarded
+// to their named *shop.Handler / *media.Handler / *catalog.Handler /
+// *crm.Handler / *stock.Handler / *reports.Handler / *sales.Handler fields
+// (shop.go, media.go, catalog.go, crm.go, stock.go, purchases.go,
+// reports.go, sales.go) — named, not embedded, because every one of these
+// handler types is called "Handler" and an anonymous field's name is its
+// type name, so embedding more than one would collide; GetHealthz/GetReadyz
+// are defined directly on server (below and in readyz.go).
+// CreateStockAdjustment, ReceivePurchase and CreateSale are the three
+// operations server implements itself rather than forwarding
+// (stock.go's/purchases.go's/sales.go's own doc comments): they need pool
+// for httpx.Idempotent, which stock.Handler.CreateAdjustmentTx,
+// stock.Handler.ReceivePurchaseTx and sales.Handler.CreateSaleTx do not
+// take.
 type server struct {
 	// pool backs GetReadyz's DB check (readyz.go) and, from T3/T4,
-	// CreateStockAdjustment's and ReceivePurchase's Idempotency-Key
-	// bookkeeping (stock.go, purchases.go).
+	// CreateStockAdjustment's, ReceivePurchase's and CreateSale's
+	// Idempotency-Key bookkeeping (stock.go, purchases.go, sales.go).
 	pool *pgxpool.Pool
 
 	*auth.Handler
@@ -48,6 +51,7 @@ type server struct {
 	crm     *crm.Handler
 	stock   *stock.Handler
 	reports *reports.Handler
+	sales   *sales.Handler
 }
 
 // GetHealthz reports the process is up. It does not touch the database —
