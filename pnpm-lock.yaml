@@ -144,6 +144,9 @@ importers:
       nativewind:
         specifier: 4.2.6
         version: 4.2.6(6f27d600d3b95dddd0e1a6122700d326)
+      openapi-fetch:
+        specifier: 0.17.0
+        version: 0.17.0
       react:
         specifier: 19.2.3
         version: 19.2.3

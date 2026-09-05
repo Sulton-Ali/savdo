@@ -2,6 +2,7 @@ import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/r
 
 import { ApiAuthError, login as apiLogin, logout as apiLogout, fetchMe } from "./authApi";
 import { ME_QUERY_KEY, TOKEN_QUERY_KEY } from "./queryKeys";
+import { deriveSessionGate } from "./sessionGate";
 import { clearToken, getToken, setToken } from "./token";
 
 // Mounted `useSession()` callers (the root layout and the `(app)` tabs
@@ -49,20 +50,25 @@ export function useSession() {
   const hasToken = !!tokenQuery.data;
   const meQuery = useQuery(meQueryOptions(hasToken));
 
+  // `hasMeData` deliberately isn't `meQuery.isError`-derived: query-core keeps
+  // the last successful `data` around across a failed *background* refetch
+  // (e.g. a stale-time-driven retry while the user is happily looking at
+  // their dashboard), and reacting to `isError` there would tear down the
+  // whole authenticated `Stack` — and its navigation state — over a
+  // transient blip. A `401 UNAUTHENTICATED` never reaches "unreachable"
+  // either: the `lib/api.ts` middleware clears `hasToken` first. See
+  // `sessionGate.ts` for the full state table and its unit tests.
+  const gate = deriveSessionGate({
+    hasToken,
+    tokenLoading: tokenQuery.isLoading,
+    hasMeData: !!meQuery.data,
+    meLoading: meQuery.isLoading,
+  });
+
   return {
-    isLoading: tokenQuery.isLoading || (hasToken && meQuery.isLoading),
-    /**
-     * A token exists but `me` has never successfully loaded for it — offline
-     * at startup, a 5xx, a token bound to a LAN IP that's since gone dark.
-     * Deliberately keyed on `!meQuery.data`, not `meQuery.isError`: query-core
-     * keeps the last successful `data` around across a failed *background*
-     * refetch (e.g. a stale-time-driven retry while the user is happily
-     * looking at their dashboard), and reacting to `isError` there would tear
-     * down the whole authenticated `Stack` — and its navigation state — over
-     * a transient blip. A `401 UNAUTHENTICATED` never reaches this state
-     * either: the `lib/api.ts` middleware clears `hasToken` first.
-     */
-    isUnreachable: hasToken && !meQuery.data,
+    hasToken,
+    isLoading: gate === "loading",
+    isUnreachable: gate === "unreachable",
     /** Retries `me`; resolves once the refetch settles so a caller can show
      * a pending state instead of a button that appears to do nothing. */
     retry: () => queryClient.invalidateQueries({ queryKey: ME_QUERY_KEY }),
@@ -75,7 +81,7 @@ export function useSession() {
       queryClient.clear();
       queryClient.setQueryData(TOKEN_QUERY_KEY, false);
     },
-    isAuthenticated: hasToken && !!meQuery.data,
+    isAuthenticated: gate === "authenticated",
     me: meQuery.data,
     role: meQuery.data?.user.role,
     shop: meQuery.data?.shop,
@@ -96,12 +102,18 @@ export function useLogin() {
     mutationFn: async (credentials: { username: string; password: string }) => {
       const { token, user } = await apiLogin(credentials);
       await setToken(token);
+      // Clear first, same as logout/401 (ADR-010): a previous session's `me`
+      // or cached lists must never leak into the one that's about to load,
+      // e.g. a different cashier logging in right after another logged out
+      // of an unreachable server without a full app restart. Re-seed the
+      // token flag after `clear()` so the reactive auth gate sees `true`
+      // immediately instead of an empty (re-fetching) cache entry.
+      queryClient.clear();
       queryClient.setQueryData(TOKEN_QUERY_KEY, true);
-      // `me` may already be cached in an error state from a failed startup
-      // fetch (no token, or an old one) — `enabled` and the query key are
-      // unchanged by logging in, so nothing else would trigger a refetch
-      // and the app would stay stuck on the login screen despite a
-      // successful login.
+      // `me` is freshly cleared but its query key is unchanged and `enabled`
+      // is already `true` from the token flag above, so this just forces the
+      // otherwise-lazy fetch to start immediately instead of waiting for the
+      // next render's subscription to notice.
       await queryClient.invalidateQueries({ queryKey: ME_QUERY_KEY });
       return { user };
     },

@@ -16,7 +16,33 @@ import { getServerUrl } from "./serverUrl";
 const TOKEN_KEY = "savdo.token";
 const TOKEN_URL_KEY = "savdo.token.url";
 
+async function readStoredToken(): Promise<{ token: string | null; issuedFor: string | null }> {
+  const [token, issuedFor] = await Promise.all([
+    SecureStore.getItemAsync(TOKEN_KEY),
+    SecureStore.getItemAsync(TOKEN_URL_KEY),
+  ]);
+  return { token, issuedFor };
+}
+
 /**
+ * Pure read of the raw stored token — whatever URL it was issued for, with
+ * no side effect. For predicates that only need to *compare* a value (the
+ * `lib/api.ts` 401 handler's Authorization check): that comparison must
+ * never itself decide "this token doesn't match the current URL, delete
+ * it" while some other part of the app (the query cache) still says
+ * authenticated — that decision belongs solely to `getToken` below, called
+ * from the one place that's about to actually use the token for a request.
+ */
+export async function peekToken(): Promise<string | null> {
+  const { token } = await readStoredToken();
+  return token;
+}
+
+/**
+ * The D-81 URL-binding check: returns the token only if it was issued for
+ * `currentUrl` (or, if omitted, whatever `getServerUrl()` currently
+ * resolves to), clearing it as a side effect on a mismatch.
+ *
  * @param currentUrl The server URL to check the token against. Callers that
  * already resolved it for the same request (`lib/api.ts`) must pass that
  * exact value, so the URL-binding check and the request's destination can
@@ -25,9 +51,8 @@ const TOKEN_URL_KEY = "savdo.token.url";
  * omit it and let this function resolve its own.
  */
 export async function getToken(currentUrl?: string): Promise<string | null> {
-  const [token, issuedFor, resolvedUrl] = await Promise.all([
-    SecureStore.getItemAsync(TOKEN_KEY),
-    SecureStore.getItemAsync(TOKEN_URL_KEY),
+  const [{ token, issuedFor }, resolvedUrl] = await Promise.all([
+    readStoredToken(),
     currentUrl ? Promise.resolve(currentUrl) : getServerUrl(),
   ]);
   if (!token) {
@@ -53,4 +78,14 @@ export async function clearToken(): Promise<void> {
     SecureStore.deleteItemAsync(TOKEN_KEY),
     SecureStore.deleteItemAsync(TOKEN_URL_KEY),
   ]);
+}
+
+/** Pure comparison for the `lib/api.ts` 401 handler: does this
+ * `Authorization` header value match the currently stored token? Split out
+ * so it's unit-testable without SecureStore. */
+export function isCurrentToken(
+  authorizationHeader: string | null | undefined,
+  storedToken: string | null | undefined,
+): boolean {
+  return !!authorizationHeader && !!storedToken && authorizationHeader === `Bearer ${storedToken}`;
 }

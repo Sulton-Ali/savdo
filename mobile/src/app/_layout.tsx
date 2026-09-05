@@ -50,17 +50,42 @@ export default function RootLayout() {
  */
 function RootNavigator() {
   const { t } = useTranslation();
-  const { isLoading, isUnreachable, isAuthenticated, retry, escapeUnreachable } = useSession();
+  const { isLoading, isUnreachable, isAuthenticated, hasToken, retry, escapeUnreachable } =
+    useSession();
   const [isRetrying, setIsRetrying] = useState(false);
   const [isEscaping, setIsEscaping] = useState(false);
+  const [showLoadingEscape, setShowLoadingEscape] = useState(false);
   const wasAuthenticatedRef = useRef(isAuthenticated);
 
   useEffect(() => {
-    if (!isLoading && !isUnreachable && wasAuthenticatedRef.current && !isAuthenticated) {
+    // Only latch on a *settled* render: during `isLoading`/`isUnreachable`,
+    // `isAuthenticated` is always false regardless of the session that will
+    // turn out to be current once it settles, so updating the ref here would
+    // erase "was previously authenticated" right before the transition this
+    // effect exists to catch — e.g. a brief background refetch blip while a
+    // tab is open must never be read as a logout.
+    if (isLoading || isUnreachable) {
+      return;
+    }
+    if (wasAuthenticatedRef.current && !isAuthenticated) {
       router.replace("/login");
     }
     wasAuthenticatedRef.current = isAuthenticated;
   }, [isLoading, isUnreachable, isAuthenticated]);
+
+  // A token exists but `/auth/me` hasn't answered yet — after 5s (well
+  // before the `lib/api.ts` request's own 15s bound), reveal the same escape
+  // hatch the outage screen offers, so a hang doesn't stealth-strand the
+  // user on a bare spinner with no visible way back to the editable "Server"
+  // field.
+  useEffect(() => {
+    if (!(isLoading && hasToken)) {
+      setShowLoadingEscape(false);
+      return;
+    }
+    const timer = setTimeout(() => setShowLoadingEscape(true), 5_000);
+    return () => clearTimeout(timer);
+  }, [isLoading, hasToken]);
 
   async function handleRetry() {
     setIsRetrying(true);
@@ -81,9 +106,19 @@ function RootNavigator() {
   }
 
   if (isLoading) {
+    const busy = isRetrying || isEscaping;
     return (
-      <View className="flex-1 items-center justify-center bg-background">
+      <View className="flex-1 items-center justify-center gap-4 bg-background">
         <ActivityIndicator color={tokens.color.primary} />
+        {showLoadingEscape ? (
+          <Button variant="outline" onPress={handleEscape} disabled={busy}>
+            {isEscaping ? (
+              <ActivityIndicator color={tokens.color.primary} />
+            ) : (
+              <Text>{t("mobile.shell.outageEscape")}</Text>
+            )}
+          </Button>
+        ) : null}
       </View>
     );
   }

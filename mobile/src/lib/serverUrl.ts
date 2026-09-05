@@ -10,7 +10,10 @@ import * as SecureStore from "expo-secure-store";
 const SERVER_URL_KEY = "savdo.serverUrl";
 
 export function defaultServerUrl(): string {
-  return process.env.EXPO_PUBLIC_API_URL ?? "http://10.0.2.2:8080/v1";
+  // `||`, not `??`: an `EXPO_PUBLIC_API_URL=""` build (unset in the shell but
+  // still substituted at build time) must fall back too, not resolve to an
+  // empty base URL.
+  return process.env.EXPO_PUBLIC_API_URL || "http://10.0.2.2:8080/v1";
 }
 
 /** Trims and drops a trailing slash so the same address always compares
