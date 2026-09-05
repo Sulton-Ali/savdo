@@ -716,6 +716,27 @@
         "empty": "Ничего не найдено",
         "qtyAvailable": "Доступно: {{qty}}"
       }
+    },
+    "catalogEdit": {
+      "fields": {
+        "promoFrom": "Акция с",
+        "promoTo": "Акция по",
+        "promoDateHint": "Формат: ГГГГ-ММ-ДД"
+      },
+      "actions": {
+        "takePhoto": "Сделать фото",
+        "choosePhoto": "Выбрать фото"
+      },
+      "errors": {
+        "promoIncomplete": "Заполните цену акции, дату начала и окончания — или оставьте все три поля пустыми.",
+        "promoInvalidDate": "Используйте формат ГГГГ-ММ-ДД.",
+        "promoRangeInvalid": "Дата окончания акции должна быть не раньше даты начала.",
+        "invalidPrice": "Введите корректную цену, например 12000 или 12000.50.",
+        "invalidThreshold": "Введите целое число 0 или больше.",
+        "retryAfter": "Слишком много загрузок. Повторите через {{seconds}} с.",
+        "cameraPermissionDenied": "Для фото нужен доступ к камере.",
+        "libraryPermissionDenied": "Для выбора фото нужен доступ к галерее."
+      }
     }
   }
 }
