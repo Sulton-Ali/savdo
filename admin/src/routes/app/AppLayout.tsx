@@ -2,6 +2,7 @@ import { Link, Outlet, useRouterState } from "@tanstack/react-router";
 import { Button, Layout, Menu, Space, Tag, Typography } from "antd";
 import {
   AlertTriangle,
+  BarChart3,
   Boxes,
   Contact,
   FolderTree,
@@ -128,6 +129,15 @@ function AppShell() {
       icon: <ShoppingCart size={16} />,
       label: <Link to="/purchases">{t("nav.purchases")}</Link>,
       permission: "stock.write",
+    },
+    // Phase 4 T6d: reports dashboard, visible to every role — the page
+    // itself adapts to `reports.read` (manager+) vs `reports.own_day`
+    // (cashier).
+    {
+      key: "/reports",
+      icon: <BarChart3 size={16} />,
+      label: <Link to="/reports">{t("nav.reports")}</Link>,
+      permission: null,
     },
     {
       key: "/settings",
