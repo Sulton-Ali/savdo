@@ -21,6 +21,8 @@ func conflictField(err error) (string, bool) {
 	switch pgErr.ConstraintName {
 	case "suppliers_shop_id_name_key":
 		return "name", true
+	case "customers_shop_id_phone_key":
+		return "phone", true
 	default:
 		return "", false
 	}
