@@ -1,30 +1,33 @@
+const { tokens } = require("@savdo/ui-tokens");
+
 /**
- * Colours below mirror `packages/ui-tokens/src/tokens.ts` (D-25) — kept in
- * sync by hand like `tokens.css` already is for the web apps, since
- * NativeWind reads this file directly (no CSS-variable theme here; Tailwind
- * 3.4 + NativeWind 4 don't need one and the mobile shell has no dark mode).
- * `border`/`input`/`secondary`/`accent`/`destructive` are neutral UI chrome,
- * not brand colours, so they aren't in `ui-tokens` — picked to read well
- * against `background`/`card`. These semantic names match the copied
- * react-native-reusables components in `src/components/ui`.
+ * Colours below come straight from `@savdo/ui-tokens` (D-25) — Node 24's
+ * native TypeScript support and synchronous `require(esm)` let this CJS
+ * config `require()` the package's `.ts` source directly, so there's
+ * nothing to keep in sync by hand here (unlike `tokens.css`, which has no
+ * build step of its own). Only genuinely non-brand UI chrome — `border`,
+ * `input`, `secondary`, `accent` — stays as a literal: neutral tones picked
+ * to read well against `background`/`card`, not part of the brand palette.
+ * These semantic names match the copied react-native-reusables components
+ * in `src/components/ui`.
  */
 const savdo = {
-  primary: "#c2410c",
-  primaryForeground: "#ffffff",
-  background: "#ffffff",
-  foreground: "#1f2937",
-  card: "#ffffff",
-  cardForeground: "#1f2937",
-  secondary: "#f5f5f4",
-  secondaryForeground: "#1f2937",
-  muted: "#f5f5f4",
-  mutedForeground: "#6b7280",
+  primary: tokens.color.primary,
+  primaryForeground: tokens.color.surface,
+  background: tokens.color.surface,
+  foreground: tokens.color.text,
+  card: tokens.color.surface,
+  cardForeground: tokens.color.text,
+  secondary: tokens.color.bg,
+  secondaryForeground: tokens.color.text,
+  muted: tokens.color.bg,
+  mutedForeground: tokens.color.muted,
   accent: "#e7e5e4",
-  accentForeground: "#1f2937",
-  destructive: "#dc2626",
+  accentForeground: tokens.color.text,
+  destructive: tokens.color.danger,
   border: "#e5e7eb",
   input: "#d1d5db",
-  ring: "#c2410c",
+  ring: tokens.color.primary,
 };
 
 /** @type {import('tailwindcss').Config} */
@@ -47,8 +50,8 @@ module.exports = {
         ring: savdo.ring,
       },
       borderRadius: {
-        md: "8px",
-        lg: "12px",
+        md: `${tokens.radius.md}px`,
+        lg: `${tokens.radius.lg}px`,
       },
     },
   },

@@ -1,5 +1,4 @@
 import { tokens } from "@savdo/ui-tokens";
-import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
@@ -10,10 +9,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Text } from "@/components/ui/text";
 import { ApiAuthError } from "@/lib/authApi";
-import { TOKEN_QUERY_KEY } from "@/lib/queryKeys";
-import { getServerUrl, isValidServerUrl, setServerUrl } from "@/lib/serverUrl";
+import { getServerUrl, setServerUrl, validateServerUrl } from "@/lib/serverUrl";
 import { useLogin } from "@/lib/session";
-import { clearToken } from "@/lib/token";
 
 interface LoginFormValues {
   server: string;
@@ -38,7 +35,6 @@ function errorKeyFor(error: unknown): "invalidCredentials" | "rateLimited" | "ge
 
 export default function LoginScreen() {
   const { t } = useTranslation();
-  const queryClient = useQueryClient();
   const login = useLogin();
   const [errorKey, setErrorKey] = useState<string | null>(null);
   const [retryAfterSeconds, setRetryAfterSeconds] = useState<number | null>(null);
@@ -62,15 +58,11 @@ export default function LoginScreen() {
     setErrorKey(null);
     setRetryAfterSeconds(null);
 
-    // Changing the server address invalidates any token from the old one
-    // (D-79) — the reactive auth gate in `_layout.tsx` reads this same
-    // query key, so clearing it here is enough, no navigation call needed.
-    const currentServerUrl = await getServerUrl();
-    if (values.server !== currentServerUrl) {
-      await setServerUrl(values.server);
-      await clearToken();
-      queryClient.setQueryData(TOKEN_QUERY_KEY, null);
-    }
+    // Just persist the address (D-79) — `lib/token.ts` binds the token to
+    // the URL it was issued by (D-81), so a changed server address makes
+    // `getToken()` treat any old token as absent on its own; nothing here
+    // needs to clear it.
+    await setServerUrl(values.server);
 
     try {
       await login.mutateAsync({ username: values.username, password: values.password });
@@ -112,7 +104,15 @@ export default function LoginScreen() {
                   name="server"
                   rules={{
                     required: t("errors.field.required"),
-                    validate: (value) => isValidServerUrl(value) || t("errors.field.invalid"),
+                    validate: (value) => {
+                      const result = validateServerUrl(value);
+                      if (result === "valid") {
+                        return true;
+                      }
+                      return result === "insecure"
+                        ? t("mobile.shell.serverInsecure")
+                        : t("errors.field.invalid");
+                    },
                   }}
                   render={({ field }) => (
                     <Input

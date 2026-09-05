@@ -2,6 +2,7 @@
 // `@rn-primitives/slot` — packages/registry/src/nativewind/components/ui/text.tsx
 // at github.com/founded-labs/react-native-reusables. Import paths adjusted
 // to this project's layout; otherwise verbatim.
+// MIT-licensed; see LICENSE-reusables in this directory.
 import { Slot } from "@rn-primitives/slot";
 import { cva, type VariantProps } from "class-variance-authority";
 import * as React from "react";

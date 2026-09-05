@@ -694,6 +694,7 @@
   "mobile": {
     "shell": {
       "server": "Server manzili",
+      "serverInsecure": "Oddiy http:// faqat mahalliy manzillar uchun (127.0.0.1, 10.x, 172.16–31.x, 192.168.x). Boshqa hollarda https:// dan foydalaning.",
       "tabs": {
         "stock": "Qoldiq"
       }

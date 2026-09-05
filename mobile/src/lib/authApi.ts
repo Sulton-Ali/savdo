@@ -33,11 +33,32 @@ function parseRetryAfterSeconds(response: Response): number | undefined {
   return Number.isFinite(seconds) ? seconds : undefined;
 }
 
+/**
+ * openapi-fetch only produces the `{ error: { code } }` envelope (ADR-013)
+ * when the server actually returned JSON; a non-JSON error body (e.g. an
+ * HTML 502 page from a proxy in front of the API) comes back as the raw
+ * response text, so `error.error.code` isn't safe to read without checking
+ * the shape first.
+ */
+function errorCodeFrom(error: unknown): ErrorCode {
+  if (
+    error &&
+    typeof error === "object" &&
+    "error" in error &&
+    error.error &&
+    typeof error.error === "object" &&
+    "code" in error.error
+  ) {
+    return (error as { error: { code: ErrorCode } }).error.code;
+  }
+  return "INTERNAL";
+}
+
 /** `GET /auth/me` — the authenticated user, their shop and permissions. */
 export async function fetchMe(): Promise<Me> {
   const { data, error } = await api.GET("/auth/me");
   if (error) {
-    throw new ApiAuthError(error.error.code);
+    throw new ApiAuthError(errorCodeFrom(error));
   }
   return data;
 }
@@ -54,7 +75,7 @@ export async function login(credentials: {
     body: { ...credentials, client: "mobile" },
   });
   if (error) {
-    throw new ApiAuthError(error.error.code, parseRetryAfterSeconds(response));
+    throw new ApiAuthError(errorCodeFrom(error), parseRetryAfterSeconds(response));
   }
   if (!data.token) {
     // The contract guarantees `token` for `client: "mobile"` — defensive only.
@@ -67,6 +88,6 @@ export async function login(credentials: {
 export async function logout(): Promise<void> {
   const { error } = await api.POST("/auth/logout");
   if (error) {
-    throw new ApiAuthError(error.error.code);
+    throw new ApiAuthError(errorCodeFrom(error));
   }
 }

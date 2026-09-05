@@ -9,16 +9,19 @@ import { SettingsSheet } from "@/components/SettingsSheet";
 import { useSession } from "@/lib/session";
 
 /**
- * Bottom tabs (deliverable 6), role-filtered per `04-DATA-MODEL.md` § 7:
- * every role sees Home/Sale/Products/Customers, Stock is manager+owner only
- * (this phase leaves staff/settings on the web, D-15 permission matrix).
- * The header shows the shop name and a settings button (language + logout).
+ * Bottom tabs: every role sees all five tabs — cashiers keep a read-only
+ * Stock tab per the `04-DATA-MODEL.md` § 7 / D-40 permission matrix (D-81
+ * amends the earlier manager+owner-only gate, which misquoted that matrix).
+ * Write actions inside a tab (receive, adjust, transfer stock, …) are gated
+ * per-action by `useSession().can(...)` against `me.permissions` (e.g.
+ * `stock.write`), not by hiding the tab itself — later Phase 5 tasks wire
+ * that into the real screens. The header shows the shop name and a settings
+ * button (language + logout).
  */
 export default function AppTabsLayout() {
   const { t } = useTranslation();
-  const { role, shop } = useSession();
+  const { shop } = useSession();
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const canSeeStock = role === "owner" || role === "manager";
 
   return (
     <>
@@ -66,15 +69,13 @@ export default function AppTabsLayout() {
             tabBarIcon: ({ color, size }) => <Users color={color} size={size} />,
           }}
         />
-        <Tabs.Protected guard={canSeeStock}>
-          <Tabs.Screen
-            name="stock/index"
-            options={{
-              title: t("mobile.shell.tabs.stock"),
-              tabBarIcon: ({ color, size }) => <Warehouse color={color} size={size} />,
-            }}
-          />
-        </Tabs.Protected>
+        <Tabs.Screen
+          name="stock/index"
+          options={{
+            title: t("mobile.shell.tabs.stock"),
+            tabBarIcon: ({ color, size }) => <Warehouse color={color} size={size} />,
+          }}
+        />
       </Tabs>
       <SettingsSheet visible={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </>

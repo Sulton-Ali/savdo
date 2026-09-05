@@ -2,6 +2,7 @@
 // packages/registry/src/nativewind/components/ui/input.tsx at
 // github.com/founded-labs/react-native-reusables. Import paths adjusted to
 // this project's layout; otherwise verbatim.
+// MIT-licensed; see LICENSE-reusables in this directory.
 import { Platform, TextInput } from "react-native";
 
 import { cn } from "@/lib/cn";

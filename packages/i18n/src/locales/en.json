@@ -694,6 +694,7 @@
   "mobile": {
     "shell": {
       "server": "Server address",
+      "serverInsecure": "Plain http:// is only allowed for local addresses (127.0.0.1, 10.x, 172.16–31.x, 192.168.x). Use https:// otherwise.",
       "tabs": {
         "stock": "Stock"
       }
