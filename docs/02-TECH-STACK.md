@@ -76,11 +76,11 @@ pattern; revisit if bundle size becomes a landing performance issue.
 
 | Item          | Pin      | Notes                                                                                   |
 | ------------- | -------- | --------------------------------------------------------------------------------------- |
-| Expo SDK      | 57.0.19  | React Native 0.86.3, **React 19.2.3**, TypeScript 6.0.3 (Expo's pins, do not raise), Node ≥ 22.13; Android package id placeholder `uz.savdo.app` (Q-18) |
+| Expo SDK      | 57.0.19  | React Native 0.86.3, **React 19.2.3**, TypeScript 6.0.3 (Expo's pins, do not raise), Node ≥ 22.13; Android package id `dev.sjalolov.savdo` (D-75) |
 | expo-router   | 57.0.18  | File-based routing; app source lives in `mobile/src/app` (Expo default template)          |
 | NativeWind    | v4.2.6   | Tailwind classes in RN. **Requires Tailwind 3.4.x** (peer `>3.3.0`), not Tailwind 4 — mobile pins `tailwindcss@3.4.19`; `react-native-css-interop` is a direct dep so Metro resolves it under pnpm isolation |
 | react-native-reusables | pin in Phase 5 | shadcn-style copy-in components on NativeWind (D-25); verify version at Phase 5      |
-| eas-cli       | v23.2.0  | Android APK builds (D-12); `expo-secure-store` for the session token                   |
+| Android build | local | `expo prebuild` + Gradle release build on the dev machine, no EAS cloud (D-72); Android SDK + JDK prerequisites in `07-DEVOPS.md`; `expo-secure-store` for the session token |
 
 ## Infrastructure
 
