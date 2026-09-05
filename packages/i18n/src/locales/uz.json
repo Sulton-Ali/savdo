@@ -40,6 +40,7 @@
     "attributes": "Atributlar",
     "staff": "Xodimlar",
     "locations": "Filiallar",
+    "customers": "Mijozlar",
     "suppliers": "Yetkazib beruvchilar",
     "purchases": "Xaridlar",
     "settings": "Sozlamalar",
@@ -439,6 +440,58 @@
     },
     "errors": {
       "categoryHasProducts": "Bu kategoriyada hali mahsulotlar bor, uni o‘chirib bo‘lmaydi."
+    }
+  },
+  "customers": {
+    "title": "Mijozlar",
+    "add": "Mijoz qo‘shish",
+    "edit": "Mijozni tahrirlash",
+    "delete": "O‘chirish",
+    "confirmDelete": "Bu mijoz o‘chirilsinmi?",
+    "searchPlaceholder": "Mijozlarni qidirish",
+    "view": "Ko‘rish",
+    "tagsPlaceholder": "Teg qo‘shing va Enter bosing",
+    "columns": {
+      "fullName": "Ismi",
+      "phone": "Telefon",
+      "telegramUsername": "Telegram",
+      "tags": "Teglar"
+    },
+    "fields": {
+      "fullName": "To‘liq ismi",
+      "phone": "Telefon",
+      "telegramUsername": "Telegram foydalanuvchi nomi",
+      "note": "Izoh",
+      "tags": "Teglar"
+    },
+    "detail": {
+      "title": "Mijoz",
+      "notFound": "Mijoz topilmadi."
+    },
+    "history": {
+      "title": "Xaridlar tarixi",
+      "empty": "Hozircha sotuvlar yo‘q",
+      "columns": {
+        "number": "Raqami",
+        "date": "Sana",
+        "total": "Jami",
+        "kind": "Turi",
+        "status": "Holati",
+        "paymentMethod": "To‘lov"
+      },
+      "kind": {
+        "sale": "Sotuv",
+        "return": "Qaytarish"
+      },
+      "status": {
+        "completed": "Yakunlangan",
+        "voided": "Bekor qilingan"
+      },
+      "paymentMethod": {
+        "cash": "Naqd",
+        "card": "Karta",
+        "transfer": "O‘tkazma"
+      }
     }
   }
 }

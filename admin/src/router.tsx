@@ -4,6 +4,8 @@ import { queryClient } from "./lib/queryClient";
 import { attributesRoute } from "./routes/app/attributesRoute";
 import { authenticatedRoute } from "./routes/app/authenticatedRoute";
 import { categoriesRoute } from "./routes/app/categoriesRoute";
+import { customerDetailRoute } from "./routes/app/customerDetailRoute";
+import { customersRoute } from "./routes/app/customersRoute";
 import { dashboardRoute } from "./routes/app/dashboardRoute";
 import { locationsRoute } from "./routes/app/locationsRoute";
 import { productEditRoute } from "./routes/app/productEditRoute";
@@ -38,6 +40,9 @@ const routeTree = rootRoute.addChildren([
     purchasesRoute,
     purchaseNewRoute,
     purchaseEditRoute,
+    // Phase 4 T6a: customers (cashier+ create/read, manager+ edit/delete).
+    customersRoute,
+    customerDetailRoute,
     settingsRoute,
     stockLevelsRoute,
     stockMovementsRoute,

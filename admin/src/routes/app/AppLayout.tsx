@@ -3,6 +3,7 @@ import { Button, Layout, Menu, Space, Tag, Typography } from "antd";
 import {
   AlertTriangle,
   Boxes,
+  Contact,
   FolderTree,
   History,
   LayoutDashboard,
@@ -105,6 +106,14 @@ function AppShell() {
       icon: <MapPin size={16} />,
       label: <Link to="/locations">{t("nav.locations")}</Link>,
       permission: "locations.manage",
+    },
+    // Phase 4 T6a: customers (cashier+ create/read, manager+ edit/delete —
+    // the whole page is visible to every role, same as `/products`).
+    {
+      key: "/customers",
+      icon: <Contact size={16} />,
+      label: <Link to="/customers">{t("nav.customers")}</Link>,
+      permission: null,
     },
     // Phase 3 T6a: suppliers (manager+).
     {
