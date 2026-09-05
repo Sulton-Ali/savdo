@@ -10,6 +10,21 @@ JOIN media_files mf ON mf.id = pi.media_id
 WHERE pi.shop_id = $1 AND pi.product_id = $2
 ORDER BY pi.sort_order, pi.id;
 
+-- name: ListCoverImagesForProducts :many
+-- One row per id in product_ids that has at least one image: the image
+-- flagged is_cover, else the first by sort_order (D-83). Feeds
+-- ListProducts' coverImage field for a whole page in one query — no
+-- N+1 — and is shop-scoped like every other product_images query (hard
+-- rule 1).
+SELECT DISTINCT ON (pi.product_id)
+    pi.product_id, pi.id, pi.variant_id, pi.media_id,
+    pi.sort_order, pi.is_cover,
+    mf.storage_key, mf.mime, mf.size_bytes, mf.width, mf.height
+FROM product_images pi
+JOIN media_files mf ON mf.id = pi.media_id
+WHERE pi.shop_id = $1 AND pi.product_id = ANY(sqlc.arg('product_ids')::uuid[])
+ORDER BY pi.product_id, pi.is_cover DESC, pi.sort_order ASC, pi.id ASC;
+
 -- name: AddProductImage :one
 INSERT INTO product_images (id, shop_id, product_id, variant_id, media_id, sort_order, is_cover)
 VALUES ($1, $2, $3, $4, $5, $6, $7)

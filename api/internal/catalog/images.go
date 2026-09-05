@@ -49,6 +49,35 @@ func (s *Service) productImagesFor(ctx context.Context, shopID, productID uuid.U
 	return items, nil
 }
 
+// coverImagesFor resolves each id in productIDs to its coverImage (D-83):
+// the image flagged is_cover, else the first by sort_order; a product with
+// no images has no entry in the returned map. One query for the whole
+// page via ListCoverImagesForProducts — no N+1 — shop-scoped like every
+// other product_images query (hard rule 1). Feeds ListProducts for both
+// the staff and cashier row shapes, since coverImage is not gated by any
+// permission (images carry no cost/PII, like productImagesFor above).
+func (s *Service) coverImagesFor(ctx context.Context, shopID uuid.UUID, productIDs []uuid.UUID) (map[uuid.UUID]gen.ProductImage, error) {
+	if len(productIDs) == 0 {
+		return nil, nil
+	}
+	rows, err := s.q.ListCoverImagesForProducts(ctx, db.ListCoverImagesForProductsParams{ShopID: shopID, ProductIds: productIDs})
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[uuid.UUID]gen.ProductImage, len(rows))
+	for _, r := range rows {
+		out[r.ProductID] = gen.ProductImage{
+			Id:        r.ID,
+			MediaId:   r.MediaID,
+			VariantId: nullableUUID(r.VariantID),
+			SortOrder: int(r.SortOrder),
+			IsCover:   r.IsCover,
+			Urls:      media.URLs(s.mediaBaseURL, r.StorageKey),
+		}
+	}
+	return out, nil
+}
+
 // AddProductImage attaches an uploaded image to a product. Requires
 // catalog.write (manager+). The 8-image cap is checked and the row
 // inserted inside one transaction, after LockShop(shopID) — the same

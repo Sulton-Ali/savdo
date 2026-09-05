@@ -3111,6 +3111,13 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ProductImage"
+        coverImage:
+          $ref: "#/components/schemas/ProductImage"
+          description: >
+            `GET /products` list items only (D-83): the product image
+            flagged `isCover`, else the first by position, else absent.
+            `GET /products/{id}` returns the full `images` array instead
+            and does not set this field.
 
     ProductPublic:
       type: object

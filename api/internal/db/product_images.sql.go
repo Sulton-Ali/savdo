@@ -90,6 +90,73 @@ func (q *Queries) CountProductImages(ctx context.Context, arg CountProductImages
 	return count, err
 }
 
+const listCoverImagesForProducts = `-- name: ListCoverImagesForProducts :many
+SELECT DISTINCT ON (pi.product_id)
+    pi.product_id, pi.id, pi.variant_id, pi.media_id,
+    pi.sort_order, pi.is_cover,
+    mf.storage_key, mf.mime, mf.size_bytes, mf.width, mf.height
+FROM product_images pi
+JOIN media_files mf ON mf.id = pi.media_id
+WHERE pi.shop_id = $1 AND pi.product_id = ANY($2::uuid[])
+ORDER BY pi.product_id, pi.is_cover DESC, pi.sort_order ASC, pi.id ASC
+`
+
+type ListCoverImagesForProductsParams struct {
+	ShopID     uuid.UUID   `json:"shop_id"`
+	ProductIds []uuid.UUID `json:"product_ids"`
+}
+
+type ListCoverImagesForProductsRow struct {
+	ProductID  uuid.UUID  `json:"product_id"`
+	ID         uuid.UUID  `json:"id"`
+	VariantID  *uuid.UUID `json:"variant_id"`
+	MediaID    uuid.UUID  `json:"media_id"`
+	SortOrder  int32      `json:"sort_order"`
+	IsCover    bool       `json:"is_cover"`
+	StorageKey string     `json:"storage_key"`
+	Mime       string     `json:"mime"`
+	SizeBytes  int64      `json:"size_bytes"`
+	Width      *int32     `json:"width"`
+	Height     *int32     `json:"height"`
+}
+
+// One row per id in product_ids that has at least one image: the image
+// flagged is_cover, else the first by sort_order (D-83). Feeds
+// ListProducts' coverImage field for a whole page in one query — no
+// N+1 — and is shop-scoped like every other product_images query (hard
+// rule 1).
+func (q *Queries) ListCoverImagesForProducts(ctx context.Context, arg ListCoverImagesForProductsParams) ([]ListCoverImagesForProductsRow, error) {
+	rows, err := q.db.Query(ctx, listCoverImagesForProducts, arg.ShopID, arg.ProductIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListCoverImagesForProductsRow
+	for rows.Next() {
+		var i ListCoverImagesForProductsRow
+		if err := rows.Scan(
+			&i.ProductID,
+			&i.ID,
+			&i.VariantID,
+			&i.MediaID,
+			&i.SortOrder,
+			&i.IsCover,
+			&i.StorageKey,
+			&i.Mime,
+			&i.SizeBytes,
+			&i.Width,
+			&i.Height,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listImageIDsForProduct = `-- name: ListImageIDsForProduct :many
 SELECT id FROM product_images
 WHERE shop_id = $1 AND product_id = $2

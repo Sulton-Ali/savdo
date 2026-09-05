@@ -697,7 +697,10 @@ type Product struct {
 	CategoryId nullable.Nullable[openapi_types.UUID] `json:"categoryId"`
 
 	// CostPrice Present only when the caller has the `cost.read` permission; absent (not null) otherwise (ADR-010).
-	CostPrice   *string                   `json:"costPrice,omitempty"`
+	CostPrice *string `json:"costPrice,omitempty"`
+
+	// CoverImage `GET /products` list items only (D-83): the product image flagged `isCover`, else the first by position, else absent. `GET /products/{id}` returns the full `images` array instead and does not set this field.
+	CoverImage  *ProductImage             `json:"coverImage,omitempty"`
 	Description nullable.Nullable[string] `json:"description"`
 	Id          openapi_types.UUID        `json:"id"`
 	Images      *[]ProductImage           `json:"images,omitempty"`
