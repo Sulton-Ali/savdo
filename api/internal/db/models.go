@@ -102,6 +102,49 @@ func (ns NullLocationKind) Value() (driver.Value, error) {
 	return string(ns.LocationKind), nil
 }
 
+type PaymentMethod string
+
+const (
+	PaymentMethodCash     PaymentMethod = "cash"
+	PaymentMethodCard     PaymentMethod = "card"
+	PaymentMethodTransfer PaymentMethod = "transfer"
+)
+
+func (e *PaymentMethod) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = PaymentMethod(s)
+	case string:
+		*e = PaymentMethod(s)
+	default:
+		return fmt.Errorf("unsupported scan type for PaymentMethod: %T", src)
+	}
+	return nil
+}
+
+type NullPaymentMethod struct {
+	PaymentMethod PaymentMethod `json:"payment_method"`
+	Valid         bool          `json:"valid"` // Valid is true if PaymentMethod is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullPaymentMethod) Scan(value interface{}) error {
+	if value == nil {
+		ns.PaymentMethod, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.PaymentMethod.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullPaymentMethod) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.PaymentMethod), nil
+}
+
 type PurchaseStatus string
 
 const (
@@ -143,6 +186,90 @@ func (ns NullPurchaseStatus) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.PurchaseStatus), nil
+}
+
+type SaleKind string
+
+const (
+	SaleKindSale   SaleKind = "sale"
+	SaleKindReturn SaleKind = "return"
+)
+
+func (e *SaleKind) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = SaleKind(s)
+	case string:
+		*e = SaleKind(s)
+	default:
+		return fmt.Errorf("unsupported scan type for SaleKind: %T", src)
+	}
+	return nil
+}
+
+type NullSaleKind struct {
+	SaleKind SaleKind `json:"sale_kind"`
+	Valid    bool     `json:"valid"` // Valid is true if SaleKind is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullSaleKind) Scan(value interface{}) error {
+	if value == nil {
+		ns.SaleKind, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.SaleKind.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullSaleKind) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.SaleKind), nil
+}
+
+type SaleStatus string
+
+const (
+	SaleStatusCompleted SaleStatus = "completed"
+	SaleStatusVoided    SaleStatus = "voided"
+)
+
+func (e *SaleStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = SaleStatus(s)
+	case string:
+		*e = SaleStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for SaleStatus: %T", src)
+	}
+	return nil
+}
+
+type NullSaleStatus struct {
+	SaleStatus SaleStatus `json:"sale_status"`
+	Valid      bool       `json:"valid"` // Valid is true if SaleStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullSaleStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.SaleStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.SaleStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullSaleStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.SaleStatus), nil
 }
 
 type SessionClient string
@@ -324,6 +451,19 @@ type CategoryTranslation struct {
 	Description *string   `json:"description"`
 }
 
+type Customer struct {
+	ID               uuid.UUID  `json:"id"`
+	ShopID           uuid.UUID  `json:"shop_id"`
+	FullName         string     `json:"full_name"`
+	Phone            *string    `json:"phone"`
+	TelegramUsername *string    `json:"telegram_username"`
+	Note             *string    `json:"note"`
+	Tags             []string   `json:"tags"`
+	DeletedAt        *time.Time `json:"deleted_at"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
+}
+
 type IdempotencyKey struct {
 	ShopID         uuid.UUID `json:"shop_id"`
 	Key            string    `json:"key"`
@@ -440,6 +580,50 @@ type PurchaseItem struct {
 	LineTotal  pgtype.Numeric `json:"line_total"`
 	CreatedAt  time.Time      `json:"created_at"`
 	UpdatedAt  time.Time      `json:"updated_at"`
+}
+
+type Sale struct {
+	ID             uuid.UUID      `json:"id"`
+	ShopID         uuid.UUID      `json:"shop_id"`
+	Number         int64          `json:"number"`
+	Kind           SaleKind       `json:"kind"`
+	Status         SaleStatus     `json:"status"`
+	LocationID     uuid.UUID      `json:"location_id"`
+	CustomerID     *uuid.UUID     `json:"customer_id"`
+	CashierID      uuid.UUID      `json:"cashier_id"`
+	OriginalSaleID *uuid.UUID     `json:"original_sale_id"`
+	Subtotal       pgtype.Numeric `json:"subtotal"`
+	DiscountAmount pgtype.Numeric `json:"discount_amount"`
+	DiscountReason *string        `json:"discount_reason"`
+	Total          pgtype.Numeric `json:"total"`
+	Note           *string        `json:"note"`
+	CompletedAt    time.Time      `json:"completed_at"`
+	VoidedAt       *time.Time     `json:"voided_at"`
+	VoidedBy       *uuid.UUID     `json:"voided_by"`
+	VoidReason     *string        `json:"void_reason"`
+	CreatedAt      time.Time      `json:"created_at"`
+}
+
+type SaleItem struct {
+	ID                 uuid.UUID      `json:"id"`
+	ShopID             uuid.UUID      `json:"shop_id"`
+	SaleID             uuid.UUID      `json:"sale_id"`
+	VariantID          uuid.UUID      `json:"variant_id"`
+	Qty                pgtype.Numeric `json:"qty"`
+	UnitPrice          pgtype.Numeric `json:"unit_price"`
+	UnitCost           pgtype.Numeric `json:"unit_cost"`
+	LineTotal          pgtype.Numeric `json:"line_total"`
+	OriginalSaleItemID *uuid.UUID     `json:"original_sale_item_id"`
+	CreatedAt          time.Time      `json:"created_at"`
+}
+
+type SalePayment struct {
+	ID        uuid.UUID      `json:"id"`
+	ShopID    uuid.UUID      `json:"shop_id"`
+	SaleID    uuid.UUID      `json:"sale_id"`
+	Method    PaymentMethod  `json:"method"`
+	Amount    pgtype.Numeric `json:"amount"`
+	CreatedAt time.Time      `json:"created_at"`
 }
 
 type Session struct {
