@@ -83,8 +83,9 @@ export async function updateVariant(
  * real `Blob`, via `XMLHttpRequest`'s `responseType: "blob"` — the
  * long-standing React Native technique for turning a picked asset into a
  * `Blob` without a native-file-reading dependency of its own. Deliberately
- * *not* `fetch(uri)`: Expo SDK 57 installs its own WinterCG `fetch` as the
- * global (`expo/src/winter/runtime.native.ts`'s `install('fetch', ...)`,
+ * *not* calling the global `fetch` on this URI directly: Expo SDK 57
+ * installs its own WinterCG-compliant `fetch` as that global
+ * (`expo/src/winter/runtime.native.ts`'s `install("fetch", ...)`,
  * confirmed against the installed package, not training data), which talks
  * to a native HTTP client and does not understand a local file URI;
  * `XMLHttpRequest` is a separate global that SDK 57 leaves untouched, so it
