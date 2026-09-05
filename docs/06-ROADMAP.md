@@ -108,13 +108,13 @@ restored; all with the tests above green.
 
 ## Phase 5 — Mobile admin (Expo, Android)
 
-- [ ] Expo Router app shell, login, secure token storage, i18n
-- [ ] Products browse/search with variants and availability, product edit (manager+)
+- [ ] Expo Router app shell, login with editable server URL (D-79), secure token storage, i18n
+- [ ] Products browse/search with variants and availability; quick edit + photo upload (manager+, D-77)
 - [ ] Quick sale flow optimised for one hand; customer attach by phone
 - [ ] Stock levels, receive purchase, adjustment
 - [ ] Reports summary card (role-aware)
-- [ ] EAS build profile for Android APK; install instructions in `07-DEVOPS.md`
-- [ ] Playwright is not applicable; Maestro or Expo e2e smoke for login + sale (owner decides scope)
+- [ ] Local Android release build (Expo prebuild + Gradle, D-72); build and install instructions in `07-DEVOPS.md`
+- [ ] No automated mobile e2e (D-74); the Done-when manual check is the smoke
 
 **Done when:** the owner installs the APK on an Android phone, logs in, makes a sale and
 receives a purchase against the local/dev API, and the numbers match the admin web.
