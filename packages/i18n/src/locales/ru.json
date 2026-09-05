@@ -40,6 +40,7 @@
     "attributes": "Атрибуты",
     "staff": "Сотрудники",
     "locations": "Филиалы",
+    "customers": "Клиенты",
     "suppliers": "Поставщики",
     "purchases": "Закупки",
     "settings": "Настройки",
@@ -439,6 +440,58 @@
     },
     "errors": {
       "categoryHasProducts": "В этой категории ещё есть товары, удаление невозможно."
+    }
+  },
+  "customers": {
+    "title": "Клиенты",
+    "add": "Добавить клиента",
+    "edit": "Редактировать клиента",
+    "delete": "Удалить",
+    "confirmDelete": "Удалить этого клиента?",
+    "searchPlaceholder": "Поиск клиентов",
+    "view": "Просмотр",
+    "tagsPlaceholder": "Добавьте тег и нажмите Enter",
+    "columns": {
+      "fullName": "Имя",
+      "phone": "Телефон",
+      "telegramUsername": "Telegram",
+      "tags": "Теги"
+    },
+    "fields": {
+      "fullName": "Полное имя",
+      "phone": "Телефон",
+      "telegramUsername": "Имя пользователя в Telegram",
+      "note": "Заметка",
+      "tags": "Теги"
+    },
+    "detail": {
+      "title": "Клиент",
+      "notFound": "Клиент не найден."
+    },
+    "history": {
+      "title": "История покупок",
+      "empty": "Пока нет продаж",
+      "columns": {
+        "number": "Номер",
+        "date": "Дата",
+        "total": "Итого",
+        "kind": "Тип",
+        "status": "Статус",
+        "paymentMethod": "Оплата"
+      },
+      "kind": {
+        "sale": "Продажа",
+        "return": "Возврат"
+      },
+      "status": {
+        "completed": "Завершена",
+        "voided": "Отменена"
+      },
+      "paymentMethod": {
+        "cash": "Наличные",
+        "card": "Карта",
+        "transfer": "Перевод"
+      }
     }
   }
 }

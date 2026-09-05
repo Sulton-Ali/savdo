@@ -40,6 +40,7 @@
     "attributes": "Attributes",
     "staff": "Staff",
     "locations": "Locations",
+    "customers": "Customers",
     "suppliers": "Suppliers",
     "purchases": "Purchases",
     "settings": "Settings",
@@ -439,6 +440,58 @@
     },
     "errors": {
       "categoryHasProducts": "This category still has products and can't be deleted."
+    }
+  },
+  "customers": {
+    "title": "Customers",
+    "add": "Add customer",
+    "edit": "Edit customer",
+    "delete": "Delete",
+    "confirmDelete": "Delete this customer?",
+    "searchPlaceholder": "Search customers",
+    "view": "View",
+    "tagsPlaceholder": "Add a tag and press Enter",
+    "columns": {
+      "fullName": "Name",
+      "phone": "Phone",
+      "telegramUsername": "Telegram",
+      "tags": "Tags"
+    },
+    "fields": {
+      "fullName": "Full name",
+      "phone": "Phone",
+      "telegramUsername": "Telegram username",
+      "note": "Note",
+      "tags": "Tags"
+    },
+    "detail": {
+      "title": "Customer",
+      "notFound": "Customer not found."
+    },
+    "history": {
+      "title": "Purchase history",
+      "empty": "No sales yet",
+      "columns": {
+        "number": "Number",
+        "date": "Date",
+        "total": "Total",
+        "kind": "Kind",
+        "status": "Status",
+        "paymentMethod": "Payment"
+      },
+      "kind": {
+        "sale": "Sale",
+        "return": "Return"
+      },
+      "status": {
+        "completed": "Completed",
+        "voided": "Voided"
+      },
+      "paymentMethod": {
+        "cash": "Cash",
+        "card": "Card",
+        "transfer": "Transfer"
+      }
     }
   }
 }
