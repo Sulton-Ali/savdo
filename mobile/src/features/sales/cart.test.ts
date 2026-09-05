@@ -4,6 +4,7 @@ import {
   type CartState,
   cartReducer,
   estimateCartTotals,
+  idempotencyOutcome,
   initialCartState,
   isValidDiscountValue,
   isZeroDecimalString,
@@ -170,13 +171,35 @@ describe("isValidDiscountValue", () => {
     ["percent", "-1", false],
     ["percent", "abc", false],
     ["percent", "", false],
+    // At most 2 fractional digits, matching the server's own discount
+    // `value` validation (T4 review) — a 3rd decimal digit must fail here
+    // so the screen shows its own field error instead of a round trip.
+    ["percent", "12.345", false],
     ["fixed", "0", true],
     ["fixed", "150000", true],
     ["fixed", "150000.50", true],
+    ["fixed", "150000.555", false],
     ["fixed", "-1", false],
     ["fixed", "1e5", false],
   ] as const)("%s %s -> %s", (kind, value, expected) => {
     expect(isValidDiscountValue(kind, value)).toBe(expected);
+  });
+});
+
+describe("idempotencyOutcome", () => {
+  it("rekeys only for IDEMPOTENCY_KEY_REUSED", () => {
+    expect(idempotencyOutcome("IDEMPOTENCY_KEY_REUSED")).toBe("rekey");
+  });
+
+  it("keeps the key for an undecoded error (network drop/timeout — code undefined)", () => {
+    expect(idempotencyOutcome(undefined)).toBe("keepKey");
+  });
+
+  it("keeps the key for any other decoded error code", () => {
+    expect(idempotencyOutcome("STOCK_INSUFFICIENT")).toBe("keepKey");
+    expect(idempotencyOutcome("DISCOUNT_EXCEEDS_SUBTOTAL")).toBe("keepKey");
+    expect(idempotencyOutcome("VALIDATION_FAILED")).toBe("keepKey");
+    expect(idempotencyOutcome("INTERNAL")).toBe("keepKey");
   });
 });
 

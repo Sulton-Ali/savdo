@@ -70,8 +70,9 @@ export interface CartState {
    * removing a line, changing qty, changing the discount — so a genuine
    * double-tap of "Pay" always replays the exact same request instead of
    * starting a second one. Reset on `clear` and `completed`; also minted
-   * fresh on demand by `rekey` (kept as a distinct action from `clear`
-   * since it leaves `lines`/`discount` untouched — see its own doc comment).
+   * fresh on demand by `rekey`, but *only* for `409 IDEMPOTENCY_KEY_REUSED`
+   * (see `idempotencyOutcome` below) — kept as a distinct action from
+   * `clear` since it leaves `lines`/`discount` untouched.
    *
    * Safe to keep stable across an edit made *after* a failed submit too
    * (e.g. fixing a qty once the server answers `409 STOCK_INSUFFICIENT`):
@@ -81,6 +82,19 @@ export interface CartState {
    * transaction and stores nothing — so the same key retried with a
    * different, corrected body is simply treated as unused, not rejected
    * as `IDEMPOTENCY_KEY_REUSED`.
+   *
+   * Critically, this also means a request whose *response was never seen*
+   * at all (a network drop, a timeout) must keep the same key rather than
+   * mint a new one (T4 review CRITICAL, corrects an earlier version of
+   * this file that rekeyed on any undecoded error): if that request had
+   * actually reached the server and committed, a cashier's natural retry
+   * of the same cart under a *new* key would create a second, real sale
+   * with its own stock movements — one that can never be undone from the
+   * device (ADR-014, sales are immutable). Keeping the key means a retry
+   * of the unchanged body either replays the first attempt's own stored
+   * success (`Idempotent` returns the same response, no new movements) or
+   * is genuinely the first attempt to reach the server at all — never a
+   * duplicate.
    */
   idempotencyKey: string;
 }
@@ -103,15 +117,16 @@ export type CartAction =
   | { type: "clear" }
   | { type: "completed" }
   /** Mints a fresh `idempotencyKey` without touching `lines`/`discount` —
-   * unlike `clear`/`completed`, this is for the "we genuinely don't know
-   * if the last attempt went through" cases (`409 IDEMPOTENCY_KEY_REUSED`,
-   * or a network/timeout error with no response at all, T4 review nit 9):
-   * the cashier's cart is still exactly what they built, but retrying with
-   * the *same* key would either replay a stale success or, if the previous
-   * attempt never reached the server, hit `IDEMPOTENCY_KEY_REUSED` once a
-   * different key's worth of edits piles up. `sale/index.tsx` pairs this
-   * with a hint pointing at today's sales list, so the cashier can check
-   * whether the earlier attempt actually completed before paying again. */
+   * unlike `clear`/`completed`. Dispatched *only* when `idempotencyOutcome`
+   * below says `"rekey"`, i.e. only for `409 IDEMPOTENCY_KEY_REUSED`: the
+   * one case where the current key is *provably* already spent on an
+   * earlier, successful attempt (this reducer's own request never reused a
+   * key against a different body on purpose), so this attempt's edited
+   * body needs a key of its own. `sale/index.tsx` pairs this with a hint
+   * pointing at today's sales list, so the cashier can check whether that
+   * earlier attempt is the one they meant before paying again. Every other
+   * failure — including one with no response at all — keeps the key
+   * instead (`idempotencyKey`'s own doc comment has the full reasoning). */
   | { type: "rekey" };
 
 /**
@@ -129,6 +144,35 @@ function generateIdempotencyKey(): string {
 
 export function initialCartState(): CartState {
   return { lines: [], discount: null, idempotencyKey: generateIdempotencyKey() };
+}
+
+export type IdempotencyOutcome = "rekey" | "keepKey";
+
+/**
+ * What `sale/index.tsx` should do with the cart's `idempotencyKey` after a
+ * failed `POST /sales`, given the error's machine-readable `code` — or
+ * `undefined` when the error was never a decoded server response at all
+ * (a network drop, a timeout: `SalesApiError` is only ever constructed
+ * from a response the client actually received and parsed).
+ *
+ * `"rekey"` only for `IDEMPOTENCY_KEY_REUSED`: the server's own
+ * `Idempotent` helper (`api/internal/httpx/idempotency.go`) answers that
+ * code exactly when this key was already used for a *different* body —
+ * which, since a failed attempt never stores a key at all, can only mean
+ * an *earlier* attempt with this key already succeeded. Every other
+ * outcome is `"keepKey"`, including `undefined`: a decoded failure
+ * (`STOCK_INSUFFICIENT`, `VALIDATION_FAILED`, …) never stored a key
+ * either, so the same key is safe to retry once the cart is fixed; and an
+ * undecoded failure's outcome is *unknown* — the request may have reached
+ * the server and committed anyway — so rekeying there would risk a
+ * cashier's natural retry becoming a second, real sale under a fresh key
+ * instead of safely replaying the first attempt's own result (T4 review
+ * CRITICAL; `idempotencyKey`'s own doc comment on `CartState` has the
+ * full reasoning). A pure function so this is pinned in Vitest without
+ * needing to construct a real `SalesApiError`.
+ */
+export function idempotencyOutcome(errorCode: string | undefined): IdempotencyOutcome {
+  return errorCode === "IDEMPOTENCY_KEY_REUSED" ? "rekey" : "keepKey";
 }
 
 /** Decimal-string fixed-point scale for money (ADR-007: `NUMERIC(14,2)`)
@@ -175,14 +219,20 @@ function exceeds(value: string, limit: string): boolean {
   return toScaledInt(value, PERCENT_SCALE) > toScaledInt(limit, PERCENT_SCALE);
 }
 
-const DECIMAL_STRING_RE = /^\d+(\.\d+)?$/;
+// At most 2 fractional digits — the server's own discount `value`
+// validation is `^\d+(\.\d{1,2})?$` (T4 review), stricter than the
+// contract's general `Decimal` pattern; matching it here means a value
+// with a 3rd decimal digit shows this screen's own inline field error
+// instead of a round trip that bounces back as a generic
+// `VALIDATION_FAILED` banner.
+const DECIMAL_STRING_RE = /^\d+(\.\d{1,2})?$/;
 const MAX_DISCOUNT_PERCENT = "100";
 
 /** A discount `value` is valid when it is a non-negative decimal string
- * and, for `percent`, does not exceed 100 — the server still validates
- * and caps everything authoritatively (D-57, hard rule 8); this is only
- * for a screen to reject an obviously-bad value before it ever tries a
- * request. */
+ * with at most 2 fractional digits, and, for `percent`, does not exceed
+ * 100 — the server still validates and caps everything authoritatively
+ * (D-57, hard rule 8); this is only for a screen to reject an
+ * obviously-bad value before it ever tries a request. */
 export function isValidDiscountValue(kind: DiscountKind, value: string): boolean {
   const trimmed = value.trim();
   if (!DECIMAL_STRING_RE.test(trimmed)) {

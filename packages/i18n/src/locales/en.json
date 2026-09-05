@@ -783,6 +783,9 @@
       "pay": "Pay",
       "paying": "Processing…",
       "locationRequired": "Pick a location before completing the sale.",
+      "errors": {
+        "networkUnknown": "Connection lost. The sale may already be recorded: check today's list before paying again."
+      },
       "list": {
         "title": "Today's sales",
         "empty": "No sales today yet."

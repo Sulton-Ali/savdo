@@ -783,6 +783,9 @@
       "pay": "To‘lash",
       "paying": "Bajarilmoqda…",
       "locationRequired": "Sotuvni yakunlashdan oldin filialni tanlang.",
+      "errors": {
+        "networkUnknown": "Aloqa uzildi. Sotuv allaqachon qayd etilgan bo‘lishi mumkin — qayta to‘lashdan oldin bugungi ro‘yxatni tekshiring."
+      },
       "list": {
         "title": "Bugungi sotuvlar",
         "empty": "Bugun hali sotuvlar yo‘q."

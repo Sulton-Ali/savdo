@@ -34,6 +34,7 @@ import {
   cartReducer,
   type DiscountKind,
   estimateCartTotals,
+  idempotencyOutcome,
   initialCartState,
   isValidDiscountValue,
   isZeroDecimalString,
@@ -229,17 +230,27 @@ export default function SaleScreen() {
   const [lineErrors, setLineErrors] = useState<Record<string, string>>({});
   const [generalError, setGeneralError] = useState<string | null>(null);
   // `true` when the last `POST /sales` failed in a way that leaves the
-  // outcome genuinely unknown (`409 IDEMPOTENCY_KEY_REUSED`, or any error
-  // that isn't a decoded server response at all — a network drop or a
-  // timeout never got as far as a response either) — the request may have
-  // already completed. Shown alongside `generalError` with a link to
+  // outcome genuinely unknown — `409 IDEMPOTENCY_KEY_REUSED` (an earlier
+  // attempt with this key already succeeded), or any error that isn't a
+  // decoded server response at all (a network drop or a timeout never got
+  // as far as a response either, so it's equally unknown whether the
+  // request committed). Shown alongside `generalError` with a link to
   // today's sales list so the cashier can check before paying again (T4
-  // review SHOULD-FIX 3 / nit 9).
+  // review SHOULD-FIX 3 / nit 9). Note this is independent of whether the
+  // key is rekeyed (`idempotencyOutcome`) — an undecoded error keeps the
+  // key (T4 review CRITICAL) but is just as "possibly recorded" as the
+  // reused-key case.
   const [possiblyRecorded, setPossiblyRecorded] = useState(false);
   const [completedSale, setCompletedSale] = useState<Sale | null>(null);
 
-  const { data: locations } = useLocations();
+  const {
+    data: locations,
+    isPending: locationsPending,
+    isError: locationsError,
+    refetch: refetchLocations,
+  } = useLocations();
   const activeLocations = useMemo(() => (locations ?? []).filter((l) => l.isActive), [locations]);
+  const noActiveLocations = !locationsPending && !locationsError && activeLocations.length === 0;
 
   // The remembered location id is only ever a *hint*: it might name a
   // location that has since been deactivated, deleted, or — since
@@ -280,6 +291,13 @@ export default function SaleScreen() {
     setSelectedLocation(resolved);
     if (resolved.id !== storedLocationId) {
       void persistLocationId(resolved.id);
+      // Resync so this state agrees with what was just written to
+      // SecureStore (T4 review nit) — otherwise `storedLocationId` keeps
+      // naming the rejected/missing id, and anything that re-reads it
+      // later (or a future re-run of this same effect, should
+      // `selectedLocation` ever reset) would see a stale value instead of
+      // the fallback that's actually in effect now.
+      setStoredLocationId(resolved.id);
     }
   }, [selectedLocation, locationHydrated, storedLocationId, activeLocations]);
 
@@ -482,27 +500,28 @@ export default function SaleScreen() {
               setGeneralError(t("sales.errors.discountExceedsSubtotal"));
               return;
             }
-            if (error.code === "IDEMPOTENCY_KEY_REUSED") {
-              // The same key was already used for a *different* body
-              // (`api/internal/httpx/idempotency.go`) — since a failed
-              // attempt never stores a key at all, this specific code only
-              // ever means an *earlier* attempt with this key already
-              // succeeded. Mint a fresh key so the cashier isn't stuck
-              // retrying against the stale one, and point at today's list
-              // to check whether that earlier sale is the one they meant
-              // (T4 review SHOULD-FIX 3).
-              dispatch({ type: "rekey" });
-              setGeneralError(t("sales.errors.idempotencyKeyReused"));
-              setPossiblyRecorded(true);
-              return;
-            }
-          } else {
-            // Not a decoded server response at all — a network drop or a
-            // request timeout never got as far as one either, so the
-            // outcome is genuinely unknown; the same fresh-key + "check
-            // today's list" treatment applies (T4 review nit 9).
+          }
+          // `idempotencyOutcome` takes the error's `code` when it was a
+          // decoded server response, else `undefined` — a network drop or
+          // a timeout never got as far as one, so its outcome is just as
+          // unknown as `IDEMPOTENCY_KEY_REUSED`'s (`possiblyRecorded`
+          // covers both), but only `IDEMPOTENCY_KEY_REUSED` actually
+          // proves the *current* key was already spent, so only that case
+          // mints a new one (T4 review CRITICAL: rekeying on an undecoded
+          // error would let a cashier's natural retry of the same cart
+          // create a second, real sale under a fresh key if the original
+          // request had actually reached the server and committed —
+          // `features/sales/cart.ts`'s own doc comments have the full
+          // reasoning).
+          const code = error instanceof SalesApiError ? error.code : undefined;
+          if (idempotencyOutcome(code) === "rekey") {
             dispatch({ type: "rekey" });
             setGeneralError(t("sales.errors.idempotencyKeyReused"));
+            setPossiblyRecorded(true);
+            return;
+          }
+          if (!(error instanceof SalesApiError)) {
+            setGeneralError(t("mobile.sale.errors.networkUnknown"));
             setPossiblyRecorded(true);
             return;
           }
@@ -548,14 +567,30 @@ export default function SaleScreen() {
           </View>
         ) : null}
 
-        <Pressable
-          accessibilityRole="button"
-          className="min-h-14 justify-center rounded-md border border-input bg-background px-3"
-          onPress={() => setLocationModalOpen(true)}
-        >
-          <Text variant="small">{t("sales.fields.location")}</Text>
-          <Text>{selectedLocation?.name ?? t("mobile.sale.location.placeholder")}</Text>
-        </Pressable>
+        {locationsError ? (
+          <View className="gap-2 rounded-md border border-border p-3">
+            <Text variant="muted">{t("errors.generic")}</Text>
+            <Pressable accessibilityRole="button" onPress={() => refetchLocations()}>
+              <Text className="text-primary">{t("common.retry")}</Text>
+            </Pressable>
+          </View>
+        ) : noActiveLocations ? (
+          <View className="gap-2 rounded-md border border-border p-3">
+            <Text variant="muted">{t("mobile.stock.noLocations")}</Text>
+            <Pressable accessibilityRole="button" onPress={() => refetchLocations()}>
+              <Text className="text-primary">{t("common.retry")}</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <Pressable
+            accessibilityRole="button"
+            className="min-h-14 justify-center rounded-md border border-input bg-background px-3"
+            onPress={() => setLocationModalOpen(true)}
+          >
+            <Text variant="small">{t("sales.fields.location")}</Text>
+            <Text>{selectedLocation?.name ?? t("mobile.sale.location.placeholder")}</Text>
+          </Pressable>
+        )}
 
         <View className="gap-2">
           <View className="flex-row items-center justify-between">
