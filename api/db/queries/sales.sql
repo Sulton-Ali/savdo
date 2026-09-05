@@ -287,6 +287,24 @@ LEFT JOIN LATERAL (
 WHERE si.shop_id = sqlc.arg('shop_id') AND si.sale_id = sqlc.arg('sale_id')
 ORDER BY si.created_at, si.id;
 
+-- name: SumReturnedForSaleItem :one
+-- Sums the qty and line_total already refunded against one original sale
+-- item, counting only completed returns (a voided return never happened)
+-- — the return refund cap (D-64): the cumulative refunded amount for a
+-- line must never exceed its net share of the original line_total, and
+-- the last partial return of a line must exactly zero out the remainder.
+-- Called after GetSaleItemsForUpdate has locked the original sale's item
+-- rows, so a concurrent second return against the same line blocks until
+-- this transaction commits or rolls back (GetSaleItemsForUpdate's own doc
+-- comment).
+SELECT
+    COALESCE(sum(ri.qty), 0)::numeric(12,3) AS returned_qty,
+    COALESCE(sum(ri.line_total), 0)::numeric(14,2) AS returned_amount
+FROM sale_items ri
+JOIN sales rs ON rs.id = ri.sale_id AND rs.shop_id = ri.shop_id
+WHERE ri.shop_id = sqlc.arg('shop_id') AND ri.original_sale_item_id = sqlc.arg('original_sale_item_id')
+    AND rs.kind = 'return' AND rs.status = 'completed';
+
 -- name: ListSaleItemsForCashier :many
 -- Same as ListSaleItemsForStaff, minus unit_cost (§ 04-DATA-MODEL.md rule
 -- 8, D-63): a separate query, not the staff one filtered in Go.

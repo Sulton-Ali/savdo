@@ -996,7 +996,7 @@ export interface components {
          * @description Machine-readable error codes (ADR-013). A client translates a code to a display sentence; the API never returns one. Adding a new error code means adding it here first.
          * @enum {string}
          */
-        ErrorCode: "VALIDATION_FAILED" | "UNAUTHENTICATED" | "FORBIDDEN" | "NOT_FOUND" | "CONFLICT" | "RATE_LIMITED" | "INTERNAL" | "STOCK_INSUFFICIENT" | "PURCHASE_NOT_DRAFT" | "PURCHASE_ALREADY_RECEIVED" | "PURCHASE_ALREADY_CANCELLED" | "SAME_LOCATION" | "IDEMPOTENCY_KEY_REUSED" | "DISCOUNT_EXCEEDS_SUBTOTAL" | "SALE_ALREADY_VOIDED" | "SALE_VOID_WINDOW_CLOSED" | "SALE_HAS_RETURNS" | "RETURN_EXCEEDS_SOLD";
+        ErrorCode: "VALIDATION_FAILED" | "UNAUTHENTICATED" | "FORBIDDEN" | "NOT_FOUND" | "CONFLICT" | "RATE_LIMITED" | "INTERNAL" | "STOCK_INSUFFICIENT" | "PURCHASE_NOT_DRAFT" | "PURCHASE_ALREADY_RECEIVED" | "PURCHASE_ALREADY_CANCELLED" | "SAME_LOCATION" | "IDEMPOTENCY_KEY_REUSED" | "DISCOUNT_EXCEEDS_SUBTOTAL" | "SALE_ALREADY_VOIDED" | "SALE_VOID_WINDOW_CLOSED" | "SALE_HAS_RETURNS" | "SALE_NOT_VOIDABLE" | "SALE_NOT_RETURNABLE" | "RETURN_EXCEEDS_SOLD";
         /** @description The error envelope every non-2xx JSON response uses (ADR-013). */
         Error: {
             error: {
@@ -1773,7 +1773,7 @@ export interface components {
             productName: string;
             variantLabel: string;
             qty: components["schemas"]["Decimal"];
-            /** @description The price actually charged for this line. On a return, the effective refunded unit price (D-61). */
+            /** @description The price actually charged for this line. On a return, the effective refunded unit price (D-61) — `qty * unitPrice` may differ from `lineTotal` by a rounding cent; `lineTotal` is authoritative. */
             unitPrice: components["schemas"]["Decimal"];
             lineTotal: components["schemas"]["Decimal"];
             /** @description Quantity of this line already returned. Always `0` on a return-kind sale's own items. */
@@ -3824,7 +3824,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description `409 SALE_ALREADY_VOIDED` when the sale is already voided; `409 SALE_VOID_WINDOW_CLOSED` once its calendar day has passed in the shop timezone (D-59); `409 SALE_HAS_RETURNS` when a return already references this sale (D-62). */
+            /** @description `409 SALE_ALREADY_VOIDED` when the sale is already voided; `409 SALE_VOID_WINDOW_CLOSED` once its calendar day has passed in the shop timezone (D-59); `409 SALE_HAS_RETURNS` when a return already references this sale (D-62); `409 SALE_NOT_VOIDABLE` when the sale is itself a return (D-66). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -3866,7 +3866,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description `409 RETURN_EXCEEDS_SOLD details.saleItemId` when a line's returned quantity would exceed sold minus already returned; `409 SALE_ALREADY_VOIDED` when the original sale is voided; `409 IDEMPOTENCY_KEY_REUSED` when the same key was already used for a different request. */
+            /** @description `409 RETURN_EXCEEDS_SOLD details.saleItemId` when a line's returned quantity would exceed sold minus already returned; `409 SALE_ALREADY_VOIDED` when the original sale is voided; `409 SALE_NOT_RETURNABLE` when the target sale is a return (D-66); `409 IDEMPOTENCY_KEY_REUSED` when the same key was already used for a different request; `409 CONFLICT details.reason: "deadlock"` when a concurrent write could not be serialized — safe to retry. */
             409: {
                 headers: {
                     [name: string]: unknown;

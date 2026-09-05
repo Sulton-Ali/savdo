@@ -612,16 +612,6 @@ func TestCreateSale_itemsFieldValidation(t *testing.T) {
 	assertValidation(t, "unknown payment method", err, "payment.method", "invalid")
 }
 
-func TestCreateSale_replayedIdempotencyKeyIsHandledAtTheHttpxLayer(t *testing.T) {
-	// Idempotency-Key replay/reuse-conflict behaviour is httpx.Idempotent's
-	// own concern (internal/httpx, not internal/sales — this package's
-	// CreateSaleTx is a plain (gen.Sale, error) method with no knowledge of
-	// Idempotency-Key at all, the same split ReceivePurchaseTx/
-	// CreateAdjustmentTx use). See internal/httpx/sales_test.go for those
-	// tests, mirroring internal/httpx/purchases_test.go's own.
-	t.Skip("idempotency replay is tested at the httpx layer: internal/httpx/sales_test.go")
-}
-
 func TestCreateSale_cashierResponseHasNoUnitCostManagerResponseHasIt(t *testing.T) {
 	pool, q := newTestQueries(t)
 	ctx := context.Background()

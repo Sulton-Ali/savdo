@@ -285,7 +285,7 @@ func (h *Handler) CreateSaleTx(ctx context.Context, qtx *db.Queries, body *gen.S
 		return gen.Sale{}, fmt.Errorf("sales: load shop timezone: %w", err)
 	}
 
-	lines, err := resolveSaleItems(ctx, qtx, authCtx.ShopID, body.Items, time.Now(), shopLoc)
+	lines, err := resolveSaleItems(ctx, qtx, authCtx.ShopID, body.Items, h.svc.now(), shopLoc)
 	if err != nil {
 		return gen.Sale{}, err
 	}

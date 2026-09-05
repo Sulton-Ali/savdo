@@ -1031,6 +1031,42 @@ func (q *Queries) NextSaleNumber(ctx context.Context, id uuid.UUID) (int64, erro
 	return column_1, err
 }
 
+const sumReturnedForSaleItem = `-- name: SumReturnedForSaleItem :one
+SELECT
+    COALESCE(sum(ri.qty), 0)::numeric(12,3) AS returned_qty,
+    COALESCE(sum(ri.line_total), 0)::numeric(14,2) AS returned_amount
+FROM sale_items ri
+JOIN sales rs ON rs.id = ri.sale_id AND rs.shop_id = ri.shop_id
+WHERE ri.shop_id = $1 AND ri.original_sale_item_id = $2
+    AND rs.kind = 'return' AND rs.status = 'completed'
+`
+
+type SumReturnedForSaleItemParams struct {
+	ShopID             uuid.UUID  `json:"shop_id"`
+	OriginalSaleItemID *uuid.UUID `json:"original_sale_item_id"`
+}
+
+type SumReturnedForSaleItemRow struct {
+	ReturnedQty    pgtype.Numeric `json:"returned_qty"`
+	ReturnedAmount pgtype.Numeric `json:"returned_amount"`
+}
+
+// Sums the qty and line_total already refunded against one original sale
+// item, counting only completed returns (a voided return never happened)
+// — the return refund cap (D-64): the cumulative refunded amount for a
+// line must never exceed its net share of the original line_total, and
+// the last partial return of a line must exactly zero out the remainder.
+// Called after GetSaleItemsForUpdate has locked the original sale's item
+// rows, so a concurrent second return against the same line blocks until
+// this transaction commits or rolls back (GetSaleItemsForUpdate's own doc
+// comment).
+func (q *Queries) SumReturnedForSaleItem(ctx context.Context, arg SumReturnedForSaleItemParams) (SumReturnedForSaleItemRow, error) {
+	row := q.db.QueryRow(ctx, sumReturnedForSaleItem, arg.ShopID, arg.OriginalSaleItemID)
+	var i SumReturnedForSaleItemRow
+	err := row.Scan(&i.ReturnedQty, &i.ReturnedAmount)
+	return i, err
+}
+
 const voidSale = `-- name: VoidSale :one
 UPDATE sales
 SET status = 'voided', voided_at = now(), voided_by = $1, void_reason = $2

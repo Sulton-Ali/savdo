@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"regexp"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/shopspring/decimal"
 
@@ -95,6 +96,49 @@ var errDeadlock = &apierr.Error{
 // computed discount_amount is greater than the sale's subtotal (D-57,
 // contracts/openapi.yaml's POST /sales 409 description).
 var errDiscountExceedsSubtotal = &apierr.Error{Status: http.StatusConflict, Code: gen.DISCOUNTEXCEEDSSUBTOTAL}
+
+// errSaleAlreadyVoided is SALE_ALREADY_VOIDED (409): VoidSaleTx was called
+// on a sale whose status is already 'voided' — also the answer to a
+// return whose original sale is voided (D-58/D-61 both require a
+// completed original).
+var errSaleAlreadyVoided = &apierr.Error{Status: http.StatusConflict, Code: gen.SALEALREADYVOIDED}
+
+// errSaleVoidWindowClosed is SALE_VOID_WINDOW_CLOSED (409): the sale's
+// completed_at calendar date, in the shop's own timezone, is not today
+// (D-59) — the correction from here on is a return, not a void.
+var errSaleVoidWindowClosed = &apierr.Error{Status: http.StatusConflict, Code: gen.SALEVOIDWINDOWCLOSED}
+
+// errSaleHasReturns is SALE_HAS_RETURNS (409): a completed return already
+// references this sale (D-62) — voiding it now would restore stock twice
+// (once for the return, once for the void).
+var errSaleHasReturns = &apierr.Error{Status: http.StatusConflict, Code: gen.SALEHASRETURNS}
+
+// errSaleNotVoidable is SALE_NOT_VOIDABLE (409): VoidSaleTx was called on
+// a return-kind sale (D-66) — a return is final; a wrong one is corrected
+// by selling the item again, not by voiding the return.
+var errSaleNotVoidable = &apierr.Error{Status: http.StatusConflict, Code: gen.SALENOTVOIDABLE}
+
+// errSaleNotReturnable is SALE_NOT_RETURNABLE (409): CreateSaleReturnTx
+// was called with a return-kind sale as its target (D-66's own "returns
+// are final" — a return of a return) — a 409, not 400, because
+// originalSaleId is a path parameter naming a real sale, not a malformed
+// request field (review ruling: the request carries no `originalSaleId`
+// field for a 400 VALIDATION_FAILED `details.fields` entry to name).
+var errSaleNotReturnable = &apierr.Error{Status: http.StatusConflict, Code: gen.SALENOTRETURNABLE}
+
+// errReturnExceedsSold builds RETURN_EXCEEDS_SOLD (409): the requested
+// return quantity for body.items[index], added to what that line already
+// has returned, would exceed what was sold (D-58). Both index (the
+// request-array position, for a client rendering "line N") and
+// saleItemId (the contract's own documented details field,
+// contracts/openapi.yaml's POST /sales/{id}/return 409 description) are
+// reported.
+func errReturnExceedsSold(index int, saleItemID uuid.UUID) *apierr.Error {
+	return &apierr.Error{
+		Status: http.StatusConflict, Code: gen.RETURNEXCEEDSSOLD,
+		Details: map[string]any{"index": index, "saleItemId": saleItemID.String()},
+	}
+}
 
 // mapMoveError turns a stock.Move error into the *apierr.Error
 // docs/05-API.md's POST /sales promises: a deadlock (SQLSTATE 40P01,
