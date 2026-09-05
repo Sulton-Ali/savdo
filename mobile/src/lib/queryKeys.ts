@@ -131,3 +131,16 @@ export const purchasesKeys = {
     ["purchases", "list", filters] as const,
   detail: (id: string) => ["purchases", "detail", id] as const,
 };
+
+/** Sales query keys (Phase 5 T4), same shape/reasoning as `catalogKeys`. */
+export const salesKeys = {
+  list: (filters: { from?: string; to?: string; customerId?: string }) =>
+    ["sales", "list", filters] as const,
+  detail: (id: string) => ["sales", "detail", id] as const,
+};
+
+/** Customers query keys (Phase 5 T4), same shape/reasoning as `catalogKeys`. */
+export const customersKeys = {
+  list: (filters: { q?: string }) => ["customers", "list", filters] as const,
+  detail: (id: string) => ["customers", "detail", id] as const,
+};

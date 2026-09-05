@@ -754,6 +754,51 @@
       "drafts": "Qoralamalar",
       "draftsEmpty": "Qoralama xaridlar yo'q",
       "saveAndReceive": "Saqlash va qabul qilish"
+    },
+    "sale": {
+      "location": {
+        "title": "Filialni tanlang",
+        "placeholder": "Filial tanlanmagan"
+      },
+      "addItem": "Mahsulot qo‘shish",
+      "cart": {
+        "empty": "Savat bo‘sh — mahsulot qidirish uchun «Mahsulot qo‘shish» tugmasini bosing."
+      },
+      "qty": {
+        "decrease": "Sonini kamaytirish",
+        "increase": "Sonini oshirish"
+      },
+      "discount": {
+        "kindNone": "Chegirmasiz",
+        "valuePlaceholder": "Miqdor",
+        "reasonPlaceholder": "Sababi (ixtiyoriy)"
+      },
+      "customer": {
+        "none": "Mijoz biriktirilmagan",
+        "attach": "Mijoz biriktirish",
+        "change": "Mijozni almashtirish",
+        "newCustomer": "Yangi mijoz"
+      },
+      "estimate": "Taxminiy — to‘lovda server aniq summani tasdiqlaydi",
+      "pay": "To‘lash",
+      "paying": "Bajarilmoqda…",
+      "locationRequired": "Sotuvni yakunlashdan oldin filialni tanlang.",
+      "errors": {
+        "networkUnknown": "Aloqa uzildi. Sotuv allaqachon qayd etilgan bo‘lishi mumkin — qayta to‘lashdan oldin bugungi ro‘yxatni tekshiring."
+      },
+      "list": {
+        "title": "Bugungi sotuvlar",
+        "empty": "Bugun hali sotuvlar yo‘q."
+      }
+    },
+    "customers": {
+      "list": {
+        "empty": "Mijozlar topilmadi"
+      },
+      "new": {
+        "duplicatePhone": "Bu telefon raqamli mijoz allaqachon mavjud.",
+        "forSaleHint": "Bu mijoz joriy sotuvga biriktiriladi."
+      }
     }
   }
 }

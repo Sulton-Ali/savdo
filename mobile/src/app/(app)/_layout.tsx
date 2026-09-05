@@ -64,11 +64,14 @@ export default function AppTabsLayout() {
           }}
         />
         <Tabs.Screen
-          name="sale/index"
-          options={{
+          name="sale"
+          options={({ route }) => ({
             title: t("nav.quickSale"),
             tabBarIcon: ({ color, size }) => <ShoppingCart color={color} size={size} />,
-          }}
+            // Same rule as "products" below: only the nested Stack's
+            // initial "index" route reuses this outer header.
+            headerShown: (getFocusedRouteNameFromRoute(route) ?? "index") === "index",
+          })}
         />
         <Tabs.Screen
           name="products"
@@ -83,11 +86,13 @@ export default function AppTabsLayout() {
           })}
         />
         <Tabs.Screen
-          name="customers/index"
-          options={{
+          name="customers"
+          options={({ route }) => ({
             title: t("nav.customers"),
             tabBarIcon: ({ color, size }) => <Users color={color} size={size} />,
-          }}
+            // Same rule as "products"/"sale" above.
+            headerShown: (getFocusedRouteNameFromRoute(route) ?? "index") === "index",
+          })}
         />
         <Tabs.Screen
           name="stock"
