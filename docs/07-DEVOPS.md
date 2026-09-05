@@ -75,6 +75,8 @@ running; reviewers and mergers leave Postgres up and never kill a :8080 process 
 not start; verification dev servers use alternate ports (admin 5174, web 3001, Expo 8093).
 The orchestrator sequences any task that needs exclusive use of the stack. At most one testcontainers-heavy gate (`make verify`, `go test ./...`) runs at a time — parallel gates produced test timeouts and a container-start deadline on 2026-09-04 (O-13).
 
+`MEDIA_DIR` defaults to `../infra/data/media` relative to the API process cwd (`api/internal/config/config.go`), so every git worktree has its own media root; a seed run in one worktree and an API started from another see different, independently empty folders and media URLs 404. When running the API for a phone/emulator smoke from a worktree, either seed from that same worktree or set `MEDIA_DIR` to the absolute path of the primary checkout's `infra/data/media`.
+
 ## The gate: `make verify`
 
 Runs, in order, and stops at the first failure:
