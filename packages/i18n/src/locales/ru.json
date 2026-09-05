@@ -737,6 +737,12 @@
         "cameraPermissionDenied": "Для фото нужен доступ к камере.",
         "libraryPermissionDenied": "Для выбора фото нужен доступ к галерее."
       }
+    },
+    "home": {
+      "topProducts": {
+        "title": "Топ товаров",
+        "empty": "Нет продаж за этот период"
+      }
     }
   }
 }

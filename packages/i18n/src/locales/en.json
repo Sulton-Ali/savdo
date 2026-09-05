@@ -737,6 +737,12 @@
         "cameraPermissionDenied": "Camera access is needed to take a photo.",
         "libraryPermissionDenied": "Photo library access is needed to choose a photo."
       }
+    },
+    "home": {
+      "topProducts": {
+        "title": "Top products",
+        "empty": "No sales in this period yet"
+      }
     }
   }
 }

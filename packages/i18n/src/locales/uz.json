@@ -737,6 +737,12 @@
         "cameraPermissionDenied": "Suratga olish uchun kamera ruxsati kerak.",
         "libraryPermissionDenied": "Rasm tanlash uchun galereya ruxsati kerak."
       }
+    },
+    "home": {
+      "topProducts": {
+        "title": "Top mahsulotlar",
+        "empty": "Bu davrda sotuvlar yo‘q"
+      }
     }
   }
 }
