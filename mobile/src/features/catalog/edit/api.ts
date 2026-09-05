@@ -79,30 +79,62 @@ export async function updateVariant(
 }
 
 /**
+ * Reads a local `file://`/`content://` URI (from `expo-image-picker`) into a
+ * real `Blob`, via `XMLHttpRequest`'s `responseType: "blob"` — the
+ * long-standing React Native technique for turning a picked asset into a
+ * `Blob` without a native-file-reading dependency of its own. Deliberately
+ * *not* calling the global `fetch` on this URI directly: Expo SDK 57
+ * installs its own WinterCG-compliant `fetch` as that global
+ * (`expo/src/winter/runtime.native.ts`'s `install("fetch", ...)`,
+ * confirmed against the installed package, not training data), which talks
+ * to a native HTTP client and does not understand a local file URI;
+ * `XMLHttpRequest` is a separate global that SDK 57 leaves untouched, so it
+ * still reads local files exactly as RN always has.
+ */
+function readAsBlob(uri: string): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.responseType = "blob";
+    xhr.onload = () => resolve(xhr.response as Blob);
+    xhr.onerror = () => reject(new Error(`readAsBlob: failed to read ${uri}`));
+    xhr.open("GET", uri, true);
+    xhr.send();
+  });
+}
+
+/**
  * `POST /media` — requires `catalog.write` (multipart). Builds real
- * `multipart/form-data` from React Native's own file-object convention
- * (`{ uri, name, type }`, not a web `File`/`Blob` — there is no such thing
- * on-device): RN's `FormData` polyfill (`Libraries/Network/FormData.js`)
- * special-cases exactly this shape and forwards it to the native
- * `XMLHttpRequest` module, and `lib/api.ts`'s per-request wrapper passes a
- * `FormData` body through untouched (never `.text()`s it), so this is the
- * only place besides `admin/src/catalog/api.ts`'s web `File`/`Blob`
- * version that needs a `bodySerializer` override at all. The generated
- * `MediaUpload` schema types `file` as `string` (openapi-typescript's
- * rendering of `format: binary`); the wire body is real multipart, so this
- * casts around that mismatch rather than widening the contract by hand
- * (ADR-002).
+ * `multipart/form-data` from a `Blob` (via `readAsBlob`), not RN's classic
+ * `{ uri, name, type }` FormData file-object convention: that shape is
+ * accepted by `FormData.append` under Expo SDK 57's own global `fetch`
+ * (`expo/src/winter/FormData.ts`'s patched `append` even documents the
+ * overload), but that `fetch`'s multipart body builder
+ * (`expo/src/winter/fetch/convertFormData.ts`) only actually serializes a
+ * part that is a real `Blob` or has a `.bytes()` method — a plain
+ * `{uri, name, type}` part throws `Unsupported FormDataPart implementation`
+ * at request time (reproduced on-device: the 8.x KB test upload never even
+ * reached the API's access log). The generated `MediaUpload` schema types
+ * `file` as `string` (openapi-typescript's rendering of `format: binary`);
+ * the wire body is real multipart, so this casts around that mismatch
+ * rather than widening the contract by hand (ADR-002).
  */
 export async function uploadMedia(
   uri: string,
   mimeType: string,
   fileName: string,
 ): Promise<MediaFile> {
+  const rawBlob = await readAsBlob(uri);
+  // `XMLHttpRequest`'s blob response type isn't always the picker's own
+  // `mimeType` (e.g. an extensionless cache path can come back
+  // `application/octet-stream`); rewrap only when it actually differs, so
+  // the multipart part's `Content-Type` always matches what the caller
+  // asked to upload.
+  const blob = rawBlob.type === mimeType ? rawBlob : new Blob([rawBlob], { type: mimeType });
   const { data, error, response } = await api.POST("/media", {
-    body: { file: uri } as unknown as { file: string },
+    body: { file: blob } as unknown as { file: string },
     bodySerializer() {
       const formData = new FormData();
-      formData.append("file", { uri, name: fileName, type: mimeType } as unknown as Blob);
+      formData.append("file", blob, fileName);
       return formData;
     },
   });
