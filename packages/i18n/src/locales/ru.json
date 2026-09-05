@@ -699,6 +699,23 @@
       "tabs": {
         "stock": "Склад"
       }
+    },
+    "catalog": {
+      "list": {
+        "empty": "Товары не найдены"
+      },
+      "detail": {
+        "variantsTitle": "Варианты",
+        "columns": {
+          "variant": "Вариант",
+          "price": "Цена"
+        }
+      },
+      "picker": {
+        "searchPlaceholder": "Поиск товара или варианта",
+        "empty": "Ничего не найдено",
+        "qtyAvailable": "Доступно: {{qty}}"
+      }
     }
   }
 }

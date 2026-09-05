@@ -699,6 +699,23 @@
       "tabs": {
         "stock": "Qoldiq"
       }
+    },
+    "catalog": {
+      "list": {
+        "empty": "Mahsulotlar topilmadi"
+      },
+      "detail": {
+        "variantsTitle": "Variantlar",
+        "columns": {
+          "variant": "Variant",
+          "price": "Narx"
+        }
+      },
+      "picker": {
+        "searchPlaceholder": "Mahsulot yoki variant qidirish",
+        "empty": "Hech narsa topilmadi",
+        "qtyAvailable": "Mavjud: {{qty}}"
+      }
     }
   }
 }
