@@ -4,8 +4,18 @@ import { ApiAuthError, login as apiLogin, logout as apiLogout, fetchMe } from ".
 import { ME_QUERY_KEY, TOKEN_QUERY_KEY } from "./queryKeys";
 import { clearToken, getToken, setToken } from "./token";
 
+// Mounted `useSession()` callers (the root layout and the `(app)` tabs
+// layout both call it) share these cache entries; a `staleTime` stops the
+// second mount from immediately firing a redundant background `/auth/me`
+// refetch just because it subscribed a few seconds after the first.
+const SESSION_STALE_TIME_MS = 60_000;
+
 function tokenQueryOptions() {
-  return queryOptions({ queryKey: TOKEN_QUERY_KEY, queryFn: async () => !!(await getToken()) });
+  return queryOptions({
+    queryKey: TOKEN_QUERY_KEY,
+    queryFn: async () => !!(await getToken()),
+    staleTime: SESSION_STALE_TIME_MS,
+  });
 }
 
 function meQueryOptions(enabled: boolean) {
@@ -13,6 +23,7 @@ function meQueryOptions(enabled: boolean) {
     queryKey: ME_QUERY_KEY,
     queryFn: fetchMe,
     enabled,
+    staleTime: SESSION_STALE_TIME_MS,
     // A `401 UNAUTHENTICATED` is a real "logged out" signal — `lib/api.ts`'s
     // middleware already clears the token for it, which disables this query
     // on the next render, so retrying it would be pointless. Anything else
@@ -40,16 +51,29 @@ export function useSession() {
 
   return {
     isLoading: tokenQuery.isLoading || (hasToken && meQuery.isLoading),
-    /** A token exists but `GET /auth/me` couldn't be reached (offline, a
-     * 5xx) after its retries — the token itself is still valid, so this is
-     * an outage, not a logout. A `401 UNAUTHENTICATED` never reaches this
-     * state: the `lib/api.ts` middleware clears `hasToken` first. */
-    isUnreachable: hasToken && meQuery.isError,
-    // Marks the me query stale and, since it's actively observed here with
-    // `enabled: true`, triggers a new attempt — same mechanism `useLogin`
-    // uses below.
-    retry: () => {
-      void queryClient.invalidateQueries({ queryKey: ME_QUERY_KEY });
+    /**
+     * A token exists but `me` has never successfully loaded for it — offline
+     * at startup, a 5xx, a token bound to a LAN IP that's since gone dark.
+     * Deliberately keyed on `!meQuery.data`, not `meQuery.isError`: query-core
+     * keeps the last successful `data` around across a failed *background*
+     * refetch (e.g. a stale-time-driven retry while the user is happily
+     * looking at their dashboard), and reacting to `isError` there would tear
+     * down the whole authenticated `Stack` — and its navigation state — over
+     * a transient blip. A `401 UNAUTHENTICATED` never reaches this state
+     * either: the `lib/api.ts` middleware clears `hasToken` first.
+     */
+    isUnreachable: hasToken && !meQuery.data,
+    /** Retries `me`; resolves once the refetch settles so a caller can show
+     * a pending state instead of a button that appears to do nothing. */
+    retry: () => queryClient.invalidateQueries({ queryKey: ME_QUERY_KEY }),
+    /** Escapes a stuck outage: clears the (possibly stale-IP-bound) token
+     * and the whole cache and returns to the login screen, same as
+     * `useLogout`'s cache handling (ADR-010) — but without a server round
+     * trip, since the server is exactly what's unreachable right now. */
+    escapeUnreachable: async () => {
+      await clearToken();
+      queryClient.clear();
+      queryClient.setQueryData(TOKEN_QUERY_KEY, false);
     },
     isAuthenticated: hasToken && !!meQuery.data,
     me: meQuery.data,
@@ -63,12 +87,14 @@ export function useSession() {
 }
 
 /** Logs in against the server currently configured in `serverUrl.ts` and
- * stores the returned bearer token. */
+ * stores the returned bearer token. Resolves to `{ user }` only — the token
+ * itself is never returned from the mutation, so it can't sit in the
+ * mutation cache (AGENTS.md hard rule 9). */
 export function useLogin() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: apiLogin,
-    onSuccess: async ({ token }) => {
+    mutationFn: async (credentials: { username: string; password: string }) => {
+      const { token, user } = await apiLogin(credentials);
       await setToken(token);
       queryClient.setQueryData(TOKEN_QUERY_KEY, true);
       // `me` may already be cached in an error state from a failed startup
@@ -77,6 +103,7 @@ export function useLogin() {
       // and the app would stay stuck on the login screen despite a
       // successful login.
       await queryClient.invalidateQueries({ queryKey: ME_QUERY_KEY });
+      return { user };
     },
   });
 }

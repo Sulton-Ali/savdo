@@ -16,16 +16,24 @@ import { getServerUrl } from "./serverUrl";
 const TOKEN_KEY = "savdo.token";
 const TOKEN_URL_KEY = "savdo.token.url";
 
-export async function getToken(): Promise<string | null> {
-  const [token, issuedFor, currentUrl] = await Promise.all([
+/**
+ * @param currentUrl The server URL to check the token against. Callers that
+ * already resolved it for the same request (`lib/api.ts`) must pass that
+ * exact value, so the URL-binding check and the request's destination can
+ * never straddle a `setServerUrl` and use two different URLs. Callers with
+ * no request of their own (`lib/session.ts`'s token-presence check) can
+ * omit it and let this function resolve its own.
+ */
+export async function getToken(currentUrl?: string): Promise<string | null> {
+  const [token, issuedFor, resolvedUrl] = await Promise.all([
     SecureStore.getItemAsync(TOKEN_KEY),
     SecureStore.getItemAsync(TOKEN_URL_KEY),
-    getServerUrl(),
+    currentUrl ? Promise.resolve(currentUrl) : getServerUrl(),
   ]);
   if (!token) {
     return null;
   }
-  if (issuedFor !== currentUrl) {
+  if (issuedFor !== resolvedUrl) {
     await clearToken();
     return null;
   }

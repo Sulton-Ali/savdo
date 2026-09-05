@@ -70,7 +70,3 @@ export function validateServerUrl(value: string): ServerUrlValidation {
   }
   return "invalid";
 }
-
-export function isValidServerUrl(value: string): boolean {
-  return validateServerUrl(value) === "valid";
-}
