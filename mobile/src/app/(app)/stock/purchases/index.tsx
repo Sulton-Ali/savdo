@@ -2,11 +2,9 @@ import { Redirect, useRouter } from "expo-router";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { ActivityIndicator, FlatList, Pressable, RefreshControl, View } from "react-native";
-
+import { Text } from "@/components/ui/text";
 import { useLocations } from "@/features/catalog/hooks";
 import { usePurchases, useSuppliers } from "@/features/purchases/hooks";
-
-import { Text } from "@/components/ui/text";
 import { formatMoney } from "@/lib/money";
 import { useSession } from "@/lib/session";
 
@@ -34,15 +32,8 @@ export default function PurchaseDraftsScreen() {
     [locations],
   );
 
-  const {
-    data,
-    isPending,
-    isRefetching,
-    refetch,
-    fetchNextPage,
-    hasNextPage,
-    isFetchingNextPage,
-  } = usePurchases("draft");
+  const { data, isPending, isRefetching, refetch, fetchNextPage, hasNextPage, isFetchingNextPage } =
+    usePurchases("draft");
   const purchases = useMemo(() => data?.pages.flatMap((page) => page.items) ?? [], [data]);
 
   if (!can("stock.write")) {

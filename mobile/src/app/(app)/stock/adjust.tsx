@@ -3,18 +3,16 @@ import { useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, View } from "react-native";
-
-import type { Variant } from "@/features/catalog/api";
-import { useLocations } from "@/features/catalog/hooks";
-import { ChipGroup } from "@/features/stock/ChipGroup";
-import { StockApiError, newIdempotencyKey, type AdjustmentReason } from "@/features/stock/api";
-import { ADJUSTMENT_REASONS, normalizeQty } from "@/features/stock/adjustmentForm";
-import { useCreateStockAdjustment } from "@/features/stock/hooks";
-import { VariantPickerModal } from "@/features/stock/VariantPickerModal";
-
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Text } from "@/components/ui/text";
+import type { Variant } from "@/features/catalog/api";
+import { useLocations } from "@/features/catalog/hooks";
+import { ADJUSTMENT_REASONS, normalizeQty } from "@/features/stock/adjustmentForm";
+import { type AdjustmentReason, newIdempotencyKey, StockApiError } from "@/features/stock/api";
+import { ChipGroup } from "@/features/stock/ChipGroup";
+import { useCreateStockAdjustment } from "@/features/stock/hooks";
+import { VariantPickerModal } from "@/features/stock/VariantPickerModal";
 import { useSession } from "@/lib/session";
 
 interface AdjustFormValues {
@@ -111,12 +109,17 @@ export default function AdjustStockScreen() {
       behavior={Platform.OS === "ios" ? "padding" : undefined}
       className="flex-1 bg-background"
     >
-      <ScrollView contentContainerStyle={{ padding: 16, gap: 16 }} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        contentContainerStyle={{ padding: 16, gap: 16 }}
+        keyboardShouldPersistTaps="handled"
+      >
         <View className="gap-1.5">
           <Text variant="small">{t("stock.fields.variant")}</Text>
           <VariantPickerModal
             locationId={locationId ?? activeLocations[0]?.id ?? ""}
-            triggerLabel={selectedVariant ? variantLabel(selectedVariant) : t("stock.picker.variant")}
+            triggerLabel={
+              selectedVariant ? variantLabel(selectedVariant) : t("stock.picker.variant")
+            }
             disabled={activeLocations.length === 0}
             onPick={(variant, qty) => {
               setSelectedVariant(variant);
@@ -232,11 +235,14 @@ export default function AdjustStockScreen() {
           />
         </View>
 
-        {mutation.isError && !(mutation.error instanceof StockApiError && mutation.error.code === "STOCK_INSUFFICIENT") && (
-          <Text variant="small" className="text-destructive">
-            {t("errors.generic")}
-          </Text>
-        )}
+        {mutation.isError &&
+          !(
+            mutation.error instanceof StockApiError && mutation.error.code === "STOCK_INSUFFICIENT"
+          ) && (
+            <Text variant="small" className="text-destructive">
+              {t("errors.generic")}
+            </Text>
+          )}
 
         <Button
           disabled={!selectedVariant || isSubmitting || mutation.isPending}

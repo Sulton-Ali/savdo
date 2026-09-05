@@ -95,9 +95,7 @@ describe("validateAdjustmentForm / isAdjustmentFormValid", () => {
 
   it("requires a valid quantity", () => {
     expect(validateAdjustmentForm({ ...valid, qty: "" }).qty).toBe("stock.errors.qtyRequired");
-    expect(validateAdjustmentForm({ ...valid, qty: "abc" }).qty).toBe(
-      "stock.errors.qtyRequired",
-    );
+    expect(validateAdjustmentForm({ ...valid, qty: "abc" }).qty).toBe("stock.errors.qtyRequired");
   });
 
   it("accepts a negative quantity (lost/damaged) as valid", () => {

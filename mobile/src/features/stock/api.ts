@@ -1,7 +1,6 @@
 import type { components } from "@savdo/api-client";
-
-import { api } from "@/lib/api";
 import type { CursorPage } from "@/features/catalog/api";
+import { api } from "@/lib/api";
 
 export type StockLevel = components["schemas"]["StockLevel"];
 export type StockMovement = components["schemas"]["StockMovement"];

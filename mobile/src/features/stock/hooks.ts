@@ -1,4 +1,10 @@
-import { useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { useMemo } from "react";
 
 import { getProduct } from "@/features/catalog/api";
@@ -85,9 +91,7 @@ export function useLowStockRows(enabled: boolean) {
   });
 
   const rows = useMemo<LowStockRow[]>(() => {
-    const productsById = new Map(
-      productIds.map((id, index) => [id, productQueries[index]?.data]),
-    );
+    const productsById = new Map(productIds.map((id, index) => [id, productQueries[index]?.data]));
     return items.map((item) => {
       const product = productsById.get(item.productId);
       const variant = product?.variants?.find((candidate) => candidate.id === item.variantId);

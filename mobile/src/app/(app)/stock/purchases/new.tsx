@@ -2,11 +2,12 @@ import { Redirect, useRouter } from "expo-router";
 import { useReducer, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, View } from "react-native";
-
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Text } from "@/components/ui/text";
 import type { Variant } from "@/features/catalog/api";
 import { useLocations } from "@/features/catalog/hooks";
-import { ChipGroup } from "@/features/stock/ChipGroup";
-import { VariantPickerModal } from "@/features/stock/VariantPickerModal";
+import { newIdempotencyKey, type Purchase, PurchasesApiError } from "@/features/purchases/api";
 import {
   buildCreateBody,
   createInitialDraft,
@@ -15,12 +16,9 @@ import {
   normalizeUnitCost,
   purchaseDraftReducer,
 } from "@/features/purchases/draft";
-import { newIdempotencyKey, PurchasesApiError, type Purchase } from "@/features/purchases/api";
 import { useCreatePurchase, useReceivePurchase, useSuppliers } from "@/features/purchases/hooks";
-
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Text } from "@/components/ui/text";
+import { ChipGroup } from "@/features/stock/ChipGroup";
+import { VariantPickerModal } from "@/features/stock/VariantPickerModal";
 import { formatMoney } from "@/lib/money";
 import { useSession } from "@/lib/session";
 
@@ -134,7 +132,10 @@ export default function NewPurchaseScreen() {
     }
 
     try {
-      await receivePurchase.mutateAsync({ id: purchaseId, idempotencyKey: draft.receiveIdempotencyKey });
+      await receivePurchase.mutateAsync({
+        id: purchaseId,
+        idempotencyKey: draft.receiveIdempotencyKey,
+      });
     } catch (error) {
       if (error instanceof PurchasesApiError && error.code === "STOCK_INSUFFICIENT") {
         const { available, variantId } = error.details as StockInsufficientDetails;
@@ -158,7 +159,10 @@ export default function NewPurchaseScreen() {
       behavior={Platform.OS === "ios" ? "padding" : undefined}
       className="flex-1 bg-background"
     >
-      <ScrollView contentContainerStyle={{ padding: 16, gap: 16 }} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        contentContainerStyle={{ padding: 16, gap: 16 }}
+        keyboardShouldPersistTaps="handled"
+      >
         {received && (
           <View className="rounded-md bg-primary/10 p-3">
             <Text className="text-primary">
@@ -267,7 +271,9 @@ export default function NewPurchaseScreen() {
                 excludeVariantIds={draft.lines.map((line) => line.variantId)}
                 disabled={activeLocations.length === 0}
                 triggerLabel={
-                  pendingVariant ? variantLabel(pendingVariant) : t("purchases.form.items.productPlaceholder")
+                  pendingVariant
+                    ? variantLabel(pendingVariant)
+                    : t("purchases.form.items.productPlaceholder")
                 }
                 onPick={setPendingVariant}
               />
@@ -310,11 +316,7 @@ export default function NewPurchaseScreen() {
         )}
 
         <Button
-          disabled={
-            submitting ||
-            received ||
-            (editable && !isPurchaseDraftValid(draft))
-          }
+          disabled={submitting || received || (editable && !isPurchaseDraftValid(draft))}
           onPress={handleSaveAndReceive}
         >
           {submitting ? <ActivityIndicator /> : <Text>{t("mobile.purchases.saveAndReceive")}</Text>}

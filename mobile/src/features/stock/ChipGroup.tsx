@@ -57,9 +57,7 @@ export function ChipGroup<T extends string>({
               disabled && "opacity-50",
             )}
           >
-            <Text className={selected ? "text-primary-foreground" : undefined}>
-              {option.label}
-            </Text>
+            <Text className={selected ? "text-primary-foreground" : undefined}>{option.label}</Text>
           </Pressable>
         );
       })}

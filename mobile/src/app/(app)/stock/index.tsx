@@ -2,18 +2,14 @@ import { useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ActivityIndicator, FlatList, RefreshControl, View } from "react-native";
-
-import { VariantPicker } from "@/features/catalog/VariantPicker";
-import { useLocations } from "@/features/catalog/hooks";
-import { formatQty } from "@/features/catalog/qty";
-import { ChipGroup } from "@/features/stock/ChipGroup";
-import { useLowStockRows } from "@/features/stock/hooks";
-import {
-  getPreferredLocationId,
-  setPreferredLocationId,
-} from "@/features/stock/preferredLocation";
 import { Button } from "@/components/ui/button";
 import { Text } from "@/components/ui/text";
+import { useLocations } from "@/features/catalog/hooks";
+import { formatQty } from "@/features/catalog/qty";
+import { VariantPicker } from "@/features/catalog/VariantPicker";
+import { ChipGroup } from "@/features/stock/ChipGroup";
+import { useLowStockRows } from "@/features/stock/hooks";
+import { getPreferredLocationId, setPreferredLocationId } from "@/features/stock/preferredLocation";
 import { useSession } from "@/lib/session";
 
 type Section = "levels" | "low";

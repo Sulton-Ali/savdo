@@ -2,12 +2,10 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal, Pressable, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-
-import type { Variant } from "@/features/catalog/api";
-import { VariantPicker } from "@/features/catalog/VariantPicker";
-
 import { Button } from "@/components/ui/button";
 import { Text } from "@/components/ui/text";
+import type { Variant } from "@/features/catalog/api";
+import { VariantPicker } from "@/features/catalog/VariantPicker";
 
 /**
  * A button that opens the shared `VariantPicker` (T2) in a full-screen

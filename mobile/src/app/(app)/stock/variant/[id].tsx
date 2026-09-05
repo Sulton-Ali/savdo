@@ -3,13 +3,11 @@ import { Redirect, useLocalSearchParams } from "expo-router";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { ActivityIndicator, FlatList, View } from "react-native";
-
+import { Text } from "@/components/ui/text";
 import { getProduct } from "@/features/catalog/api";
 import { useLocations } from "@/features/catalog/hooks";
 import { formatQty } from "@/features/catalog/qty";
 import { useVariantMovements, useVariantStockLevels } from "@/features/stock/hooks";
-
-import { Text } from "@/components/ui/text";
 import { catalogKeys } from "@/lib/queryKeys";
 import { useSession } from "@/lib/session";
 
@@ -41,7 +39,9 @@ export default function VariantMovementsScreen() {
   const variantLabel = variant
     ? Object.entries(variant.attributes)
         .map(([key, val]) => `${key}: ${val}`)
-        .join(", ") || variant.sku || ""
+        .join(", ") ||
+      variant.sku ||
+      ""
     : "";
 
   const { data: locations } = useLocations();
