@@ -496,6 +496,22 @@ func TestNextSaleNumber_gapFreeUnderConcurrencyWithBarrier(t *testing.T) {
 // and once unblocked, must see A's now-committed return. Without the
 // lock, two concurrent partial returns could both read "0 already
 // returned" and jointly over-refund past what was sold (D-58).
+//
+// This does not compare wall-clock timestamps taken in different
+// goroutines (that comparison is flaky under CPU load: two independent
+// time.Now() calls a few dozen microseconds apart can land in either
+// order regardless of which happened "first" from Postgres's point of
+// view). Instead it proves blocking behaviourally: (1) B is still not
+// done a bounded, generous interval after A has issued its uncommitted
+// insert — bDone must NOT fire before that timeout; (2) once A commits,
+// B completes within a separate, generous timeout and its own
+// CountCompletedReturnsForSale call sees A's committed return. The
+// ordering that makes step (1) meaningful — B's blocking call must
+// actually have reached Postgres before A commits — is guaranteed by a
+// handshake: B signals bAboutToCall right before invoking
+// GetSaleItemsForUpdate, and the main goroutine waits to receive that
+// signal (not a fixed sleep) before proceeding to the "still blocked"
+// check and then A's commit.
 func TestGetSaleItemsForUpdate_secondCallerBlocksUntilFirstCommits(t *testing.T) {
 	f := newSalesFixture(t, "shop-sales-return-lock")
 	ctx := context.Background()
@@ -534,65 +550,73 @@ func TestGetSaleItemsForUpdate_secondCallerBlocksUntilFirstCommits(t *testing.T)
 	// A now holds the row lock on original's sale_items and has an
 	// uncommitted return referencing them.
 
-	bUnblocked := make(chan time.Time, 1)
-	bErr := make(chan error, 1)
+	bAboutToCall := make(chan struct{})
+	bDone := make(chan error, 1)
 	go func() {
 		txB, err := f.pool.Begin(ctx)
 		if err != nil {
-			bErr <- err
+			bDone <- err
 			return
 		}
 		defer func() { _ = txB.Rollback(ctx) }() // no-op once committed
 		qB := db.New(txB)
+
+		close(bAboutToCall) // signals: about to issue the blocking call
 		if _, err := qB.GetSaleItemsForUpdate(ctx, db.GetSaleItemsForUpdateParams{ShopID: f.shopID, SaleID: original.ID}); err != nil {
-			bErr <- err
+			bDone <- err
 			return
 		}
-		bUnblocked <- time.Now()
 
 		// B must see A's committed return when it computes "already
 		// returned" — proving no lost-update race between the two.
 		count, err := qB.CountCompletedReturnsForSale(ctx, db.CountCompletedReturnsForSaleParams{ShopID: f.shopID, OriginalSaleID: &original.ID})
 		if err != nil {
-			bErr <- err
+			bDone <- err
 			return
 		}
 		if count != 1 {
-			bErr <- fmt.Errorf("want B to see A's committed return once unblocked, count=%d", count)
+			bDone <- fmt.Errorf("want B to see A's committed return once unblocked, count=%d", count)
 			return
 		}
 		if err := txB.Commit(ctx); err != nil {
-			bErr <- err
+			bDone <- err
 			return
 		}
-		bErr <- nil
+		bDone <- nil
 	}()
 
-	// Give B's goroutine time to reach Postgres and actually start
-	// blocking on A's row lock before A commits. The ordering the
-	// assertions below check (A locks+inserts, then A commits, then B's
-	// unblock is timestamped) is guaranteed by the handshake structure
-	// itself, not by this sleep — the sleep only avoids racing B's
-	// dispatch against A's commit below.
-	time.Sleep(300 * time.Millisecond)
+	// Wait for B to actually reach the point of calling
+	// GetSaleItemsForUpdate before checking that it is blocked. This is
+	// an ordering guarantee (a channel receive), not a timing guess: it
+	// only proves B has *started* its call, not that it has reached
+	// Postgres and begun waiting on the row lock, so the "still blocked"
+	// check below also needs a bounded wait of its own.
+	<-bAboutToCall
+
+	// B must still be blocked a good while after it began its call and
+	// while A's return is still uncommitted. This does not prove B will
+	// never finish without A's commit (that would require an infinite
+	// wait), only that it does not finish within a generous window —
+	// which is the behavioural signature of being blocked on the row
+	// lock rather than racing through.
+	select {
+	case err := <-bDone:
+		t.Fatalf("want B's GetSaleItemsForUpdate to still be blocked while A's return is uncommitted, but B finished (err=%v)", err)
+	case <-time.After(300 * time.Millisecond):
+		// expected: B is still blocked.
+	}
 
 	if err := txA.Commit(ctx); err != nil {
 		t.Fatalf("Commit (A): %v", err)
 	}
-	aCommittedAt := time.Now()
 
 	select {
-	case err := <-bErr:
+	case err := <-bDone:
 		if err != nil {
 			t.Fatalf("transaction B: %v", err)
 		}
 	case <-time.After(10 * time.Second):
-		t.Fatal("timed out waiting for transaction B — GetSaleItemsForUpdate did not block/unblock as expected")
-	}
-
-	bUnblockedAt := <-bUnblocked
-	if bUnblockedAt.Before(aCommittedAt) {
-		t.Fatalf("want B's GetSaleItemsForUpdate to unblock no earlier than A's commit (A committed %s, B unblocked %s)", aCommittedAt, bUnblockedAt)
+		t.Fatal("timed out waiting for transaction B — GetSaleItemsForUpdate did not unblock after A's commit")
 	}
 }
 
