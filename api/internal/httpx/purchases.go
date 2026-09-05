@@ -90,7 +90,7 @@ func (s server) ReceivePurchase(ctx context.Context, req gen.ReceivePurchaseRequ
 	if err := ValidateIdempotencyKey(key); err != nil {
 		return nil, err
 	}
-	hash, err := RequestHash(http.MethodPost, receivePurchasePath(req.Id), authCtx.UserID, nil)
+	hash, err := RequestHash(http.MethodPost, receivePurchasePath(req.Id), authCtx.UserID, authCtx.Role, nil)
 	if err != nil {
 		return nil, err
 	}

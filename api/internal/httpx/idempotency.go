@@ -64,39 +64,45 @@ const maxIdempotencyKeyLen = 128
 // RequestHash is the "same key, same request, same caller" fingerprint
 // docs/05-API.md § Conventions and docs/04-DATA-MODEL.md § 3
 // (idempotency_keys) describe: SHA-256 of the method, the path, the acting
-// user's id and a canonical rendering of body. actorID is part of the hash
-// (MINOR 7), not just the lookup key, because Idempotent's stored response
-// body was already role-shaped for whoever made the first request (e.g.
-// unitCost present or null per their cost.read) — Phase 4 shares this
-// helper across cashiers and owners on the same shop, so two different
-// actors reusing the same client-chosen key must never let the second one
-// silently receive a body rendered for the first; they get 409
-// IDEMPOTENCY_KEY_REUSED instead, the same as any other hash mismatch.
-// "Canonical" here means json.Marshal of the request's already-decoded Go
-// value (the strict server hands every handler a typed *Body, never raw
-// bytes) — deterministic because it walks the struct's fields in their
-// fixed declaration order, not a map, so two decodes of logically the same
-// JSON always marshal back to the same bytes regardless of how the
-// client's original bytes were formatted or ordered.
+// user's id, the acting user's role and a canonical rendering of body.
+// actorID is part of the hash (MINOR 7), not just the lookup key, because
+// Idempotent's stored response body was already role-shaped for whoever
+// made the first request (e.g. unitCost present or null per their
+// cost.read) — Phase 4 shares this helper across cashiers and owners on
+// the same shop, so two different actors reusing the same client-chosen
+// key must never let the second one silently receive a body rendered for
+// the first; they get 409 IDEMPOTENCY_KEY_REUSED instead, the same as any
+// other hash mismatch. role is folded in for the same reason, one level
+// down: the same actorID reusing a key after a role change (e.g. promoted
+// cashier -> manager) must not replay a response rendered for their old
+// role's permissions either — a role change is rare but not impossible
+// within a stored response's window, and the fix is the same one-line
+// fold actorID itself already needed. "Canonical" here means json.Marshal
+// of the request's already-decoded Go value (the strict server hands
+// every handler a typed *Body, never raw bytes) — deterministic because
+// it walks the struct's fields in their fixed declaration order, not a
+// map, so two decodes of logically the same JSON always marshal back to
+// the same bytes regardless of how the client's original bytes were
+// formatted or ordered.
 //
 // The resolved locale is deliberately NOT part of the fingerprint (T4
-// review residual 3): method, path, actorID and body say nothing about
-// Accept-Language, and Idempotent's own stored response is whatever body
-// fn(qtx) rendered the first time — for POST /purchases/{id}/receive that
-// includes each PurchaseItem's productName/variantLabel, resolved once,
-// at receive time, in whatever locale that first request asked for. A
-// replay with the same key returns that first rendering unchanged even if
-// the client's Accept-Language has since changed (e.g. the admin's own
+// review residual 3): method, path, actorID, role and body say nothing
+// about Accept-Language, and Idempotent's own stored response is whatever
+// body fn(qtx) rendered the first time — for POST /purchases/{id}/receive
+// that includes each PurchaseItem's productName/variantLabel, resolved
+// once, at receive time, in whatever locale that first request asked for.
+// A replay with the same key returns that first rendering unchanged even
+// if the client's Accept-Language has since changed (e.g. the admin's own
 // language switch, D-39) — a language switch must never turn a safe
 // retry into a 409, and Idempotent has no way to re-render a stored,
 // already-serialized response body in a different locale after the fact
 // regardless.
-func RequestHash(method, path string, actorID uuid.UUID, body any) (string, error) {
+func RequestHash(method, path string, actorID uuid.UUID, role db.UserRole, body any) (string, error) {
 	canonical, err := json.Marshal(body)
 	if err != nil {
 		return "", fmt.Errorf("httpx: canonicalize request body: %w", err)
 	}
-	sum := sha256.Sum256([]byte(method + "|" + path + "|" + actorID.String() + "|" + string(canonical)))
+	sum := sha256.Sum256([]byte(method + "|" + path + "|" + actorID.String() + "|" + string(role) + "|" + string(canonical)))
 	return hex.EncodeToString(sum[:]), nil
 }
 

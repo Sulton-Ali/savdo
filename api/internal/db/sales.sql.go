@@ -305,6 +305,77 @@ func (q *Queries) GetSaleItemsForUpdate(ctx context.Context, arg GetSaleItemsFor
 	return items, nil
 }
 
+const getVariantForSale = `-- name: GetVariantForSale :one
+SELECT
+    v.id AS variant_id, v.product_id, v.price_override, v.cost_override,
+    v.is_active AS variant_is_active,
+    p.base_price, p.cost_price, p.promo_price, p.promo_from, p.promo_to,
+    p.is_active AS product_is_active
+FROM product_variants v
+JOIN products p ON p.id = v.product_id AND p.shop_id = v.shop_id
+WHERE v.shop_id = $1 AND v.id = $2
+    AND v.deleted_at IS NULL AND p.deleted_at IS NULL
+`
+
+type GetVariantForSaleParams struct {
+	ShopID uuid.UUID `json:"shop_id"`
+	ID     uuid.UUID `json:"id"`
+}
+
+type GetVariantForSaleRow struct {
+	VariantID       uuid.UUID      `json:"variant_id"`
+	ProductID       uuid.UUID      `json:"product_id"`
+	PriceOverride   pgtype.Numeric `json:"price_override"`
+	CostOverride    pgtype.Numeric `json:"cost_override"`
+	VariantIsActive bool           `json:"variant_is_active"`
+	BasePrice       pgtype.Numeric `json:"base_price"`
+	CostPrice       pgtype.Numeric `json:"cost_price"`
+	PromoPrice      pgtype.Numeric `json:"promo_price"`
+	PromoFrom       *time.Time     `json:"promo_from"`
+	PromoTo         *time.Time     `json:"promo_to"`
+	ProductIsActive bool           `json:"product_is_active"`
+}
+
+// Loads a variant plus its product's pricing/cost fields in one round
+// trip, for CreateSale's per-line price resolution (D-56, T3): only a
+// variant that belongs to the shop and is not soft-deleted, whose product
+// is also not soft-deleted, resolves at all — deleted_at IS NULL on both,
+// the same guard GetVariantForStaff/GetProductForStaff each already
+// apply. The service additionally checks variant_is_active and
+// product_is_active (both returned here) before selling: an inactive
+// variant or product is not client-supplied pricing, so this is not a
+// pricing rule, but "not for sale" is still this query's concern to
+// surface, not a second round trip's. price_override/cost_override are
+// the variant's own (§ 04-DATA-MODEL.md § 2); base_price/cost_price/
+// promo_price/promo_from/promo_to are the product's — the caller combines
+// them into one effective unit price and unit cost.
+//
+// This query reads cost_price/cost_override on every CreateSale call,
+// including a cashier's — not a rule 8 violation (orchestrator ruling):
+// rule 8 governs response-shaping queries; an internal pricing query may
+// read cost inside the write transaction as long as no cost value ever
+// reaches a cashier response (CreateSaleTx freezes it into
+// sale_items.unit_cost, which ListSaleItemsForCashier/GetSaleForCashier
+// never select).
+func (q *Queries) GetVariantForSale(ctx context.Context, arg GetVariantForSaleParams) (GetVariantForSaleRow, error) {
+	row := q.db.QueryRow(ctx, getVariantForSale, arg.ShopID, arg.ID)
+	var i GetVariantForSaleRow
+	err := row.Scan(
+		&i.VariantID,
+		&i.ProductID,
+		&i.PriceOverride,
+		&i.CostOverride,
+		&i.VariantIsActive,
+		&i.BasePrice,
+		&i.CostPrice,
+		&i.PromoPrice,
+		&i.PromoFrom,
+		&i.PromoTo,
+		&i.ProductIsActive,
+	)
+	return i, err
+}
+
 const insertSale = `-- name: InsertSale :one
 INSERT INTO sales (
     id, shop_id, number, kind, location_id, customer_id, cashier_id,
@@ -473,6 +544,7 @@ const listSaleItemsForCashier = `-- name: ListSaleItemsForCashier :many
 SELECT
     si.id, si.sale_id, si.variant_id, si.qty, si.unit_price, si.line_total,
     si.original_sale_item_id, si.created_at,
+    p.id AS product_id,
     v.sku AS variant_sku,
     v.attributes AS variant_attributes,
     COALESCE(t.locale, '') AS locale_used,
@@ -518,6 +590,7 @@ type ListSaleItemsForCashierRow struct {
 	LineTotal          pgtype.Numeric  `json:"line_total"`
 	OriginalSaleItemID *uuid.UUID      `json:"original_sale_item_id"`
 	CreatedAt          time.Time       `json:"created_at"`
+	ProductID          uuid.UUID       `json:"product_id"`
 	VariantSku         *string         `json:"variant_sku"`
 	VariantAttributes  json.RawMessage `json:"variant_attributes"`
 	LocaleUsed         string          `json:"locale_used"`
@@ -545,6 +618,7 @@ func (q *Queries) ListSaleItemsForCashier(ctx context.Context, arg ListSaleItems
 			&i.LineTotal,
 			&i.OriginalSaleItemID,
 			&i.CreatedAt,
+			&i.ProductID,
 			&i.VariantSku,
 			&i.VariantAttributes,
 			&i.LocaleUsed,
@@ -565,6 +639,7 @@ const listSaleItemsForStaff = `-- name: ListSaleItemsForStaff :many
 SELECT
     si.id, si.sale_id, si.variant_id, si.qty, si.unit_price, si.unit_cost, si.line_total,
     si.original_sale_item_id, si.created_at,
+    p.id AS product_id,
     v.sku AS variant_sku,
     v.attributes AS variant_attributes,
     COALESCE(t.locale, '') AS locale_used,
@@ -611,6 +686,7 @@ type ListSaleItemsForStaffRow struct {
 	LineTotal          pgtype.Numeric  `json:"line_total"`
 	OriginalSaleItemID *uuid.UUID      `json:"original_sale_item_id"`
 	CreatedAt          time.Time       `json:"created_at"`
+	ProductID          uuid.UUID       `json:"product_id"`
 	VariantSku         *string         `json:"variant_sku"`
 	VariantAttributes  json.RawMessage `json:"variant_attributes"`
 	LocaleUsed         string          `json:"locale_used"`
@@ -620,10 +696,10 @@ type ListSaleItemsForStaffRow struct {
 
 // Mirrors ListPurchaseItemsWithLabels (purchases.sql): joins each
 // sale_items row to its variant and product for the response-only
-// productName/variantLabel/sku fields, with the same locale fallback
-// (requested -> 'uz' -> any, ADR-012). returned_qty sums the qty of
-// return-kind items whose original_sale_item_id points back at this row,
-// counting only completed returns (a voided return never happened).
+// productId/productName/variantLabel/sku fields, with the same locale
+// fallback (requested -> 'uz' -> any, ADR-012). returned_qty sums the qty
+// of return-kind items whose original_sale_item_id points back at this
+// row, counting only completed returns (a voided return never happened).
 // unit_cost is included — staff only (§ 04-DATA-MODEL.md rule 8).
 func (q *Queries) ListSaleItemsForStaff(ctx context.Context, arg ListSaleItemsForStaffParams) ([]ListSaleItemsForStaffRow, error) {
 	rows, err := q.db.Query(ctx, listSaleItemsForStaff, arg.Locale, arg.ShopID, arg.SaleID)
@@ -644,6 +720,7 @@ func (q *Queries) ListSaleItemsForStaff(ctx context.Context, arg ListSaleItemsFo
 			&i.LineTotal,
 			&i.OriginalSaleItemID,
 			&i.CreatedAt,
+			&i.ProductID,
 			&i.VariantSku,
 			&i.VariantAttributes,
 			&i.LocaleUsed,
@@ -665,11 +742,18 @@ SELECT
     s.id, s.shop_id, s.number, s.kind, s.status, s.location_id, s.customer_id, s.cashier_id, s.original_sale_id, s.subtotal, s.discount_amount, s.discount_reason, s.total, s.note, s.completed_at, s.voided_at, s.voided_by, s.void_reason, s.created_at,
     l.name AS location_name,
     c.full_name AS customer_name,
-    u.full_name AS cashier_name
+    u.full_name AS cashier_name,
+    p.method AS payment_method,
+    EXISTS (
+        SELECT 1 FROM sales r
+        WHERE r.shop_id = s.shop_id AND r.original_sale_id = s.id
+            AND r.kind = 'return' AND r.status = 'completed'
+    ) AS has_returns
 FROM sales s
 JOIN locations l ON l.id = s.location_id
 LEFT JOIN customers c ON c.id = s.customer_id
 JOIN users u ON u.id = s.cashier_id
+LEFT JOIN sale_payments p ON p.sale_id = s.id AND p.shop_id = s.shop_id
 WHERE s.shop_id = $1
     AND ($2::timestamptz IS NULL OR s.completed_at >= $2)
     AND ($3::timestamptz IS NULL OR s.completed_at < $3)
@@ -723,6 +807,8 @@ type ListSalesForCashierRow struct {
 	LocationName   string         `json:"location_name"`
 	CustomerName   *string        `json:"customer_name"`
 	CashierName    string         `json:"cashier_name"`
+	PaymentMethod  *PaymentMethod `json:"payment_method"`
+	HasReturns     bool           `json:"has_returns"`
 }
 
 // Same shape as ListSalesForStaff (D-63): the sales header carries no
@@ -772,6 +858,8 @@ func (q *Queries) ListSalesForCashier(ctx context.Context, arg ListSalesForCashi
 			&i.LocationName,
 			&i.CustomerName,
 			&i.CashierName,
+			&i.PaymentMethod,
+			&i.HasReturns,
 		); err != nil {
 			return nil, err
 		}
@@ -788,11 +876,18 @@ SELECT
     s.id, s.shop_id, s.number, s.kind, s.status, s.location_id, s.customer_id, s.cashier_id, s.original_sale_id, s.subtotal, s.discount_amount, s.discount_reason, s.total, s.note, s.completed_at, s.voided_at, s.voided_by, s.void_reason, s.created_at,
     l.name AS location_name,
     c.full_name AS customer_name,
-    u.full_name AS cashier_name
+    u.full_name AS cashier_name,
+    p.method AS payment_method,
+    EXISTS (
+        SELECT 1 FROM sales r
+        WHERE r.shop_id = s.shop_id AND r.original_sale_id = s.id
+            AND r.kind = 'return' AND r.status = 'completed'
+    ) AS has_returns
 FROM sales s
 JOIN locations l ON l.id = s.location_id
 LEFT JOIN customers c ON c.id = s.customer_id
 JOIN users u ON u.id = s.cashier_id
+LEFT JOIN sale_payments p ON p.sale_id = s.id AND p.shop_id = s.shop_id
 WHERE s.shop_id = $1
     AND ($2::timestamptz IS NULL OR s.completed_at >= $2)
     AND ($3::timestamptz IS NULL OR s.completed_at < $3)
@@ -846,6 +941,8 @@ type ListSalesForStaffRow struct {
 	LocationName   string         `json:"location_name"`
 	CustomerName   *string        `json:"customer_name"`
 	CashierName    string         `json:"cashier_name"`
+	PaymentMethod  *PaymentMethod `json:"payment_method"`
+	HasReturns     bool           `json:"has_returns"`
 }
 
 // Keyset pagination on (completed_at, id), newest first, same convention
@@ -853,7 +950,12 @@ type ListSalesForStaffRow struct {
 // by the service (e.g. a shop-timezone calendar day, § 04-DATA-MODEL.md
 // rule 9: timestamps are UTC, the shop timezone is applied in the
 // service/reports layer, not here). location/cashier/customer/kind/status
-// are optional exact-match filters.
+// are optional exact-match filters. payment_method backs SaleSummary's
+// required `paymentMethod` field (T3 addition) — LEFT JOIN, same as
+// GetSaleForStaff's own payment join, so a header still lists even in the
+// — currently impossible, but defensive — case a payment row is missing.
+// has_returns is the same EXISTS correlated subquery GetSaleForStaff
+// already uses, backing SaleSummary's required `hasReturns` field.
 func (q *Queries) ListSalesForStaff(ctx context.Context, arg ListSalesForStaffParams) ([]ListSalesForStaffRow, error) {
 	rows, err := q.db.Query(ctx, listSalesForStaff,
 		arg.ShopID,
@@ -898,6 +1000,8 @@ func (q *Queries) ListSalesForStaff(ctx context.Context, arg ListSalesForStaffPa
 			&i.LocationName,
 			&i.CustomerName,
 			&i.CashierName,
+			&i.PaymentMethod,
+			&i.HasReturns,
 		); err != nil {
 			return nil, err
 		}

@@ -79,7 +79,7 @@ func (s server) CreateStockAdjustment(ctx context.Context, req gen.CreateStockAd
 	if err := ValidateIdempotencyKey(key); err != nil {
 		return nil, err
 	}
-	hash, err := RequestHash(http.MethodPost, stockAdjustmentPath, authCtx.UserID, *req.Body)
+	hash, err := RequestHash(http.MethodPost, stockAdjustmentPath, authCtx.UserID, authCtx.Role, *req.Body)
 	if err != nil {
 		return nil, err
 	}
