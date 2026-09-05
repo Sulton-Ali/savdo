@@ -40,12 +40,14 @@ Base path `/v1`. JSON only. Server: Go, `api/cmd/api`, port 8080 behind Caddy.
   INTERNAL`. The full enum lives in the spec under `components.schemas.ErrorCode`;
   adding a code means adding it there.
 - **Validation and conflict vocabulary** (O-12): `details.fields` maps field → one of `required`, `invalid`, `too_short`, `too_long`; a uniqueness violation is `409 CONFLICT` with `details.field` naming the field (`username`, `phone`, `name`). Clients translate these words; nothing else is used.
-- **List vs get asymmetry**: `GET /products` returns all fields except `description` and
-  `translations` (to reduce response size); `GET /products/{id}` returns the full schema
-  including translations. Same applies to variants, categories and other entities.
-  `translations`, like `costPrice`/`costOverride`, is present only for a caller with the
-  matching permission (`catalog.write` for translations, `cost.read` for cost fields) —
-  a cashier or public caller never receives it, regardless of endpoint.
+- **List vs get asymmetry**: `GET /products` returns all fields except `description`,
+  `translations`, `variants` and `images`, and carries `coverImage` (D-83) with its media URLs
+  (the image flagged `isCover`, else the first by position, else null);
+  `GET /products/{id}` returns the full schema including translations. Same applies to
+  variants, categories and other entities. `translations`, like `costPrice`/`costOverride`,
+  is present only for a caller with the matching permission (`catalog.write` for
+  translations, `cost.read` for cost fields) — a cashier or public caller never
+  receives it, regardless of endpoint.
 - **Promo pricing** (Q-05): `promoPrice`, `promoFrom` and `promoTo` (ISO 8601 dates) are
   independent fields on the product; a PATCH may set any subset of them. Sending an
   explicit `null` for any one of the three clears all three together (D-35's
