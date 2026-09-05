@@ -34,6 +34,7 @@ import {
   cartReducer,
   type DiscountKind,
   estimateCartTotals,
+  generateIdempotencyKey,
   idempotencyOutcome,
   initialCartState,
   isValidDiscountValue,
@@ -80,7 +81,8 @@ function CustomerPickerModal({
   const router = useRouter();
   const [rawQuery, setRawQuery] = useState("");
   const debouncedQuery = useDebouncedValue(rawQuery, 300);
-  const { data, isFetching } = useCustomersSearch(debouncedQuery);
+  const { data, isFetching, fetchNextPage, hasNextPage, isFetchingNextPage } =
+    useCustomersSearch(debouncedQuery);
   const customers = useMemo(() => data?.pages.flatMap((page) => page.items) ?? [], [data]);
 
   // Resets the search query on every close path (Cancel, backdrop/hardware
@@ -126,6 +128,12 @@ function CustomerPickerModal({
         <FlatList
           data={customers}
           keyExtractor={(customer) => customer.id}
+          onEndReachedThreshold={0.4}
+          onEndReached={() => {
+            if (hasNextPage && !isFetchingNextPage) {
+              fetchNextPage();
+            }
+          }}
           ListEmptyComponent={
             !isFetching ? (
               <Text variant="muted" className="p-4 text-center">
@@ -133,6 +141,7 @@ function CustomerPickerModal({
               </Text>
             ) : null
           }
+          ListFooterComponent={isFetchingNextPage ? <ActivityIndicator className="py-4" /> : null}
           renderItem={({ item }) => (
             <Pressable
               accessibilityRole="button"
@@ -213,6 +222,17 @@ function LocationPickerModal({
  * only the server's own numbers, which is the only place a total is ever
  * authoritative (D-56, hard rule 8; `features/sales/cart.ts`'s own doc
  * comment has the full reasoning).
+ *
+ * A `401` mid-cart (a revoked/expired session) clears the cart by design:
+ * `lib/api.ts`'s middleware calls `resetSessionCache` on every `401`, which
+ * removes every non-session cached query and bounces the root layout's auth
+ * gate to the login screen (ADR-010 — no cross-session data may survive a
+ * session boundary); this screen keeps its cart in local `useReducer` state
+ * with no persistence of its own, so unmounting behind that gate loses an
+ * in-progress, unpaid cart along with it. Accepted rather than fixed here:
+ * persisting an unsubmitted cart across a session boundary would risk the
+ * next session (a different cashier, say) resuming someone else's
+ * in-progress sale.
  */
 export default function SaleScreen() {
   const { t } = useTranslation();
@@ -431,6 +451,10 @@ export default function SaleScreen() {
       productName: product.name,
       unitPrice,
       availableQty,
+      // Only adopted by the reducer if this fills an empty cart
+      // (`cartReducer`'s own doc comment) — minted here regardless since
+      // the reducer, not this call site, decides whether it's needed.
+      idempotencyKey: generateIdempotencyKey(),
     });
     clearLineError(variant.id);
     setPickerOpen(false);
@@ -515,7 +539,7 @@ export default function SaleScreen() {
           // reasoning).
           const code = error instanceof SalesApiError ? error.code : undefined;
           if (idempotencyOutcome(code) === "rekey") {
-            dispatch({ type: "rekey" });
+            dispatch({ type: "rekey", idempotencyKey: generateIdempotencyKey() });
             setGeneralError(t("sales.errors.idempotencyKeyReused"));
             setPossiblyRecorded(true);
             return;

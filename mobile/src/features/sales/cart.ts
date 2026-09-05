@@ -74,6 +74,16 @@ export interface CartState {
    * (see `idempotencyOutcome` below) — kept as a distinct action from
    * `clear` since it leaves `lines`/`discount` untouched.
    *
+   * The actual key generation happens outside this reducer: `Math.random`/
+   * `Date.now` are non-deterministic, and a reducer that calls them itself
+   * can no longer be trusted to return the same output for the same input
+   * (React 19's Strict Mode intentionally double-invokes a reducer to catch
+   * exactly this kind of impurity). `addItem` and `rekey` actions instead
+   * carry an `idempotencyKey` the dispatching screen minted via this
+   * module's own exported `generateIdempotencyKey`; the reducer only
+   * *decides whether* to adopt it (`addItem`: only when the cart was empty;
+   * `rekey`: always), never generates one itself.
+   *
    * Safe to keep stable across an edit made *after* a failed submit too
    * (e.g. fixing a qty once the server answers `409 STOCK_INSUFFICIENT`):
    * the server's `Idempotent` helper
@@ -108,6 +118,11 @@ export type CartAction =
       unitPrice: string;
       availableQty: string;
       qty?: number;
+      /** Minted by the dispatching component via `generateIdempotencyKey`,
+       * not by this reducer (see `CartState.idempotencyKey`'s doc comment).
+       * Adopted only when this action takes the cart from empty to
+       * non-empty; otherwise ignored, same as before. */
+      idempotencyKey: string;
     }
   | { type: "incrementQty"; variantId: string }
   | { type: "decrementQty"; variantId: string }
@@ -116,18 +131,19 @@ export type CartAction =
   | { type: "setDiscount"; discount: CartDiscount | null }
   | { type: "clear" }
   | { type: "completed" }
-  /** Mints a fresh `idempotencyKey` without touching `lines`/`discount` —
-   * unlike `clear`/`completed`. Dispatched *only* when `idempotencyOutcome`
-   * below says `"rekey"`, i.e. only for `409 IDEMPOTENCY_KEY_REUSED`: the
-   * one case where the current key is *provably* already spent on an
-   * earlier, successful attempt (this reducer's own request never reused a
-   * key against a different body on purpose), so this attempt's edited
-   * body needs a key of its own. `sale/index.tsx` pairs this with a hint
+  /** Adopts a fresh `idempotencyKey` (minted by the dispatching component,
+   * same as `addItem`) without touching `lines`/`discount` — unlike
+   * `clear`/`completed`. Dispatched *only* when `idempotencyOutcome` below
+   * says `"rekey"`, i.e. only for `409 IDEMPOTENCY_KEY_REUSED`: the one
+   * case where the current key is *provably* already spent on an earlier,
+   * successful attempt (this reducer's own request never reused a key
+   * against a different body on purpose), so this attempt's edited body
+   * needs a key of its own. `sale/index.tsx` pairs this with a hint
    * pointing at today's sales list, so the cashier can check whether that
    * earlier attempt is the one they meant before paying again. Every other
    * failure — including one with no response at all — keeps the key
    * instead (`idempotencyKey`'s own doc comment has the full reasoning). */
-  | { type: "rekey" };
+  | { type: "rekey"; idempotencyKey: string };
 
 /**
  * Generates an idempotency key with no dependency on a runtime global this
@@ -135,9 +151,12 @@ export type CartAction =
  * `crypto.randomUUID` support was not asserted against any pinned source,
  * so this deliberately avoids relying on it — good enough here since an
  * `Idempotency-Key` only needs to be practically unique per device per
- * cart, not cryptographically random).
+ * cart, not cryptographically random). Exported so the dispatching
+ * component (`sale/index.tsx`) can mint the key it hands to `addItem`/
+ * `rekey` actions itself — see `CartState.idempotencyKey`'s doc comment for
+ * why minting doesn't happen inside `cartReducer`.
  */
-function generateIdempotencyKey(): string {
+export function generateIdempotencyKey(): string {
   const randomSegment = () => Math.random().toString(36).slice(2, 10);
   return `${Date.now().toString(36)}-${randomSegment()}-${randomSegment()}`;
 }
@@ -358,9 +377,10 @@ export function cartReducer(state: CartState, action: CartAction): CartState {
         ...updateLines(state, lines),
         // A key minted while the cart was empty was never used against a
         // request with a body attached (there is nothing to submit yet),
-        // so only a fill (empty -> non-empty) needs a fresh one; every
-        // later edit keeps it (see `idempotencyKey`'s own doc comment).
-        idempotencyKey: wasEmpty ? generateIdempotencyKey() : state.idempotencyKey,
+        // so only a fill (empty -> non-empty) adopts the action's freshly
+        // minted key; every later edit keeps the existing one (see
+        // `idempotencyKey`'s own doc comment).
+        idempotencyKey: wasEmpty ? action.idempotencyKey : state.idempotencyKey,
       };
     }
     case "incrementQty":
@@ -409,7 +429,7 @@ export function cartReducer(state: CartState, action: CartAction): CartState {
     case "completed":
       return initialCartState();
     case "rekey":
-      return { ...state, idempotencyKey: generateIdempotencyKey() };
+      return { ...state, idempotencyKey: action.idempotencyKey };
     default:
       return state;
   }
