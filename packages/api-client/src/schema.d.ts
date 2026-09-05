@@ -1896,20 +1896,20 @@ export interface components {
             locationId: string | null;
             /**
              * Format: uuid
-             * @description Non-null only when the report is scoped to one cashier (a cashier caller always gets their own id here; manager+ gets `null` for a whole-shop summary).
+             * @description Non-null only when the report is scoped to one cashier (a cashier caller always gets their own id here; manager+ gets `null` for a whole-shop summary). For a cashier, a `return`-kind sale is attributed to the original sale's cashier, not the (typically manager) staff member who created the return (D-58, D-71).
              */
             cashierId: string | null;
             /** @description Count of completed `sale`-kind sales in the period (D-64). */
             salesCount: number;
-            /** @description Count of completed `return`-kind sales in the period (D-64). */
+            /** @description Count of completed `return`-kind sales in the period (D-64). For a cashier, this counts returns against that cashier's own sales — attributed via the original sale's cashier, not the return's own cashier — counted on the day the return itself happens, not the day of the original sale (D-71). */
             returnsCount: number;
             /** @description Sum of `total` over completed `sale`-kind sales in the period — already net of each sale's own discount (D-64). */
             revenue: components["schemas"]["Decimal"];
             /** @description Sum of `discount_amount` over completed `sale`-kind sales in the period (D-64). */
             discounts: components["schemas"]["Decimal"];
-            /** @description Sum of `total` over completed `return`-kind sales (refunds) in the period (D-64). */
+            /** @description Sum of `total` over completed `return`-kind sales (refunds) in the period (D-64). For a cashier, a return is attributed to the original sale's cashier, not the (typically manager) staff member who created the return, and counted on the day the return itself happens rather than the day of the original sale (D-58, D-71) — so a cashier's own-day summary can show refunds, and `salesCount: 0`, on a day it made no sales at all. */
             refunds: components["schemas"]["Decimal"];
-            /** @description `revenue - refunds` (D-64). */
+            /** @description `revenue - refunds` (D-64), using the D-71 cashier attribution of `refunds` above for a cashier. Can be negative on a day with refunds against a prior day's sale and no sales of its own. */
             netRevenue: components["schemas"]["Decimal"];
             /** @description Present only for manager+ (ADR-010). Sum of `qty * unitCost` over items sold minus items returned in the period (D-64). */
             cost?: components["schemas"]["Decimal"];

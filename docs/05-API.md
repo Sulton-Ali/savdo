@@ -76,8 +76,15 @@ Base path `/v1`. JSON only. Server: Go, `api/cmd/api`, port 8080 behind Caddy.
   location. A cashier calling `/reports/sales/summary` has `from`, `to` and
   `locationId` ignored — the response is always today (shop timezone) for that
   cashier's own sales, with the effective `from`/`to`/`cashierId` echoed back;
-  `cost`/`margin` on both reports are present only for manager+ (ADR-010). Phase
-  4 also adds `DISCOUNT_EXCEEDS_SUBTOTAL`, `SALE_ALREADY_VOIDED`,
+  `cost`/`margin` on both reports are present only for manager+ (ADR-010). The
+  cashier's own-day summary attributes a `return`-kind sale to the original
+  sale's cashier, not the return's own `cashier_id` (D-58), and counts it on
+  the day the return itself happens, not the day of the original sale — so
+  `netRevenue` can be negative on a day with refunds and no sales (D-71).
+  `SalesSummaryForStaff`'s own `cashier_id` filter follows the same rule, but
+  it is internal for now: the contract has no `cashierId` parameter on
+  `/reports/sales/summary` for manager+. Phase 4 also adds
+  `DISCOUNT_EXCEEDS_SUBTOTAL`, `SALE_ALREADY_VOIDED`,
   `SALE_VOID_WINDOW_CLOSED`, `SALE_HAS_RETURNS` and `RETURN_EXCEEDS_SOLD` to
   `ErrorCode` (§ Errors above).
 - **Versioning**: additive changes only within `/v1`. A breaking change is `/v2` and an

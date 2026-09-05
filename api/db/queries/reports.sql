@@ -9,14 +9,29 @@
 -- (net cost of goods actually kept by customers); staff only (§
 -- 04-DATA-MODEL.md rule 8) — see SalesSummaryForCashier for the cashier
 -- equivalent with no cost column.
+--
+-- cashier_id attribution (D-71): a return is created by a manager
+-- (D-58), so its own cashier_id is the manager's, not the original
+-- cashier's. The LEFT JOIN to "orig" resolves each return's original
+-- sale so that, when cashier_id is given, a sale-kind row matches its own
+-- cashier_id but a return-kind row matches orig.cashier_id instead —
+-- otherwise a cashier's own-day report would never see the refunds
+-- against their own sales. This also scopes sale_cost's return-cost leg
+-- below, since it joins on sf. Location filtering is unchanged: it still
+-- applies to the row's own location_id, never the original sale's.
 WITH sf AS (
-    SELECT * FROM sales sales_row
+    SELECT sales_row.* FROM sales sales_row
+    LEFT JOIN sales orig ON orig.id = sales_row.original_sale_id AND orig.shop_id = sales_row.shop_id
     WHERE sales_row.shop_id = sqlc.arg('shop_id')
         AND sales_row.status = 'completed'
         AND sales_row.completed_at >= sqlc.arg('from')
         AND sales_row.completed_at < sqlc.arg('to')
         AND (sqlc.narg('location_id')::uuid IS NULL OR sales_row.location_id = sqlc.narg('location_id'))
-        AND (sqlc.narg('cashier_id')::uuid IS NULL OR sales_row.cashier_id = sqlc.narg('cashier_id'))
+        AND (
+            sqlc.narg('cashier_id')::uuid IS NULL
+            OR (sales_row.kind = 'sale' AND sales_row.cashier_id = sqlc.narg('cashier_id'))
+            OR (sales_row.kind = 'return' AND orig.cashier_id = sqlc.narg('cashier_id'))
+        )
 ),
 sale_cost AS (
     SELECT sf.kind, sum(i.qty * i.unit_cost) AS total_cost
@@ -44,15 +59,23 @@ FROM sf;
 -- Same filters as SalesSummaryForStaff, no cost column (§ 04-DATA-MODEL.md
 -- rule 8, D-63) — the permission matrix's "own-day sales only" for a
 -- cashier is enforced by the service passing from/to and cashier_id, not
--- by this query.
+-- by this query. cashier_id attribution follows SalesSummaryForStaff's
+-- D-71 rule: a return-kind row matches orig.cashier_id (the original
+-- sale's cashier), not its own, so a cashier's own-day summary is net of
+-- refunds against their own sales.
 WITH sf AS (
-    SELECT * FROM sales
-    WHERE shop_id = sqlc.arg('shop_id')
-        AND status = 'completed'
-        AND completed_at >= sqlc.arg('from')
-        AND completed_at < sqlc.arg('to')
-        AND (sqlc.narg('location_id')::uuid IS NULL OR location_id = sqlc.narg('location_id'))
-        AND (sqlc.narg('cashier_id')::uuid IS NULL OR cashier_id = sqlc.narg('cashier_id'))
+    SELECT sales.* FROM sales
+    LEFT JOIN sales orig ON orig.id = sales.original_sale_id AND orig.shop_id = sales.shop_id
+    WHERE sales.shop_id = sqlc.arg('shop_id')
+        AND sales.status = 'completed'
+        AND sales.completed_at >= sqlc.arg('from')
+        AND sales.completed_at < sqlc.arg('to')
+        AND (sqlc.narg('location_id')::uuid IS NULL OR sales.location_id = sqlc.narg('location_id'))
+        AND (
+            sqlc.narg('cashier_id')::uuid IS NULL
+            OR (sales.kind = 'sale' AND sales.cashier_id = sqlc.narg('cashier_id'))
+            OR (sales.kind = 'return' AND orig.cashier_id = sqlc.narg('cashier_id'))
+        )
 )
 SELECT
     count(*) FILTER (WHERE kind = 'sale')::bigint AS sales_count,
