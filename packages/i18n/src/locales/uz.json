@@ -47,6 +47,7 @@
     "stockLevels": "Qoldiqlar",
     "stockMovements": "Ombor harakatlari",
     "stockLow": "Kam qoldiq",
+    "quickSale": "Tezkor sotuv",
     "reports": "Hisobotlar"
   },
   "auth": {
@@ -536,6 +537,66 @@
       "title": "Kam qoldiq",
       "count": "{{value}} variant chegara darajasida yoki undan past",
       "link": "Kam qoldiqni ko‘rish"
+    }
+  },
+  "sales": {
+    "title": "Tezkor sotuv",
+    "fields": {
+      "location": "Filial",
+      "customer": "Mijoz",
+      "paymentMethod": "To‘lov usuli",
+      "discountType": "Chegirma",
+      "discountValue": "Chegirma miqdori",
+      "discountReason": "Chegirma sababi",
+      "note": "Izoh"
+    },
+    "customerPlaceholder": "Ism yoki telefon bo‘yicha qidirish",
+    "paymentMethod": {
+      "cash": "Naqd",
+      "card": "Karta",
+      "transfer": "O‘tkazma"
+    },
+    "discountType": {
+      "percent": "Foiz",
+      "fixed": "Belgilangan summa"
+    },
+    "items": {
+      "title": "Mahsulotlar",
+      "productPlaceholder": "Nomi yoki SKU bo‘yicha qidirish",
+      "variantPlaceholder": "Variantni tanlang",
+      "qty": "Soni",
+      "add": "Qo‘shish",
+      "empty": "Hozircha mahsulot yo‘q — qo‘shish uchun yuqorida qidiring.",
+      "required": "Sotuvni yakunlash uchun kamida bitta mahsulot qo‘shing.",
+      "noLabel": "Standart variant",
+      "remove": "O‘chirish",
+      "columns": {
+        "product": "Mahsulot",
+        "variant": "Variant",
+        "unitPrice": "Narxi",
+        "qty": "Soni",
+        "lineTotal": "Summasi"
+      }
+    },
+    "cart": {
+      "clear": "Savatni tozalash"
+    },
+    "summary": {
+      "subtotal": "Oraliq summa",
+      "discount": "Chegirma",
+      "total": "Jami"
+    },
+    "submit": "Sotuvni yakunlash",
+    "success": {
+      "title": "Sotuv yakunlandi",
+      "number": "Sotuv №{{number}}",
+      "total": "Jami: {{total}}",
+      "newSale": "Yangi sotuv"
+    },
+    "errors": {
+      "stockInsufficient": "Yetarli mahsulot yo‘q: faqat {{available}} mavjud.",
+      "discountExceedsSubtotal": "Chegirma oraliq summadan oshmasligi kerak.",
+      "idempotencyKeyReused": "Bu sotuv allaqachon yuborilgan bo‘lishi mumkin. Tekshirib, qayta urinib ko‘ring."
     }
   }
 }
