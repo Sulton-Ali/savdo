@@ -43,3 +43,25 @@ func toGenSupplier(s db.Supplier) gen.Supplier {
 		Note:             nullableString(s.Note),
 	}
 }
+
+// toGenCustomer maps a customers row onto the API schema. tags is never
+// null in the response even though the Go zero value for a nil []string
+// column would marshal that way — the customers table's own `NOT NULL
+// DEFAULT '{}'` (0015_customers.sql) already keeps the driver from
+// returning nil in practice, but the explicit fallback here means the
+// response contract holds even if that ever changes.
+func toGenCustomer(c db.Customer) gen.Customer {
+	tags := c.Tags
+	if tags == nil {
+		tags = []string{}
+	}
+	return gen.Customer{
+		Id: c.ID, FullName: c.FullName,
+		Phone:            nullableString(c.Phone),
+		TelegramUsername: nullableString(c.TelegramUsername),
+		Note:             nullableString(c.Note),
+		Tags:             tags,
+		CreatedAt:        c.CreatedAt,
+		UpdatedAt:        c.UpdatedAt,
+	}
+}

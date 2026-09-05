@@ -67,3 +67,15 @@ func paginateSuppliers(rows []db.Supplier, limit int32) ([]db.Supplier, *string)
 	cursor := pagination.Encode(last.CreatedAt, last.ID)
 	return items, &cursor
 }
+
+// paginateCustomers is paginateSuppliers' own trim, for ListCustomers'
+// keyset (identical shape: (created_at, id) DESC).
+func paginateCustomers(rows []db.Customer, limit int32) ([]db.Customer, *string) {
+	if len(rows) <= int(limit) {
+		return rows, nil
+	}
+	items := rows[:limit]
+	last := items[len(items)-1]
+	cursor := pagination.Encode(last.CreatedAt, last.ID)
+	return items, &cursor
+}

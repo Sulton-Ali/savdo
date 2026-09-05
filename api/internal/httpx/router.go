@@ -52,8 +52,8 @@ import (
 // stock.NewHandler (stock.go, purchases.go); CreateStockAdjustment and
 // ReceivePurchase additionally use pool directly, for httpx.Idempotent's
 // Idempotency-Key bookkeeping (stock.go's/purchases.go's own doc
-// comments). crmSvc backs the five `/suppliers` operations via
-// crm.NewHandler (crm.go).
+// comments). crmSvc backs the five `/suppliers` and five `/customers`
+// operations via crm.NewHandler (crm.go).
 func NewRouter(logger *slog.Logger, pool *pgxpool.Pool, authSvc *auth.Service, shopSvc *shop.Service, mediaSvc *media.Service, devMedia http.Handler, catalogSvc *catalog.Service, stockSvc *stock.Service, crmSvc *crm.Service) http.Handler {
 	mux := http.NewServeMux()
 

@@ -10,16 +10,17 @@ import (
 
 // notImplementedResponse satisfies every Phase 4 T0 *ResponseObject
 // interface the strict server needs so `server` keeps satisfying
-// `gen.StrictServerInterface` for the 12 customers/sales/reports
-// operations the contract just gained (docs/06-ROADMAP.md Phase 4),
-// before each operation's owning module lands. It always writes the
-// shared `Error` envelope (ADR-013) with code INTERNAL and
-// `details.reason: "not_implemented"` — same shape and same rationale
-// as Phase 1, 2 and 3's unimplemented.go (git history).
+// `gen.StrictServerInterface` for the sales/reports operations the
+// contract gained (docs/06-ROADMAP.md Phase 4), before each operation's
+// owning module lands — the five customers operations T2's own crm
+// module has since replaced. It always writes the shared `Error`
+// envelope (ADR-013) with code INTERNAL and `details.reason:
+// "not_implemented"` — same shape and same rationale as Phase 1, 2 and
+// 3's unimplemented.go (git history).
 //
 // Each method here corresponds to one contracts/openapi.yaml operationId.
-// Replaced as the customers and sales handlers land in their own
-// modules; delete the method here when its real handler lands.
+// Replaced as the sales and reports handlers land in their own modules;
+// delete the method here when its real handler lands.
 type notImplementedResponse struct{}
 
 func (notImplementedResponse) write(w http.ResponseWriter) error {
@@ -33,21 +34,6 @@ func (notImplementedResponse) write(w http.ResponseWriter) error {
 	return json.NewEncoder(w).Encode(body)
 }
 
-func (r notImplementedResponse) VisitListCustomersResponse(w http.ResponseWriter) error {
-	return r.write(w)
-}
-func (r notImplementedResponse) VisitCreateCustomerResponse(w http.ResponseWriter) error {
-	return r.write(w)
-}
-func (r notImplementedResponse) VisitGetCustomerResponse(w http.ResponseWriter) error {
-	return r.write(w)
-}
-func (r notImplementedResponse) VisitUpdateCustomerResponse(w http.ResponseWriter) error {
-	return r.write(w)
-}
-func (r notImplementedResponse) VisitDeleteCustomerResponse(w http.ResponseWriter) error {
-	return r.write(w)
-}
 func (r notImplementedResponse) VisitListSalesResponse(w http.ResponseWriter) error {
 	return r.write(w)
 }
@@ -68,36 +54,6 @@ func (r notImplementedResponse) VisitGetSalesSummaryReportResponse(w http.Respon
 }
 func (r notImplementedResponse) VisitListSalesByProductResponse(w http.ResponseWriter) error {
 	return r.write(w)
-}
-
-// ListCustomers lists the shop's customers.
-// Phase 4 T0: replaced once the customers module lands.
-func (server) ListCustomers(_ context.Context, _ gen.ListCustomersRequestObject) (gen.ListCustomersResponseObject, error) {
-	return notImplementedResponse{}, nil
-}
-
-// CreateCustomer creates a customer.
-// Phase 4 T0: replaced once the customers module lands.
-func (server) CreateCustomer(_ context.Context, _ gen.CreateCustomerRequestObject) (gen.CreateCustomerResponseObject, error) {
-	return notImplementedResponse{}, nil
-}
-
-// GetCustomer gets a customer.
-// Phase 4 T0: replaced once the customers module lands.
-func (server) GetCustomer(_ context.Context, _ gen.GetCustomerRequestObject) (gen.GetCustomerResponseObject, error) {
-	return notImplementedResponse{}, nil
-}
-
-// UpdateCustomer updates a customer.
-// Phase 4 T0: replaced once the customers module lands.
-func (server) UpdateCustomer(_ context.Context, _ gen.UpdateCustomerRequestObject) (gen.UpdateCustomerResponseObject, error) {
-	return notImplementedResponse{}, nil
-}
-
-// DeleteCustomer soft-deletes a customer.
-// Phase 4 T0: replaced once the customers module lands.
-func (server) DeleteCustomer(_ context.Context, _ gen.DeleteCustomerRequestObject) (gen.DeleteCustomerResponseObject, error) {
-	return notImplementedResponse{}, nil
 }
 
 // ListSales lists the shop's sales.
