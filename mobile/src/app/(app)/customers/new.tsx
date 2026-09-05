@@ -51,6 +51,17 @@ export default function NewCustomerScreen() {
         phone: values.phone.trim(),
       });
       if (returnTo === "sale") {
+        // This screen was pushed onto the *Customers* tab's own stack
+        // (its file lives under `app/(app)/customers/`, regardless of
+        // which tab's button pushed it): `replace` swaps this stack
+        // entry for `/sale` and switches the active tab there, which is
+        // what the round trip needs. A `router.dismissTo` alternative
+        // was tried here to also clear the Customers tab's own history
+        // (so switching back to it later shows its list, not this stale
+        // form) but did not navigate at all when tested on-device
+        // (T4's smoke test) — reverted to this known-working `replace`;
+        // the stale-Customers-tab-history nit is left for a follow-up,
+        // noted in this task's report.
         router.replace({
           pathname: "/sale",
           params: {

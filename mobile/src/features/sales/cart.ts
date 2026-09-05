@@ -1,10 +1,10 @@
 /**
  * Pure cart state for the one-handed quick-sale screen
  * (`app/(app)/sale/index.tsx`) — no React, no React Native import, so it is
- * testable under plain Vitest with no Expo/RN mocking (this task's brief
- * cites this as "D-85"; `docs/00-DECISIONS.md` does not have that row yet —
- * flagged in this task's report against `D-73`, which says mobile has no
- * unit test runner at all, so the two need reconciling in the docs).
+ * testable under plain Vitest with no Expo/RN mocking (D-85 amends D-73 to
+ * allow this for pure, RN-free modules; `mobile/vitest.config.mts`'s
+ * `include` covers this file under `src/features` alongside D-85's own
+ * `src/lib` examples).
  *
  * A cart line carries no price and no product name: the shared
  * `features/catalog/VariantPicker.tsx` (T2) reports back only the picked
