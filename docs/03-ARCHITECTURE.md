@@ -224,7 +224,7 @@ A `sales` row with status `completed` is never updated except to `voided`. A voi
 writes `sale_void_in` movements for every line. A return is a new `returns` sale kind
 referencing the original, with `return_in` movements. Sale numbers are per shop,
 sequential, gap-free within a shop (`shops.next_sale_number` under row lock).
-Amended 2026-09-05 (D-58, D-59): voids are limited to the sale's calendar day in the shop timezone; returns may be partial and refund by the original payment method.
+Amended 2026-09-05 (D-58, D-59, D-61, D-62): voids are limited to the sale's calendar day in the shop timezone and are refused once a return exists; returns may be partial, refund by the original payment method, and refund each line net of its proportional share of the sale discount.
 
 ## Cross-cutting
 
