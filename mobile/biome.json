@@ -3,7 +3,15 @@
   "root": false,
   "extends": "//",
   "files": {
-    "includes": ["**", "!**/.expo", "!expo-env.d.ts", "!**/dist", "!**/web-build"]
+    "includes": [
+      "**",
+      "!**/.expo",
+      "!expo-env.d.ts",
+      "!**/dist",
+      "!**/web-build",
+      "!**/android",
+      "!**/ios"
+    ]
   },
   "overrides": [
     {

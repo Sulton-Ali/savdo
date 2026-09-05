@@ -690,5 +690,15 @@
       "saleNotVoidable": "Bu qaytarish, uni bekor qilib bo‘lmaydi. Xato qaytarishni tuzatish uchun mahsulotni qayta soting.",
       "saleNotReturnable": "Bu qaytarish, unga nisbatan qaytarish rasmiylashtirib bo‘lmaydi."
     }
+  },
+  "mobile": {
+    "shell": {
+      "server": "Server manzili",
+      "serverInsecure": "Oddiy http:// faqat mahalliy manzillar uchun (127.0.0.1, 10.x, 172.16–31.x, 192.168.x). Boshqa hollarda https:// dan foydalaning.",
+      "outageEscape": "Serverni almashtirish yoki chiqish",
+      "tabs": {
+        "stock": "Qoldiq"
+      }
+    }
   }
 }

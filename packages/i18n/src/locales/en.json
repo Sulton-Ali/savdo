@@ -690,5 +690,15 @@
       "saleNotVoidable": "This is a return and cannot be voided. To correct a mistaken return, sell the item again.",
       "saleNotReturnable": "This is a return and cannot itself be returned."
     }
+  },
+  "mobile": {
+    "shell": {
+      "server": "Server address",
+      "serverInsecure": "Plain http:// is only allowed for local addresses (127.0.0.1, 10.x, 172.16–31.x, 192.168.x). Use https:// otherwise.",
+      "outageEscape": "Change server or log out",
+      "tabs": {
+        "stock": "Stock"
+      }
+    }
   }
 }
