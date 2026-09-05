@@ -5,7 +5,7 @@ import { mergeHeaders } from "openapi-fetch";
 
 import { i18next } from "../i18n";
 import { queryClient } from "./queryClient";
-import { TOKEN_QUERY_KEY } from "./queryKeys";
+import { resetSessionCache } from "./queryKeys";
 import { getServerUrl } from "./serverUrl";
 import { clearToken, getToken, isCurrentToken, peekToken } from "./token";
 
@@ -23,10 +23,14 @@ const raw = createClient("");
  */
 const REQUEST_TIMEOUT_MS = 15_000;
 
-function withTimeout(callerSignal?: AbortSignal | null): AbortSignal {
+function withTimeout(callerSignal?: AbortSignal | null): {
+  signal: AbortSignal;
+  clear: () => void;
+} {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  controller.signal.addEventListener("abort", () => clearTimeout(timer), { once: true });
+  const clear = () => clearTimeout(timer);
+  controller.signal.addEventListener("abort", clear, { once: true });
   if (callerSignal) {
     if (callerSignal.aborted) {
       controller.abort();
@@ -34,7 +38,11 @@ function withTimeout(callerSignal?: AbortSignal | null): AbortSignal {
       callerSignal.addEventListener("abort", () => controller.abort(), { once: true });
     }
   }
-  return controller.signal;
+  // The abort listener above only clears the timer if the request is
+  // actually aborted; a request that settles normally (success or a non-abort
+  // error) within the bound must not leave the timer running until it fires
+  // on its own — the caller clears it once the wrapped call settles.
+  return { signal: controller.signal, clear };
 }
 
 /**
@@ -54,7 +62,10 @@ function withTimeout(callerSignal?: AbortSignal | null): AbortSignal {
  */
 async function withServerContext<Init extends Record<string, unknown> | undefined>(
   init: Init,
-): Promise<Init & { baseUrl: string; headers: Headers; signal: AbortSignal }> {
+): Promise<{
+  init: Init & { baseUrl: string; headers: Headers; signal: AbortSignal };
+  clearTimer: () => void;
+}> {
   const serverUrl = await getServerUrl();
   const token = await getToken(serverUrl);
   const headers = mergeHeaders(
@@ -62,11 +73,14 @@ async function withServerContext<Init extends Record<string, unknown> | undefine
     token ? { Authorization: `Bearer ${token}` } : undefined,
     init?.headers as HeadersOptions | undefined,
   );
-  const signal = withTimeout(init?.signal as AbortSignal | null | undefined);
-  return { ...init, baseUrl: serverUrl, headers, signal } as Init & {
-    baseUrl: string;
-    headers: Headers;
-    signal: AbortSignal;
+  const { signal, clear } = withTimeout(init?.signal as AbortSignal | null | undefined);
+  return {
+    init: { ...init, baseUrl: serverUrl, headers, signal } as Init & {
+      baseUrl: string;
+      headers: Headers;
+      signal: AbortSignal;
+    },
+    clearTimer: clear,
   };
 }
 
@@ -87,7 +101,14 @@ const VERB_NAMES: VerbName[] = [
 ];
 
 function withDynamicBaseUrl(method: VerbMethod): VerbMethod {
-  return async (url, init) => method(url, await withServerContext(init));
+  return async (url, init) => {
+    const { init: fullInit, clearTimer } = await withServerContext(init);
+    try {
+      return await method(url, fullInit);
+    } finally {
+      clearTimer();
+    }
+  };
 }
 
 // openapi-fetch's verb methods are generic, overloaded and keyed to the exact
@@ -151,10 +172,10 @@ raw.use({
     }
 
     await clearToken();
-    // Clear the whole cache before re-seeding the token flag, so the fresh
-    // `false` isn't wiped out again by `clear()` and no stale query (another
-    // user's `me`, cached lists, …) survives the session boundary (ADR-010).
-    queryClient.clear();
-    queryClient.setQueryData(TOKEN_QUERY_KEY, false);
+    // `resetSessionCache` notifies the still-mounted `useSession` observers
+    // directly and drops every other cached query, so no stale query
+    // (another user's `me`, cached lists, …) survives the session boundary
+    // (ADR-010) without detaching those observers the way a `clear()` would.
+    resetSessionCache(queryClient, false);
   },
 });

@@ -1,7 +1,7 @@
 import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { ApiAuthError, login as apiLogin, logout as apiLogout, fetchMe } from "./authApi";
-import { ME_QUERY_KEY, TOKEN_QUERY_KEY } from "./queryKeys";
+import { ME_QUERY_KEY, resetSessionCache, TOKEN_QUERY_KEY } from "./queryKeys";
 import { deriveSessionGate } from "./sessionGate";
 import { clearToken, getToken, setToken } from "./token";
 
@@ -73,13 +73,13 @@ export function useSession() {
      * a pending state instead of a button that appears to do nothing. */
     retry: () => queryClient.invalidateQueries({ queryKey: ME_QUERY_KEY }),
     /** Escapes a stuck outage: clears the (possibly stale-IP-bound) token
-     * and the whole cache and returns to the login screen, same as
-     * `useLogout`'s cache handling (ADR-010) — but without a server round
-     * trip, since the server is exactly what's unreachable right now. */
+     * and every other cached query and returns to the login screen, same as
+     * `useLogout`'s cache handling (ADR-010, `resetSessionCache`) — but
+     * without a server round trip, since the server is exactly what's
+     * unreachable right now. */
     escapeUnreachable: async () => {
       await clearToken();
-      queryClient.clear();
-      queryClient.setQueryData(TOKEN_QUERY_KEY, false);
+      resetSessionCache(queryClient, false);
     },
     isAuthenticated: gate === "authenticated",
     me: meQuery.data,
@@ -102,19 +102,13 @@ export function useLogin() {
     mutationFn: async (credentials: { username: string; password: string }) => {
       const { token, user } = await apiLogin(credentials);
       await setToken(token);
-      // Clear first, same as logout/401 (ADR-010): a previous session's `me`
-      // or cached lists must never leak into the one that's about to load,
-      // e.g. a different cashier logging in right after another logged out
-      // of an unreachable server without a full app restart. Re-seed the
-      // token flag after `clear()` so the reactive auth gate sees `true`
-      // immediately instead of an empty (re-fetching) cache entry.
-      queryClient.clear();
-      queryClient.setQueryData(TOKEN_QUERY_KEY, true);
-      // `me` is freshly cleared but its query key is unchanged and `enabled`
-      // is already `true` from the token flag above, so this just forces the
-      // otherwise-lazy fetch to start immediately instead of waiting for the
-      // next render's subscription to notice.
-      await queryClient.invalidateQueries({ queryKey: ME_QUERY_KEY });
+      // `resetSessionCache` seeds the token flag on the mounted `useSession`
+      // observers directly (ADR-010: a previous session's `me` or cached
+      // lists must never leak into the one that's about to load, e.g. a
+      // different cashier logging in right after another logged out of an
+      // unreachable server without a full app restart) and resets `me` so
+      // the enable transition it triggers fetches this login's own user.
+      resetSessionCache(queryClient, true);
       return { user };
     },
   });
@@ -126,9 +120,7 @@ export function useLogin() {
  * is worse than a session still alive on the server (the owner can revoke
  * it from the admin), and stale cached data is worse still: the next login
  * (a different cashier, say) must never see the previous user's data
- * (ADR-010). Mirrors `admin/src/auth/AuthContext.tsx`. The token entry is
- * re-seeded after `clear()` so the reactive auth gate sees `false`
- * immediately instead of an empty (re-fetching) cache entry.
+ * (ADR-010, `resetSessionCache`). Mirrors `admin/src/auth/AuthContext.tsx`.
  */
 export function useLogout() {
   const queryClient = useQueryClient();
@@ -136,8 +128,7 @@ export function useLogout() {
     mutationFn: apiLogout,
     onSettled: async () => {
       await clearToken();
-      queryClient.clear();
-      queryClient.setQueryData(TOKEN_QUERY_KEY, false);
+      resetSessionCache(queryClient, false);
     },
   });
 }
