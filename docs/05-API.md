@@ -48,7 +48,7 @@ Base path `/v1`. JSON only. Server: Go, `api/cmd/api`, port 8080 behind Caddy.
 - **Promo pricing** (Q-05): `promoPrice`, `promoFrom` and `promoTo` (ISO 8601 dates) are
   independent fields on the product; a PATCH may set any subset of them. Sending an
   explicit `null` for any one of the three clears all three together (D-35's
-  `ClearPromo`), since a promo without one of its parts is not valid. `promoFrom` must
+  `ClearPromo`), since a promo without one of its parts is not valid. A promo is active on every calendar day in the shop timezone from `promoFrom`'s date to `promoTo`'s date inclusive; the time part is ignored (D-68). `promoFrom` must
   not be after `promoTo`; on a partial PATCH naming only one of the pair, the other side
   is checked against the value already stored, not against nothing. Variants have no
   promo fields — promo pricing is product-level only.
