@@ -59,12 +59,12 @@
       "Bash(git push --force:*)",
       "Bash(git push -f:*)",
       "Bash(docker compose down -v)",
-      "Bash(psql:* DROP*)",
+      "Bash(psql * DROP*)",
       "Read(./infra/.env)",
       "Read(./**/.env)",
       "Read(./**/.env.local)",
-      "Bash(docker compose exec postgres psql:* DROP*)",
-      "Bash(docker compose exec postgres psql:* TRUNCATE*)"
+      "Bash(docker compose exec postgres psql * DROP*)",
+      "Bash(docker compose exec postgres psql * TRUNCATE*)"
     ]
   }
 }
