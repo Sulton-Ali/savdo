@@ -77,3 +77,16 @@ export const catalogKeys = {
    * instead. */
   serverUrl: () => ["catalog", "serverUrl"] as const,
 };
+
+/**
+ * Reports query keys (Phase 5 T6), grouped the same way `catalogKeys` is.
+ * `summary`'s `filters` is `{ from?, to? }` — a cashier's own-day view
+ * always calls with `{}` (the server ignores anything else, D-55), so its
+ * key is stable across refetches for that role; manager+'s period toggle
+ * varies it.
+ */
+export const reportsKeys = {
+  summary: (filters: { from?: string; to?: string }) => ["reports", "summary", filters] as const,
+  byProduct: (filters: { from: string; to: string }) => ["reports", "byProduct", filters] as const,
+  lowStock: () => ["reports", "lowStock"] as const,
+};
