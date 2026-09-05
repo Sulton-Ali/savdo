@@ -46,7 +46,8 @@
     "settings": "Settings",
     "stockLevels": "Stock levels",
     "stockMovements": "Stock movements",
-    "stockLow": "Low stock"
+    "stockLow": "Low stock",
+    "reports": "Reports"
   },
   "auth": {
     "login": {
@@ -492,6 +493,49 @@
         "card": "Card",
         "transfer": "Transfer"
       }
+    }
+  },
+  "reports": {
+    "title": "Reports",
+    "presetLabel": "Date range",
+    "presets": {
+      "today": "Today",
+      "last7Days": "Last 7 days",
+      "thisMonth": "This month"
+    },
+    "locationPlaceholder": "All locations",
+    "summary": {
+      "title": "Sales summary",
+      "fields": {
+        "range": "Period",
+        "salesCount": "Sales",
+        "returnsCount": "Returns",
+        "revenue": "Revenue",
+        "discounts": "Discounts",
+        "refunds": "Refunds",
+        "netRevenue": "Net revenue",
+        "cost": "Cost",
+        "margin": "Margin"
+      }
+    },
+    "myDay": {
+      "title": "My day"
+    },
+    "byProduct": {
+      "title": "Sales by product",
+      "columns": {
+        "product": "Product",
+        "qtySold": "Qty sold",
+        "qtyReturned": "Qty returned",
+        "revenue": "Revenue",
+        "cost": "Cost",
+        "margin": "Margin"
+      }
+    },
+    "lowStock": {
+      "title": "Low stock",
+      "count": "{{value}} variant(s) at or below threshold",
+      "link": "View low stock"
     }
   }
 }

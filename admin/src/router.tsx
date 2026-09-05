@@ -14,6 +14,7 @@ import { productsRoute } from "./routes/app/productsRoute";
 import { purchaseEditRoute } from "./routes/app/purchaseEditRoute";
 import { purchaseNewRoute } from "./routes/app/purchaseNewRoute";
 import { purchasesRoute } from "./routes/app/purchasesRoute";
+import { reportsRoute } from "./routes/app/reportsRoute";
 import { settingsRoute } from "./routes/app/settingsRoute";
 import { staffRoute } from "./routes/app/staffRoute";
 import { stockLevelsRoute } from "./routes/app/stockLevelsRoute";
@@ -43,6 +44,7 @@ const routeTree = rootRoute.addChildren([
     // Phase 4 T6a: customers (cashier+ create/read, manager+ edit/delete).
     customersRoute,
     customerDetailRoute,
+    reportsRoute,
     settingsRoute,
     stockLevelsRoute,
     stockMovementsRoute,

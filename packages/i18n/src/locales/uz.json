@@ -46,7 +46,8 @@
     "settings": "Sozlamalar",
     "stockLevels": "Qoldiqlar",
     "stockMovements": "Ombor harakatlari",
-    "stockLow": "Kam qoldiq"
+    "stockLow": "Kam qoldiq",
+    "reports": "Hisobotlar"
   },
   "auth": {
     "login": {
@@ -492,6 +493,49 @@
         "card": "Karta",
         "transfer": "O‘tkazma"
       }
+    }
+  },
+  "reports": {
+    "title": "Hisobotlar",
+    "presetLabel": "Davr",
+    "presets": {
+      "today": "Bugun",
+      "last7Days": "Oxirgi 7 kun",
+      "thisMonth": "Shu oy"
+    },
+    "locationPlaceholder": "Barcha filiallar",
+    "summary": {
+      "title": "Sotuvlar xulosasi",
+      "fields": {
+        "range": "Davr",
+        "salesCount": "Sotuvlar",
+        "returnsCount": "Qaytarishlar",
+        "revenue": "Tushum",
+        "discounts": "Chegirmalar",
+        "refunds": "Qaytarilgan summa",
+        "netRevenue": "Sof tushum",
+        "cost": "Tannarx",
+        "margin": "Marja"
+      }
+    },
+    "myDay": {
+      "title": "Mening kunim"
+    },
+    "byProduct": {
+      "title": "Mahsulotlar bo‘yicha sotuvlar",
+      "columns": {
+        "product": "Mahsulot",
+        "qtySold": "Sotilgan miqdor",
+        "qtyReturned": "Qaytarilgan miqdor",
+        "revenue": "Tushum",
+        "cost": "Tannarx",
+        "margin": "Marja"
+      }
+    },
+    "lowStock": {
+      "title": "Kam qoldiq",
+      "count": "{{value}} variant chegara darajasida yoki undan past",
+      "link": "Kam qoldiqni ko‘rish"
     }
   }
 }

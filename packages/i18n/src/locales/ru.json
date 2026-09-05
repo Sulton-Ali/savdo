@@ -46,7 +46,8 @@
     "settings": "Настройки",
     "stockLevels": "Остатки",
     "stockMovements": "Движения товара",
-    "stockLow": "Низкий остаток"
+    "stockLow": "Низкий остаток",
+    "reports": "Отчёты"
   },
   "auth": {
     "login": {
@@ -492,6 +493,49 @@
         "card": "Карта",
         "transfer": "Перевод"
       }
+    }
+  },
+  "reports": {
+    "title": "Отчёты",
+    "presetLabel": "Период",
+    "presets": {
+      "today": "Сегодня",
+      "last7Days": "Последние 7 дней",
+      "thisMonth": "Этот месяц"
+    },
+    "locationPlaceholder": "Все филиалы",
+    "summary": {
+      "title": "Сводка по продажам",
+      "fields": {
+        "range": "Период",
+        "salesCount": "Продажи",
+        "returnsCount": "Возвраты",
+        "revenue": "Выручка",
+        "discounts": "Скидки",
+        "refunds": "Возмещения",
+        "netRevenue": "Чистая выручка",
+        "cost": "Себестоимость",
+        "margin": "Маржа"
+      }
+    },
+    "myDay": {
+      "title": "Мой день"
+    },
+    "byProduct": {
+      "title": "Продажи по товарам",
+      "columns": {
+        "product": "Товар",
+        "qtySold": "Продано",
+        "qtyReturned": "Возвращено",
+        "revenue": "Выручка",
+        "cost": "Себестоимость",
+        "margin": "Маржа"
+      }
+    },
+    "lowStock": {
+      "title": "Низкий остаток",
+      "count": "{{value}} вариант(ов) на пороге или ниже",
+      "link": "Смотреть низкий остаток"
     }
   }
 }
