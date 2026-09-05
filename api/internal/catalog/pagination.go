@@ -52,6 +52,17 @@ func cursorPtr(createdAt time.Time, id uuid.UUID) (*time.Time, *uuid.UUID) {
 	return &createdAt, &id
 }
 
+// idsOf extracts the id from each row via keyOf — used to build the
+// product-id batch ListProducts passes to coverImagesFor, one call per
+// page rather than one query per row (D-83).
+func idsOf[T any](rows []T, keyOf func(T) uuid.UUID) []uuid.UUID {
+	ids := make([]uuid.UUID, len(rows))
+	for i, r := range rows {
+		ids[i] = keyOf(r)
+	}
+	return ids
+}
+
 // paginateT trims rows (fetched with limit+1) down to at most limit items
 // and reports the opaque cursor for the next page — non-nil exactly when
 // a limit+1'th row proved more data exists.

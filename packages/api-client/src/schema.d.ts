@@ -1356,6 +1356,8 @@ export interface components {
             lowStockThreshold: number | null;
             variants?: components["schemas"]["Variant"][];
             images?: components["schemas"]["ProductImage"][];
+            /** @description `GET /products` list items only (D-83): the product image flagged `isCover`, else the first by position, else absent. `GET /products/{id}` returns the full `images` array instead and does not set this field. */
+            coverImage?: components["schemas"]["ProductImage"];
         };
         /** @description Defined now for Phase 6's public catalogue (D-32/D-34); no path references it yet. Only active products/variants are ever returned this way; variants carry `availability`, never cost or quantity (hard rule 4/5). */
         ProductPublic: {

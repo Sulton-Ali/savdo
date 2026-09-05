@@ -283,6 +283,10 @@ func (h *Handler) ListProducts(ctx context.Context, req gen.ListProductsRequestO
 		}
 		page, nc := paginateT(rows, limit, func(r db.ListProductsForStaffRow) (time.Time, uuid.UUID) { return r.CreatedAt, r.ID })
 		nextCursor = nc
+		covers, err := h.svc.coverImagesFor(ctx, authCtx.ShopID, idsOf(page, func(r db.ListProductsForStaffRow) uuid.UUID { return r.ID }))
+		if err != nil {
+			return nil, fmt.Errorf("catalog: list cover images: %w", err)
+		}
 		for _, r := range page {
 			g, err := toGenProductBase(commonFromListStaffRow(r), locale)
 			if err != nil {
@@ -296,6 +300,9 @@ func (h *Handler) ListProducts(ctx context.Context, req gen.ListProductsRequestO
 				v := money.String(d)
 				g.CostPrice = &v
 			}
+			if img, ok := covers[r.ID]; ok {
+				g.CoverImage = &img
+			}
 			items = append(items, g)
 		}
 	} else {
@@ -308,10 +315,17 @@ func (h *Handler) ListProducts(ctx context.Context, req gen.ListProductsRequestO
 		}
 		page, nc := paginateT(rows, limit, func(r db.ListProductsForCashierRow) (time.Time, uuid.UUID) { return r.CreatedAt, r.ID })
 		nextCursor = nc
+		covers, err := h.svc.coverImagesFor(ctx, authCtx.ShopID, idsOf(page, func(r db.ListProductsForCashierRow) uuid.UUID { return r.ID }))
+		if err != nil {
+			return nil, fmt.Errorf("catalog: list cover images: %w", err)
+		}
 		for _, r := range page {
 			g, err := toGenProductBase(commonFromListCashierRow(r), locale)
 			if err != nil {
 				return nil, fmt.Errorf("catalog: %w", err)
+			}
+			if img, ok := covers[r.ID]; ok {
+				g.CoverImage = &img
 			}
 			items = append(items, g)
 		}
