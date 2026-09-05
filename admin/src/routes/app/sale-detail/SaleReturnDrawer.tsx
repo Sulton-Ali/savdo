@@ -23,6 +23,7 @@ const RETURN_ERROR_KEYS: Partial<Record<string, string>> = {
   RETURN_EXCEEDS_SOLD: "sales.errors.returnExceedsSold",
   SALE_ALREADY_VOIDED: "sales.errors.saleAlreadyVoided",
   IDEMPOTENCY_KEY_REUSED: "sales.errors.returnIdempotencyKeyReused",
+  SALE_NOT_RETURNABLE: "sales.errors.saleNotReturnable",
 };
 
 /** Counts the decimal places of a `Decimal` wire string (`"2.000"` → 3,

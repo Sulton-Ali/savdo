@@ -238,6 +238,25 @@ describe("SaleDetailPage", () => {
     ).toBeTruthy();
   });
 
+  it("shows the mapped message on SALE_NOT_VOIDABLE", async () => {
+    // Unreachable through the normal UI — the void button is hidden for a
+    // return-kind sale — but the server remains the enforcement point
+    // (ADR-010), so a stale page or direct navigation still gets a specific
+    // message rather than the generic fallback (D-66).
+    renderPage(saleFixture(), ["sales.void"]);
+    fireEvent.click(await screen.findByRole("button", { name: "Void sale" }));
+
+    mockedApi.POST.mockResolvedValueOnce(apiError("SALE_NOT_VOIDABLE"));
+
+    fireEvent.click(screen.getByRole("button", { name: "OK" }));
+
+    expect(
+      await screen.findByText(
+        "This is a return and cannot be voided. To correct a mistaken return, sell the item again.",
+      ),
+    ).toBeTruthy();
+  });
+
   it("caps the return qty at sold minus returned, posts the exact body with an Idempotency-Key, and navigates to the new sale", async () => {
     // AntD's `InputNumber` doesn't expose a way to drive a typed value
     // through jsdom's `fireEvent.change` reliably (its internal input
@@ -406,5 +425,25 @@ describe("SaleDetailPage", () => {
     expect(
       await screen.findByText("The return quantity exceeds what is left to return."),
     ).toBeTruthy();
+  });
+
+  it("shows the mapped message on SALE_NOT_RETURNABLE", async () => {
+    // Unreachable through the normal UI — the return button is hidden for a
+    // return-kind sale — but the server remains the enforcement point
+    // (ADR-010), so a stale page or direct navigation still gets a specific
+    // message rather than the generic fallback (D-70).
+    renderPage(saleFixture(), ["sales.void"]);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Return" }));
+
+    const increase = (await screen.findAllByLabelText("Increase Value"))[0] as HTMLElement;
+    fireEvent.mouseDown(increase);
+    fireEvent.mouseUp(increase);
+
+    mockedApi.POST.mockResolvedValueOnce(apiError("SALE_NOT_RETURNABLE"));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Submit return" }));
+
+    expect(await screen.findByText("This is a return and cannot itself be returned.")).toBeTruthy();
   });
 });

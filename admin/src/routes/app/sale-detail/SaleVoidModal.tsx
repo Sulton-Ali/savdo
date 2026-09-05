@@ -17,6 +17,7 @@ const VOID_ERROR_KEYS: Partial<Record<string, string>> = {
   SALE_VOID_WINDOW_CLOSED: "sales.errors.voidWindowClosed",
   SALE_HAS_RETURNS: "sales.errors.saleHasReturns",
   SALE_ALREADY_VOIDED: "sales.errors.saleAlreadyVoided",
+  SALE_NOT_VOIDABLE: "sales.errors.saleNotVoidable",
 };
 
 /**
