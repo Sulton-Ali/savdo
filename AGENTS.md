@@ -154,5 +154,5 @@ pnpm --filter admin dev · pnpm --filter web dev · pnpm --filter mobile start
 ## MCP
 
 `context7` (library docs — mandatory before asserting an API) · `playwright` (browser
-verification for `/phase-done`, from Phase 2). DB inspection: `docker compose exec
+verification for `/phase-done`, from Phase 2). The MCP is pinned to Playwright's bundled Chromium (`--browser chromium`); run `pnpm exec playwright install chromium` once per machine. DB inspection: `docker compose exec
 postgres psql` — no postgres MCP (D-24).
