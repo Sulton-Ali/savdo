@@ -764,6 +764,10 @@
       "cart": {
         "empty": "Savat bo‘sh — mahsulot qidirish uchun «Mahsulot qo‘shish» tugmasini bosing."
       },
+      "qty": {
+        "decrease": "Sonini kamaytirish",
+        "increase": "Sonini oshirish"
+      },
       "discount": {
         "kindNone": "Chegirmasiz",
         "valuePlaceholder": "Miqdor",
@@ -775,6 +779,7 @@
         "change": "Mijozni almashtirish",
         "newCustomer": "Yangi mijoz"
       },
+      "estimate": "Taxminiy — to‘lovda server aniq summani tasdiqlaydi",
       "pay": "To‘lash",
       "paying": "Bajarilmoqda…",
       "locationRequired": "Sotuvni yakunlashdan oldin filialni tanlang.",

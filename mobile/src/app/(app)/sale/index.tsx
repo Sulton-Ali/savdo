@@ -18,8 +18,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Text } from "@/components/ui/text";
-import type { Location, Variant } from "@/features/catalog/api";
+import type { Location, Product, Variant } from "@/features/catalog/api";
 import { useDebouncedValue, useLocations } from "@/features/catalog/hooks";
+import { resolveEffectivePrice } from "@/features/catalog/pricing";
 import { VariantPicker } from "@/features/catalog/VariantPicker";
 import type { Customer } from "@/features/customers/api";
 import { useCustomersSearch } from "@/features/customers/hooks";
@@ -32,9 +33,12 @@ import {
 import {
   cartReducer,
   type DiscountKind,
+  estimateCartTotals,
   initialCartState,
   isValidDiscountValue,
   isZeroDecimalString,
+  multiplyMoneyByQty,
+  qtyExceedsAvailable,
 } from "@/features/sales/cart";
 import { useCreateSale } from "@/features/sales/hooks";
 import { persistLocationId, readStoredLocationId } from "@/features/sales/locationStorage";
@@ -78,26 +82,33 @@ function CustomerPickerModal({
   const { data, isFetching } = useCustomersSearch(debouncedQuery);
   const customers = useMemo(() => data?.pages.flatMap((page) => page.items) ?? [], [data]);
 
-  function handlePick(customer: Customer) {
-    onPick({ id: customer.id, fullName: customer.fullName, phone: customer.phone });
+  // Resets the search query on every close path (Cancel, backdrop/hardware
+  // back, picking a row, handing off to "New customer") so reopening the
+  // sheet never shows a stale query from the last time it was used (T4
+  // review nit).
+  function handleClose() {
     setRawQuery("");
     onClose();
   }
 
+  function handlePick(customer: Customer) {
+    onPick({ id: customer.id, fullName: customer.fullName, phone: customer.phone });
+    handleClose();
+  }
+
   function handleNewCustomer() {
-    setRawQuery("");
-    onClose();
+    handleClose();
     router.push({ pathname: "/customers/new", params: { returnTo: "sale" } });
   }
 
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+    <Modal visible={visible} animationType="slide" onRequestClose={handleClose}>
       <View className="flex-1 gap-3 bg-background p-4 pt-12">
         <View className="flex-row items-center justify-between">
           <Text variant="h4">{t("sales.fields.customer")}</Text>
           <Pressable
             accessibilityRole="button"
-            onPress={onClose}
+            onPress={handleClose}
             className="min-h-11 justify-center"
           >
             <Text className="text-primary">{t("common.cancel")}</Text>
@@ -188,20 +199,26 @@ function LocationPickerModal({
 
 /**
  * One-handed quick sale (T4, `docs/03-ARCHITECTURE.md` § Quick sale flow,
- * D-52..D-57): pick a location (remembered), search/pick variants with the
- * shared `VariantPicker` (T2), adjust quantities, optionally discount and
- * attach a customer, choose a payment method, and pay. Every total shown
- * after payment comes from the server's response — this screen never
- * computes or sends one (D-56, hard rule 8); a cart line therefore has no
- * price at all (see `features/sales/cart.ts`'s own doc comment for why:
- * the shared `VariantPicker`'s `onPick` reports back only the picked
- * `Variant`, which itself carries no product name either).
+ * D-52..D-57): pick a location (remembered, and re-validated against the
+ * shop's actual locations on every launch — see the location-bootstrap
+ * effect below, T4 review BLOCKER), search/pick variants with the shared
+ * `VariantPicker` (T2, its `onPick` gained an additive `product` argument
+ * in this review round), adjust quantities, optionally discount and
+ * attach a customer, choose a payment method, and pay. A cart line's
+ * price/product name and the cart's subtotal/discount/total are a
+ * *preview* only, resolved from the catalogue the same way `VariantPicker`
+ * itself does (`resolveEffectivePrice`) and clearly labelled as an
+ * estimate (`mobile.sale.estimate`) — the confirmation after payment shows
+ * only the server's own numbers, which is the only place a total is ever
+ * authoritative (D-56, hard rule 8; `features/sales/cart.ts`'s own doc
+ * comment has the full reasoning).
  */
 export default function SaleScreen() {
   const { t } = useTranslation();
   const router = useRouter();
   const { shop } = useSession();
   const currency = shop?.currency ?? "UZS";
+  const timeZone = shop?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
   const params = useLocalSearchParams<{
     attachCustomerId?: string;
     attachCustomerName?: string;
@@ -211,23 +228,60 @@ export default function SaleScreen() {
   const [cart, dispatch] = useReducer(cartReducer, undefined, initialCartState);
   const [lineErrors, setLineErrors] = useState<Record<string, string>>({});
   const [generalError, setGeneralError] = useState<string | null>(null);
+  // `true` when the last `POST /sales` failed in a way that leaves the
+  // outcome genuinely unknown (`409 IDEMPOTENCY_KEY_REUSED`, or any error
+  // that isn't a decoded server response at all — a network drop or a
+  // timeout never got as far as a response either) — the request may have
+  // already completed. Shown alongside `generalError` with a link to
+  // today's sales list so the cashier can check before paying again (T4
+  // review SHOULD-FIX 3 / nit 9).
+  const [possiblyRecorded, setPossiblyRecorded] = useState(false);
   const [completedSale, setCompletedSale] = useState<Sale | null>(null);
 
   const { data: locations } = useLocations();
   const activeLocations = useMemo(() => (locations ?? []).filter((l) => l.isActive), [locations]);
-  const [locationId, setLocationId] = useState<string | null>(() => readStoredLocationId());
-  const selectedLocation = activeLocations.find((l) => l.id === locationId) ?? null;
-  // Once the shop's locations load, fall back to the remembered id (if it's
-  // still active), else the shop's default location, else the first active
-  // one — a cashier who has never picked one yet still gets a location
-  // pre-selected rather than a mandatory extra tap every single sale.
+
+  // The remembered location id is only ever a *hint*: it might name a
+  // location that has since been deactivated, deleted, or — since
+  // `locationStorage.ts` namespaces it by server origin — could only reach
+  // this state at all from a stored value that predates that namespacing.
+  // Every screen control below gates on `selectedLocation`, the resolved
+  // `Location` object, never on a raw id (T4 review BLOCKER): a truthy but
+  // unresolved id must never be treated as "a location is selected".
+  const [selectedLocation, setSelectedLocation] = useState<Location | null>(null);
+  const [storedLocationId, setStoredLocationId] = useState<string | null>(null);
+  const [locationHydrated, setLocationHydrated] = useState(false);
   useEffect(() => {
-    if (locationId != null || activeLocations.length === 0) {
+    let cancelled = false;
+    readStoredLocationId().then((id) => {
+      if (!cancelled) {
+        setStoredLocationId(id);
+        setLocationHydrated(true);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  // Once the shop's locations load, accept the remembered id only if it
+  // names a location that is actually active right now; otherwise fall
+  // back to the shop's default location, else the first active one — a
+  // cashier who has never picked one yet (or whose remembered one is no
+  // longer valid) still gets a location pre-selected rather than a
+  // mandatory extra tap every sale. A rejected/missing remembered id is
+  // overwritten with the resolved fallback so this doesn't repeat next launch.
+  useEffect(() => {
+    if (selectedLocation != null || !locationHydrated || activeLocations.length === 0) {
       return;
     }
-    const fallback = activeLocations.find((l) => l.isDefault) ?? (activeLocations[0] as Location);
-    setLocationId(fallback.id);
-  }, [locationId, activeLocations]);
+    const remembered = activeLocations.find((l) => l.id === storedLocationId);
+    const resolved =
+      remembered ?? activeLocations.find((l) => l.isDefault) ?? (activeLocations[0] as Location);
+    setSelectedLocation(resolved);
+    if (resolved.id !== storedLocationId) {
+      void persistLocationId(resolved.id);
+    }
+  }, [selectedLocation, locationHydrated, storedLocationId, activeLocations]);
 
   const [locationModalOpen, setLocationModalOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -266,6 +320,14 @@ export default function SaleScreen() {
     cart.discount.value.trim() !== "" &&
     !isValidDiscountValue(discountKind, cart.discount.value);
 
+  // Decimal-safe preview only — never sent to the server, never shown as
+  // "the total" (that word is reserved for the confirmation screen's own
+  // `completedSale.total`, T4 review SHOULD-FIX 2). Recomputed on every
+  // render from the lines' pick-time prices, so it always matches what's
+  // currently in the cart.
+  const estimate = estimateCartTotals(cart.lines, cart.discount);
+  const hasEstimatedDiscount = estimate.discountAmount !== "0.00";
+
   function handleDiscountKindChange(kind: "none" | DiscountKind) {
     setDiscountKind(kind);
     if (kind === "none") {
@@ -298,27 +360,68 @@ export default function SaleScreen() {
   const createSale = useCreateSale();
 
   function handlePickLocation(location: Location) {
-    setLocationId(location.id);
-    persistLocationId(location.id);
+    setSelectedLocation(location);
+    void persistLocationId(location.id);
   }
 
-  function handlePickVariant(variant: Variant) {
-    const attrs = Object.values(variant.attributes).filter(Boolean).join(" / ");
-    const label = [variant.sku, attrs].filter(Boolean).join(" — ") || t("sales.items.noLabel");
-    dispatch({ type: "addItem", variantId: variant.id, label });
+  function clearLineError(variantId: string) {
     setLineErrors((prev) => {
-      if (!(variant.id in prev)) {
+      if (!(variantId in prev)) {
         return prev;
       }
-      const { [variant.id]: _removed, ...rest } = prev;
+      const { [variantId]: _removed, ...rest } = prev;
       return rest;
     });
+  }
+
+  // Wrap every qty-changing dispatch so a line's `STOCK_INSUFFICIENT`
+  // error clears as soon as the cashier tries a different quantity, rather
+  // than sticking around next to a qty that might now be fine (T4 review
+  // nit 7) — the server re-checks on the next "Pay" regardless.
+  function handleIncrement(variantId: string) {
+    dispatch({ type: "incrementQty", variantId });
+    clearLineError(variantId);
+  }
+
+  function handleDecrement(variantId: string) {
+    dispatch({ type: "decrementQty", variantId });
+    clearLineError(variantId);
+  }
+
+  function handleRemoveLine(variantId: string) {
+    dispatch({ type: "removeItem", variantId });
+    clearLineError(variantId);
+  }
+
+  function handleClearCart() {
+    dispatch({ type: "clear" });
+    setLineErrors({});
+    setGeneralError(null);
+    setPossiblyRecorded(false);
+    setCustomer(null);
+    setDiscountKind("none");
+  }
+
+  function handlePickVariant(variant: Variant, availableQty: string, product: Product) {
+    const attrs = Object.values(variant.attributes).filter(Boolean).join(" / ");
+    const label = [variant.sku, attrs].filter(Boolean).join(" — ") || t("sales.items.noLabel");
+    const unitPrice = resolveEffectivePrice(product, variant, timeZone);
+    dispatch({
+      type: "addItem",
+      variantId: variant.id,
+      label,
+      productName: product.name,
+      unitPrice,
+      availableQty,
+    });
+    clearLineError(variant.id);
     setPickerOpen(false);
   }
 
   function handlePay() {
     setGeneralError(null);
-    if (!locationId) {
+    setPossiblyRecorded(false);
+    if (!selectedLocation) {
       setGeneralError(t("mobile.sale.locationRequired"));
       return;
     }
@@ -339,7 +442,7 @@ export default function SaleScreen() {
       !isZeroDecimalString(cart.discount.value);
 
     const body: SaleCreate = {
-      locationId,
+      locationId: selectedLocation.id,
       items: cart.lines.map((line) => ({ variantId: line.variantId, qty: String(line.qty) })),
       payment: { method: paymentMethod },
       ...(customer ? { customerId: customer.id } : {}),
@@ -380,9 +483,28 @@ export default function SaleScreen() {
               return;
             }
             if (error.code === "IDEMPOTENCY_KEY_REUSED") {
+              // The same key was already used for a *different* body
+              // (`api/internal/httpx/idempotency.go`) — since a failed
+              // attempt never stores a key at all, this specific code only
+              // ever means an *earlier* attempt with this key already
+              // succeeded. Mint a fresh key so the cashier isn't stuck
+              // retrying against the stale one, and point at today's list
+              // to check whether that earlier sale is the one they meant
+              // (T4 review SHOULD-FIX 3).
+              dispatch({ type: "rekey" });
               setGeneralError(t("sales.errors.idempotencyKeyReused"));
+              setPossiblyRecorded(true);
               return;
             }
+          } else {
+            // Not a decoded server response at all — a network drop or a
+            // request timeout never got as far as one either, so the
+            // outcome is genuinely unknown; the same fresh-key + "check
+            // today's list" treatment applies (T4 review nit 9).
+            dispatch({ type: "rekey" });
+            setGeneralError(t("sales.errors.idempotencyKeyReused"));
+            setPossiblyRecorded(true);
+            return;
           }
           setGeneralError(t("errors.generic"));
         },
@@ -416,8 +538,13 @@ export default function SaleScreen() {
         keyboardShouldPersistTaps="handled"
       >
         {generalError ? (
-          <View className="rounded-md bg-destructive/10 p-3">
+          <View className="gap-1 rounded-md bg-destructive/10 p-3">
             <Text className="text-destructive">{generalError}</Text>
+            {possiblyRecorded ? (
+              <Pressable accessibilityRole="button" onPress={() => router.push("/sale/list")}>
+                <Text className="text-destructive underline">{t("mobile.sale.list.title")}</Text>
+              </Pressable>
+            ) : null}
           </View>
         ) : null}
 
@@ -433,7 +560,7 @@ export default function SaleScreen() {
         <View className="gap-2">
           <View className="flex-row items-center justify-between">
             <Text variant="large">{t("sales.items.title")}</Text>
-            <Button size="sm" disabled={!locationId} onPress={() => setPickerOpen(true)}>
+            <Button size="sm" disabled={!selectedLocation} onPress={() => setPickerOpen(true)}>
               <Plus size={16} color={tokens.color.surface} />
               <Text>{t("mobile.sale.addItem")}</Text>
             </Button>
@@ -442,49 +569,66 @@ export default function SaleScreen() {
           {cart.lines.length === 0 ? (
             <Text variant="muted">{t("mobile.sale.cart.empty")}</Text>
           ) : (
-            cart.lines.map((line) => (
-              <View key={line.variantId} className="gap-2 rounded-md border border-border p-3">
-                <View className="flex-row items-start justify-between gap-2">
-                  <Text className="flex-1" numberOfLines={2}>
-                    {line.label}
-                  </Text>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={t("sales.items.remove")}
-                    className="h-9 w-9 items-center justify-center"
-                    onPress={() => dispatch({ type: "removeItem", variantId: line.variantId })}
-                  >
-                    <Trash2 size={18} color={tokens.color.danger} />
-                  </Pressable>
+            cart.lines.map((line) => {
+              const lineError = lineErrors[line.variantId];
+              const exceedsAvailable =
+                !lineError && qtyExceedsAvailable(line.qty, line.availableQty);
+              return (
+                <View key={line.variantId} className="gap-2 rounded-md border border-border p-3">
+                  <View className="flex-row items-start justify-between gap-2">
+                    <View className="flex-1">
+                      <Text numberOfLines={1}>{line.productName}</Text>
+                      <Text variant="muted" numberOfLines={2}>
+                        {line.label}
+                      </Text>
+                    </View>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={t("sales.items.remove")}
+                      className="h-9 w-9 items-center justify-center"
+                      onPress={() => handleRemoveLine(line.variantId)}
+                    >
+                      <Trash2 size={18} color={tokens.color.danger} />
+                    </Pressable>
+                  </View>
+                  <View className="flex-row items-center justify-between">
+                    <View className="flex-row items-center gap-3">
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={t("mobile.sale.qty.decrease")}
+                        className="h-11 w-11 items-center justify-center rounded-md border border-border active:bg-accent"
+                        onPress={() => handleDecrement(line.variantId)}
+                      >
+                        <Minus size={20} color={tokens.color.text} />
+                      </Pressable>
+                      <Text variant="large" className="w-10 text-center">
+                        {line.qty}
+                      </Text>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={t("mobile.sale.qty.increase")}
+                        className="h-11 w-11 items-center justify-center rounded-md border border-border active:bg-accent"
+                        onPress={() => handleIncrement(line.variantId)}
+                      >
+                        <Plus size={20} color={tokens.color.text} />
+                      </Pressable>
+                    </View>
+                    <Text variant="muted">
+                      {formatMoney(multiplyMoneyByQty(line.unitPrice, line.qty), currency)}
+                    </Text>
+                  </View>
+                  {lineError ? (
+                    <Text variant="small" className="text-destructive">
+                      {lineError}
+                    </Text>
+                  ) : exceedsAvailable ? (
+                    <Text variant="small" className="text-destructive">
+                      {t("sales.errors.stockInsufficient", { available: line.availableQty })}
+                    </Text>
+                  ) : null}
                 </View>
-                <View className="flex-row items-center gap-3">
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="-"
-                    className="h-11 w-11 items-center justify-center rounded-md border border-border active:bg-accent"
-                    onPress={() => dispatch({ type: "decrementQty", variantId: line.variantId })}
-                  >
-                    <Minus size={20} color={tokens.color.text} />
-                  </Pressable>
-                  <Text variant="large" className="w-10 text-center">
-                    {line.qty}
-                  </Text>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="+"
-                    className="h-11 w-11 items-center justify-center rounded-md border border-border active:bg-accent"
-                    onPress={() => dispatch({ type: "incrementQty", variantId: line.variantId })}
-                  >
-                    <Plus size={20} color={tokens.color.text} />
-                  </Pressable>
-                </View>
-                {lineErrors[line.variantId] ? (
-                  <Text variant="small" className="text-destructive">
-                    {lineErrors[line.variantId]}
-                  </Text>
-                ) : null}
-              </View>
-            ))
+              );
+            })
           )}
         </View>
 
@@ -529,9 +673,34 @@ export default function SaleScreen() {
           ) : null}
         </View>
 
+        {cart.lines.length > 0 ? (
+          <View className="gap-1 rounded-md border border-border p-3">
+            <Text variant="small" className="text-muted-foreground">
+              {t("mobile.sale.estimate")}
+            </Text>
+            <View className="flex-row justify-between">
+              <Text variant="muted">{t("sales.summary.subtotal")}</Text>
+              <Text>{formatMoney(estimate.subtotal, currency)}</Text>
+            </View>
+            {hasEstimatedDiscount ? (
+              <View className="flex-row justify-between">
+                <Text variant="muted">{t("sales.summary.discount")}</Text>
+                <Text>-{formatMoney(estimate.discountAmount, currency)}</Text>
+              </View>
+            ) : null}
+            <View className="flex-row justify-between">
+              <Text variant="large">{t("sales.summary.total")}</Text>
+              <Text variant="large">{formatMoney(estimate.total, currency)}</Text>
+            </View>
+          </View>
+        ) : null}
+
         <View className="gap-2">
           <Pressable
             accessibilityRole="button"
+            accessibilityLabel={
+              customer ? t("mobile.sale.customer.change") : t("mobile.sale.customer.attach")
+            }
             className="min-h-14 justify-center rounded-md border border-input bg-background px-3"
             onPress={() => setCustomerModalOpen(true)}
           >
@@ -569,12 +738,21 @@ export default function SaleScreen() {
         <Pressable accessibilityRole="button" onPress={() => router.push("/sale/list")}>
           <Text className="text-center text-primary">{t("mobile.sale.list.title")}</Text>
         </Pressable>
+
+        {cart.lines.length > 0 ? (
+          <Pressable accessibilityRole="button" onPress={handleClearCart}>
+            <Text className="text-center text-destructive">{t("sales.cart.clear")}</Text>
+          </Pressable>
+        ) : null}
       </ScrollView>
 
       <View className="border-border border-t bg-background p-4">
         <Button size="lg" disabled={createSale.isPending} onPress={handlePay}>
           {createSale.isPending ? (
-            <ActivityIndicator color={tokens.color.surface} />
+            <>
+              <ActivityIndicator color={tokens.color.surface} />
+              <Text>{t("mobile.sale.paying")}</Text>
+            </>
           ) : (
             <Text>{t("mobile.sale.pay")}</Text>
           )}
@@ -600,11 +778,11 @@ export default function SaleScreen() {
               <Text className="text-primary">{t("common.cancel")}</Text>
             </Pressable>
           </View>
-          {locationId ? (
+          {selectedLocation ? (
             <VariantPicker
-              locationId={locationId}
+              locationId={selectedLocation.id}
               excludeVariantIds={cart.lines.map((line) => line.variantId)}
-              onPick={(variant) => handlePickVariant(variant)}
+              onPick={handlePickVariant}
             />
           ) : null}
         </View>

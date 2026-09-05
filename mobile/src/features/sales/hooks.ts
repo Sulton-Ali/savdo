@@ -1,19 +1,28 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { salesKeys } from "@/lib/queryKeys";
+import { customersKeys, salesKeys } from "@/lib/queryKeys";
 
 import { createSale, getSale, type ListSalesParams, listSales, type SaleCreate } from "./api";
 
 /** Completes a quick sale (`POST /sales`). Invalidates the sales list on
- * success so a freshly completed sale shows up in `sale/list.tsx` and a
- * customer's purchase history without a manual pull-to-refresh. */
+ * success so a freshly completed sale shows up in `sale/list.tsx`, plus —
+ * when the sale carried a `customerId` — that customer's own detail key
+ * (`customersKeys.detail`, the prefix `features/customers/hooks.ts`'s
+ * `useCustomerSales` builds its `[...detail(id), "sales"]` key from), so
+ * their purchase history (`customers/[id].tsx`) shows the new sale without
+ * a manual pull-to-refresh (T4 review nit). */
 export function useCreateSale() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ body, idempotencyKey }: { body: SaleCreate; idempotencyKey: string }) =>
       createSale(body, idempotencyKey),
-    onSuccess: () => {
+    onSuccess: (_sale, variables) => {
       queryClient.invalidateQueries({ queryKey: ["sales"] });
+      if (variables.body.customerId) {
+        queryClient.invalidateQueries({
+          queryKey: customersKeys.detail(variables.body.customerId),
+        });
+      }
     },
   });
 }

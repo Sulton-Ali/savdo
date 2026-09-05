@@ -764,6 +764,10 @@
       "cart": {
         "empty": "Cart is empty — tap \"Add item\" to search a product."
       },
+      "qty": {
+        "decrease": "Decrease quantity",
+        "increase": "Increase quantity"
+      },
       "discount": {
         "kindNone": "No discount",
         "valuePlaceholder": "Value",
@@ -775,6 +779,7 @@
         "change": "Change customer",
         "newCustomer": "New customer"
       },
+      "estimate": "Estimate — the server confirms the exact total on payment",
       "pay": "Pay",
       "paying": "Processing…",
       "locationRequired": "Pick a location before completing the sale.",

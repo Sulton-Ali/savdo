@@ -34,7 +34,13 @@ interface VariantRow {
 export interface VariantPickerProps {
   /** Quantities are shown, and reported to `onPick`, at this location only. */
   locationId: string;
-  onPick: (variant: Variant, availableQty: string) => void;
+  /** `product` is the variant's parent — additive third argument (T4 review):
+   * a caller that only destructures `(variant, availableQty)` keeps working
+   * unchanged (extra JS callback arguments are simply ignored), so T5's
+   * stock adjustment/transfer pickers needed no update for this. Lets a
+   * caller resolve a display price (`resolveEffectivePrice`) or product
+   * name without a second fetch — see `features/sales/cart.ts`'s `CartLine`. */
+  onPick: (variant: Variant, availableQty: string, product: Product) => void;
   /** Variant ids to hide from the results, e.g. lines already in a cart. */
   excludeVariantIds?: string[];
 }
@@ -126,7 +132,7 @@ export function VariantPicker({ locationId, onPick, excludeVariantIds }: Variant
             <Pressable
               accessibilityRole="button"
               className="min-h-12 flex-row items-center justify-between border-border border-b px-3 py-3 active:bg-accent"
-              onPress={() => onPick(item.variant, item.qty)}
+              onPress={() => onPick(item.variant, item.qty, selectedProduct)}
             >
               <Text numberOfLines={1} className="flex-1 pr-2">
                 {variantLabel(item.variant)}

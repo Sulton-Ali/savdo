@@ -6,26 +6,19 @@
  * `include` covers this file under `src/features` alongside D-85's own
  * `src/lib` examples).
  *
- * A cart line carries no price and no product name: the shared
- * `features/catalog/VariantPicker.tsx` (T2) reports back only the picked
- * `Variant` and its available qty at the chosen location, never the
- * `Product` it belongs to — and `Variant` itself has no `productId`/name
- * field, so there is no way for this caller to resolve one without
- * fetching every product's variants. This is a real gap between that
- * component's shape and this cart's needs (also flagged in the report); it
- * is not fixed here since `VariantPicker.tsx` is outside this task's file
- * scope (a T2 file). The line's `label` is built from the variant's own
- * SKU/attributes instead (`sale/index.tsx`'s `variantLabel`), the same
- * fallback shape `admin/src/routes/app/QuickSalePage.tsx`'s own
- * `variantLabel` uses.
- *
- * `POST /sales` only ever carries `variantId`/`qty` — never a price (D-56,
- * hard rule 8) — so this cart never needed one for the request either; the
- * server computes and returns every total. No money value is computed or
- * displayed anywhere in this module for the same reason (deliberately
- * simpler than `admin`'s quick-sale cart, which does keep a decimal-safe
- * preview total — this module has no product/price data to preview from at
- * all, see above).
+ * A cart line's `productName`/`unitPrice` are a *preview* only, resolved
+ * once when the line is added from the `Variant` and its parent `Product`
+ * the shared `features/catalog/VariantPicker.tsx` now reports back
+ * (T4 review: its `onPick` gained an additive third `product` argument for
+ * exactly this). `POST /sales` still only ever carries `variantId`/`qty` —
+ * never a price (D-56, hard rule 8) — so none of this module's money math
+ * is sent anywhere; `estimateCartTotals` below is for display only,
+ * labelled as an estimate in the UI (`mobile.sale.estimate`), and the
+ * server's own response/`GET /sales/{id}` is what a confirmation screen
+ * shows. `availableQty` is kept per line only to warn when "+" would take
+ * a line above the stock last seen at pick time (`qtyExceedsAvailable`) —
+ * the server still re-checks authoritatively and can still answer `409
+ * STOCK_INSUFFICIENT` regardless (stock can move between pick and pay).
  */
 
 export type DiscountKind = "percent" | "fixed";
@@ -46,6 +39,18 @@ export interface CartDiscount {
 export interface CartLine {
   variantId: string;
   label: string;
+  /** Resolved once, when the line is added, from the picked `Variant`'s
+   * parent `Product` — a preview only (see this module's own doc comment). */
+  productName: string;
+  /** `features/catalog/pricing.ts`'s `resolveEffectivePrice` at pick time —
+   * a preview only; the server resolves it again, authoritatively, at
+   * payment time (D-67/D-68, hard rule 8). */
+  unitPrice: string;
+  /** The stock quantity the `VariantPicker` showed for this variant at
+   * pick time — a snapshot, not re-checked as the cart is edited; used only
+   * by `qtyExceedsAvailable` to warn in the UI, never to block a qty change
+   * (the server is still the only authority, hard rule 8). */
+  availableQty: string;
   /** Whole units only — the same simplifying assumption
    * `admin/src/routes/app/QuickSalePage.tsx`'s `formatSaleQty` makes (a
    * family clothing shop's till always sells whole units); revisit if a
@@ -64,7 +69,9 @@ export interface CartState {
    * non-empty, and kept stable across every further edit — adding or
    * removing a line, changing qty, changing the discount — so a genuine
    * double-tap of "Pay" always replays the exact same request instead of
-   * starting a second one. Reset only on `clear` and `completed`.
+   * starting a second one. Reset on `clear` and `completed`; also minted
+   * fresh on demand by `rekey` (kept as a distinct action from `clear`
+   * since it leaves `lines`/`discount` untouched — see its own doc comment).
    *
    * Safe to keep stable across an edit made *after* a failed submit too
    * (e.g. fixing a qty once the server answers `409 STOCK_INSUFFICIENT`):
@@ -79,14 +86,33 @@ export interface CartState {
 }
 
 export type CartAction =
-  | { type: "addItem"; variantId: string; label: string; qty?: number }
+  | {
+      type: "addItem";
+      variantId: string;
+      label: string;
+      productName: string;
+      unitPrice: string;
+      availableQty: string;
+      qty?: number;
+    }
   | { type: "incrementQty"; variantId: string }
   | { type: "decrementQty"; variantId: string }
   | { type: "setQty"; variantId: string; qty: number }
   | { type: "removeItem"; variantId: string }
   | { type: "setDiscount"; discount: CartDiscount | null }
   | { type: "clear" }
-  | { type: "completed" };
+  | { type: "completed" }
+  /** Mints a fresh `idempotencyKey` without touching `lines`/`discount` —
+   * unlike `clear`/`completed`, this is for the "we genuinely don't know
+   * if the last attempt went through" cases (`409 IDEMPOTENCY_KEY_REUSED`,
+   * or a network/timeout error with no response at all, T4 review nit 9):
+   * the cashier's cart is still exactly what they built, but retrying with
+   * the *same* key would either replay a stale success or, if the previous
+   * attempt never reached the server, hit `IDEMPOTENCY_KEY_REUSED` once a
+   * different key's worth of edits piles up. `sale/index.tsx` pairs this
+   * with a hint pointing at today's sales list, so the cashier can check
+   * whether the earlier attempt actually completed before paying again. */
+  | { type: "rekey" };
 
 /**
  * Generates an idempotency key with no dependency on a runtime global this
@@ -105,11 +131,13 @@ export function initialCartState(): CartState {
   return { lines: [], discount: null, idempotencyKey: generateIdempotencyKey() };
 }
 
-/** Decimal-string compare scale for the `percent` upper bound check below —
- * generous enough for any percent a person would type (ADR-007: never
- * `Number`/float on a value that represents money or a money-like
- * percentage). */
-const COMPARE_SCALE = 6;
+/** Decimal-string fixed-point scale for money (ADR-007: `NUMERIC(14,2)`)
+ * and for a discount `percent` value — never `Number`/float on either
+ * (hard rule 4). Shared by the discount-percent bound check below and by
+ * `estimateCartTotals`'s money arithmetic. */
+const MONEY_SCALE = 2;
+const PERCENT_SCALE = 4;
+const QTY_SCALE = 3;
 
 function toScaledInt(value: string, scale: number): bigint {
   const [intPartRaw, fracPartRaw = ""] = value.trim().split(".");
@@ -118,9 +146,33 @@ function toScaledInt(value: string, scale: number): bigint {
   return BigInt(intPart + fracPart);
 }
 
-/** `true` when non-negative decimal string `value` is greater than `limit`. */
+/** Inverse of `toScaledInt` — formats a scaled `BigInt` back to a decimal
+ * string, e.g. `fromScaledInt(12345n, 2)` -> `"123.45"`. */
+function fromScaledInt(value: bigint, scale: number): string {
+  const negative = value < 0n;
+  const magnitude = negative ? -value : value;
+  const digits = magnitude.toString().padStart(scale + 1, "0");
+  const intPart = digits.slice(0, digits.length - scale);
+  const fracPart = digits.slice(digits.length - scale);
+  const sign = negative && magnitude !== 0n ? "-" : "";
+  return scale > 0 ? `${sign}${intPart}.${fracPart}` : `${sign}${intPart}`;
+}
+
+/** Rounds `numerator / divisor` half-up, away from zero, both `BigInt` —
+ * only `percentOfMoney` below needs this (an integer money x integer qty
+ * multiplication, `multiplyMoneyByQty`, is always exact). */
+function roundDiv(numerator: bigint, divisor: bigint): bigint {
+  if (numerator >= 0n) {
+    return (numerator + divisor / 2n) / divisor;
+  }
+  return -((-numerator + divisor / 2n) / divisor);
+}
+
+/** `true` when non-negative decimal string `value` is greater than `limit`
+ * — compared at `PERCENT_SCALE`, generous enough for any percent a person
+ * would type. */
 function exceeds(value: string, limit: string): boolean {
-  return toScaledInt(value, COMPARE_SCALE) > toScaledInt(limit, COMPARE_SCALE);
+  return toScaledInt(value, PERCENT_SCALE) > toScaledInt(limit, PERCENT_SCALE);
 }
 
 const DECIMAL_STRING_RE = /^\d+(\.\d+)?$/;
@@ -147,6 +199,83 @@ export function isZeroDecimalString(value: string): boolean {
   return /^0+(\.0+)?$/.test(value.trim());
 }
 
+/** `unitPrice` (money, 2-place decimal string) x `qty` (a whole-unit
+ * integer count) -> a money decimal string. Exact — no rounding needed,
+ * unlike `percentOfMoney` below. */
+export function multiplyMoneyByQty(unitPrice: string, qty: number): string {
+  return fromScaledInt(toScaledInt(unitPrice, MONEY_SCALE) * BigInt(qty), MONEY_SCALE);
+}
+
+/** Sums a list of money decimal strings; `[]` sums to `"0.00"`. */
+export function sumMoney(values: string[]): string {
+  const total = values.reduce((acc, value) => acc + toScaledInt(value, MONEY_SCALE), 0n);
+  return fromScaledInt(total, MONEY_SCALE);
+}
+
+export function subtractMoney(a: string, b: string): string {
+  return fromScaledInt(toScaledInt(a, MONEY_SCALE) - toScaledInt(b, MONEY_SCALE), MONEY_SCALE);
+}
+
+/** Clamps a money decimal string at zero (never negative) — the estimate's
+ * `total` uses this the same way `admin/src/routes/app/QuickSalePage.tsx`'s
+ * preview does: the server rejects a discount over the subtotal rather
+ * than silently clamping it (D-57), this only keeps the *preview* from
+ * showing a negative total while the user is mid-edit. */
+export function clampMoneyAtZero(value: string): string {
+  return toScaledInt(value, MONEY_SCALE) < 0n ? "0.00" : value;
+}
+
+/** `percent` (0..100, decimal string, e.g. "12.5") of a money `subtotal`,
+ * decimal-safe, rounded half-up to 2 places. */
+export function percentOfMoney(subtotal: string, percent: string): string {
+  const subtotalUnits = toScaledInt(subtotal, MONEY_SCALE);
+  const percentUnits = toScaledInt(percent, PERCENT_SCALE);
+  const divisor = 10n ** BigInt(PERCENT_SCALE) * 100n;
+  return fromScaledInt(roundDiv(subtotalUnits * percentUnits, divisor), MONEY_SCALE);
+}
+
+/** `true` when a whole-unit `qty` is more than the decimal-string
+ * `availableQty` snapshot a cart line carries — decimal-safe (`available`
+ * can have up to 3 places, matching `docs/05-API.md`'s stock `"2.000"`
+ * convention), used only for a UI warning (this module's own doc comment). */
+export function qtyExceedsAvailable(qty: number, availableQty: string): boolean {
+  const qtyUnits = BigInt(qty) * 10n ** BigInt(QTY_SCALE);
+  return qtyUnits > toScaledInt(availableQty, QTY_SCALE);
+}
+
+export interface CartEstimate {
+  subtotal: string;
+  /** `"0.00"` when there is no active discount. */
+  discountAmount: string;
+  total: string;
+}
+
+/** A decimal-safe *preview* of what the server will charge, from the
+ * catalogue prices resolved onto each line at pick time — never sent to
+ * the server and never authoritative (hard rule 8; this module's own doc
+ * comment). Mirrors `admin/src/routes/app/quick-sale/decimal.ts`'s
+ * `multiplyMoneyByQty`/`sumMoney`/`percentOfMoney`/`subtractMoney` shape. */
+export function estimateCartTotals(lines: CartLine[], discount: CartDiscount | null): CartEstimate {
+  const subtotal = sumMoney(lines.map((line) => multiplyMoneyByQty(line.unitPrice, line.qty)));
+  const hasDiscount =
+    discount != null &&
+    isValidDiscountValue(discount.kind, discount.value) &&
+    !isZeroDecimalString(discount.value);
+  const discountAmount = hasDiscount
+    ? discount.kind === "percent"
+      ? percentOfMoney(subtotal, discount.value.trim())
+      : // Re-scaled to a 2-place money string (a "fixed" value like "5000"
+        // is otherwise returned as-is, inconsistent with every other money
+        // string this module produces).
+        fromScaledInt(toScaledInt(discount.value.trim(), MONEY_SCALE), MONEY_SCALE)
+    : "0.00";
+  return {
+    subtotal,
+    discountAmount,
+    total: clampMoneyAtZero(subtractMoney(subtotal, discountAmount)),
+  };
+}
+
 function updateLines(state: CartState, lines: CartLine[]): CartState {
   return { ...state, lines };
 }
@@ -163,7 +292,17 @@ export function cartReducer(state: CartState, action: CartAction): CartState {
         ? state.lines.map((line) =>
             line.variantId === action.variantId ? { ...line, qty: line.qty + addedQty } : line,
           )
-        : [...state.lines, { variantId: action.variantId, label: action.label, qty: addedQty }];
+        : [
+            ...state.lines,
+            {
+              variantId: action.variantId,
+              label: action.label,
+              productName: action.productName,
+              unitPrice: action.unitPrice,
+              availableQty: action.availableQty,
+              qty: addedQty,
+            },
+          ];
       const wasEmpty = state.lines.length === 0;
       return {
         ...updateLines(state, lines),
@@ -219,6 +358,8 @@ export function cartReducer(state: CartState, action: CartAction): CartState {
     case "clear":
     case "completed":
       return initialCartState();
+    case "rekey":
+      return { ...state, idempotencyKey: generateIdempotencyKey() };
     default:
       return state;
   }

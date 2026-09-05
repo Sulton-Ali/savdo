@@ -3,17 +3,39 @@ import { describe, expect, it } from "vitest";
 import {
   type CartState,
   cartReducer,
+  estimateCartTotals,
   initialCartState,
   isValidDiscountValue,
   isZeroDecimalString,
+  multiplyMoneyByQty,
+  percentOfMoney,
+  qtyExceedsAvailable,
+  subtractMoney,
+  sumMoney,
 } from "./cart";
 
 function addA(state: CartState, qty?: number): CartState {
-  return cartReducer(state, { type: "addItem", variantId: "a", label: "Variant A", qty });
+  return cartReducer(state, {
+    type: "addItem",
+    variantId: "a",
+    label: "Variant A",
+    productName: "Product A",
+    unitPrice: "10000.00",
+    availableQty: "5.000",
+    qty,
+  });
 }
 
 function addB(state: CartState, qty?: number): CartState {
-  return cartReducer(state, { type: "addItem", variantId: "b", label: "Variant B", qty });
+  return cartReducer(state, {
+    type: "addItem",
+    variantId: "b",
+    label: "Variant B",
+    productName: "Product B",
+    unitPrice: "25000.00",
+    availableQty: "2.000",
+    qty,
+  });
 }
 
 describe("initialCartState", () => {
@@ -33,9 +55,18 @@ describe("initialCartState", () => {
 });
 
 describe("addItem", () => {
-  it("adds a new line with qty 1 by default", () => {
+  it("adds a new line with qty 1 by default, carrying product/price/availability", () => {
     const state = addA(initialCartState());
-    expect(state.lines).toEqual([{ variantId: "a", label: "Variant A", qty: 1 }]);
+    expect(state.lines).toEqual([
+      {
+        variantId: "a",
+        label: "Variant A",
+        productName: "Product A",
+        unitPrice: "10000.00",
+        availableQty: "5.000",
+        qty: 1,
+      },
+    ]);
   });
 
   it("adds a new line with the given qty", () => {
@@ -125,7 +156,7 @@ describe("removeItem", () => {
     let state = addA(initialCartState());
     state = addB(state);
     state = cartReducer(state, { type: "removeItem", variantId: "a" });
-    expect(state.lines).toEqual([{ variantId: "b", label: "Variant B", qty: 1 }]);
+    expect(state.lines.map((line) => line.variantId)).toEqual(["b"]);
   });
 });
 
@@ -219,5 +250,119 @@ describe("clear / completed", () => {
     expect(after.lines).toEqual([]);
     expect(after.discount).toBeNull();
     expect(after.idempotencyKey).not.toBe(before.idempotencyKey);
+  });
+});
+
+describe("rekey", () => {
+  it("mints a fresh idempotency key without touching lines or discount", () => {
+    let before = addA(initialCartState(), 2);
+    before = cartReducer(before, {
+      type: "setDiscount",
+      discount: { kind: "percent", value: "10", reason: "loyal" },
+    });
+    const after = cartReducer(before, { type: "rekey" });
+    expect(after.idempotencyKey).not.toBe(before.idempotencyKey);
+    expect(after.lines).toEqual(before.lines);
+    expect(after.discount).toEqual(before.discount);
+  });
+});
+
+describe("money helpers", () => {
+  it("multiplyMoneyByQty is exact for whole-unit quantities", () => {
+    expect(multiplyMoneyByQty("199000.00", 2)).toBe("398000.00");
+    expect(multiplyMoneyByQty("10000.50", 3)).toBe("30001.50");
+    expect(multiplyMoneyByQty("100.00", 0)).toBe("0.00");
+  });
+
+  it("sumMoney adds a list, and sums to 0.00 for an empty list", () => {
+    expect(sumMoney(["100.00", "50.25", "0.75"])).toBe("151.00");
+    expect(sumMoney([])).toBe("0.00");
+  });
+
+  it("subtractMoney subtracts, allowing a negative result", () => {
+    expect(subtractMoney("100.00", "40.00")).toBe("60.00");
+    expect(subtractMoney("40.00", "100.00")).toBe("-60.00");
+  });
+
+  it("percentOfMoney rounds half-up to 2 places", () => {
+    expect(percentOfMoney("100.00", "10")).toBe("10.00");
+    // 33.335 rounds up, not banker's-rounds to even.
+    expect(percentOfMoney("333.35", "10")).toBe("33.34");
+    expect(percentOfMoney("398000.00", "10")).toBe("39800.00");
+  });
+
+  it("qtyExceedsAvailable compares a whole-unit qty against a decimal availableQty", () => {
+    expect(qtyExceedsAvailable(2, "5.000")).toBe(false);
+    expect(qtyExceedsAvailable(5, "5.000")).toBe(false);
+    expect(qtyExceedsAvailable(6, "5.000")).toBe(true);
+    expect(qtyExceedsAvailable(1, "0.500")).toBe(true);
+  });
+});
+
+describe("estimateCartTotals", () => {
+  it("sums line totals with no discount", () => {
+    let state = addA(initialCartState(), 2); // 10000.00 x 2 = 20000.00
+    state = addB(state, 1); // 25000.00 x 1 = 25000.00
+    expect(estimateCartTotals(state.lines, state.discount)).toEqual({
+      subtotal: "45000.00",
+      discountAmount: "0.00",
+      total: "45000.00",
+    });
+  });
+
+  it("applies a percent discount", () => {
+    const state = addA(initialCartState(), 2); // subtotal 20000.00
+    const estimate = estimateCartTotals(state.lines, {
+      kind: "percent",
+      value: "10",
+      reason: "",
+    });
+    expect(estimate).toEqual({
+      subtotal: "20000.00",
+      discountAmount: "2000.00",
+      total: "18000.00",
+    });
+  });
+
+  it("applies a fixed discount", () => {
+    const state = addA(initialCartState(), 2); // subtotal 20000.00
+    const estimate = estimateCartTotals(state.lines, {
+      kind: "fixed",
+      value: "5000",
+      reason: "",
+    });
+    expect(estimate).toEqual({
+      subtotal: "20000.00",
+      discountAmount: "5000.00",
+      total: "15000.00",
+    });
+  });
+
+  it("clamps the total at zero when a fixed discount exceeds the subtotal", () => {
+    const state = addA(initialCartState(), 1); // subtotal 10000.00
+    const estimate = estimateCartTotals(state.lines, {
+      kind: "fixed",
+      value: "50000",
+      reason: "",
+    });
+    expect(estimate.total).toBe("0.00");
+  });
+
+  it("ignores an invalid or zero discount", () => {
+    const state = addA(initialCartState(), 1);
+    const invalid = estimateCartTotals(state.lines, { kind: "percent", value: "150", reason: "" });
+    const zero = estimateCartTotals(state.lines, { kind: "fixed", value: "0", reason: "" });
+    const emptyValue = estimateCartTotals(state.lines, { kind: "percent", value: "", reason: "" });
+    expect(invalid.discountAmount).toBe("0.00");
+    expect(zero.discountAmount).toBe("0.00");
+    expect(emptyValue.discountAmount).toBe("0.00");
+  });
+
+  it("is 0.00/0.00/0.00 for an empty cart", () => {
+    expect(estimateCartTotals([], null)).toEqual({
+      subtotal: "0.00",
+      discountAmount: "0.00",
+      total: "0.00",
+    });
   });
 });
