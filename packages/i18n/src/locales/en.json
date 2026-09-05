@@ -686,7 +686,9 @@
       "voidWindowClosed": "This sale can no longer be voided — its calendar day has passed.",
       "saleHasReturns": "This sale already has a return and can no longer be voided.",
       "saleAlreadyVoided": "This sale is already voided.",
-      "returnExceedsSold": "The return quantity exceeds what is left to return."
+      "returnExceedsSold": "The return quantity exceeds what is left to return.",
+      "saleNotVoidable": "This is a return and cannot be voided. To correct a mistaken return, sell the item again.",
+      "saleNotReturnable": "This is a return and cannot itself be returned."
     }
   }
 }

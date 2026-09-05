@@ -686,7 +686,9 @@
       "voidWindowClosed": "Bu sotuvni endi bekor qilib bo‘lmaydi — uning kalendar kuni allaqachon o‘tgan.",
       "saleHasReturns": "Bu sotuv bo‘yicha allaqachon qaytarish mavjud, uni bekor qilib bo‘lmaydi.",
       "saleAlreadyVoided": "Bu sotuv allaqachon bekor qilingan.",
-      "returnExceedsSold": "Qaytariladigan miqdor qolgan miqdordan ko‘p."
+      "returnExceedsSold": "Qaytariladigan miqdor qolgan miqdordan ko‘p.",
+      "saleNotVoidable": "Bu qaytarish, uni bekor qilib bo‘lmaydi. Xato qaytarishni tuzatish uchun mahsulotni qayta soting.",
+      "saleNotReturnable": "Bu qaytarish, unga nisbatan qaytarish rasmiylashtirib bo‘lmaydi."
     }
   }
 }
