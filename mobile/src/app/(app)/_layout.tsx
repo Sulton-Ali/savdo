@@ -90,11 +90,16 @@ export default function AppTabsLayout() {
           }}
         />
         <Tabs.Screen
-          name="stock/index"
-          options={{
+          name="stock"
+          options={({ route }) => ({
             title: t("mobile.shell.tabs.stock"),
             tabBarIcon: ({ color, size }) => <Warehouse color={color} size={size} />,
-          }}
+            // Same nested-header rule as "products" above: `stock/_layout.tsx`
+            // (T5) nests its own Stack for the levels list, purchases and the
+            // adjustment form, so only that Stack's initial "index" route
+            // reuses this outer header.
+            headerShown: (getFocusedRouteNameFromRoute(route) ?? "index") === "index",
+          })}
         />
       </Tabs>
       <SettingsSheet visible={settingsOpen} onClose={() => setSettingsOpen(false)} />

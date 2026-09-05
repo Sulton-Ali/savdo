@@ -90,3 +90,25 @@ export const reportsKeys = {
   byProduct: (filters: { from: string; to: string }) => ["reports", "byProduct", filters] as const,
   lowStock: () => ["reports", "lowStock"] as const,
 };
+
+/**
+ * Stock/purchases query keys (Phase 5 T5), added alongside `catalogKeys`
+ * above for the same reason: a `filters`/`id` dimension each feature's
+ * `hooks.ts` needs, kept here rather than declared ad hoc so every mutation's
+ * `invalidateQueries` call (create/receive a purchase, post an adjustment)
+ * targets the exact same keys the list/detail queries use.
+ */
+export const stockKeys = {
+  levels: (filters: { productId?: string; variantId?: string; locationId?: string }) =>
+    ["stock", "levels", filters] as const,
+  low: () => ["stock", "low"] as const,
+  movements: (filters: { variantId?: string; locationId?: string }) =>
+    ["stock", "movements", filters] as const,
+};
+
+export const purchasesKeys = {
+  suppliers: () => ["purchases", "suppliers"] as const,
+  list: (filters: { status?: "draft" | "received" | "cancelled" }) =>
+    ["purchases", "list", filters] as const,
+  detail: (id: string) => ["purchases", "detail", id] as const,
+};
