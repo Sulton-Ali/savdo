@@ -47,7 +47,7 @@ func TestSeedStock_seedsSuppliersPurchasesAndATransferIdempotently(t *testing.T)
 		t.Fatalf("Seed() error = %v", err)
 	}
 
-	q, catalogHandler, mediaSvc := newCatalogTestDeps(t, pool)
+	q, catalogHandler, mediaSvc, _ := newCatalogTestDeps(t, pool)
 	owner, err := q.GetOwner(ctx, shopReport.ShopID)
 	if err != nil {
 		t.Fatalf("GetOwner() error = %v", err)

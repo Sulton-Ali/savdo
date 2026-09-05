@@ -1,8 +1,14 @@
 package seed_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"image"
+	"io"
+	"io/fs"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -82,8 +88,12 @@ func findProductBySlug(t *testing.T, products []db.ListProductsForStaffRow, slug
 
 // newCatalogTestDeps builds the same catalog.Handler + media.Service pair
 // runSeedCatalog (cmd/savdo/main.go) wires in production, backed by a
-// throwaway on-disk media root (t.TempDir()) instead of MEDIA_DIR.
-func newCatalogTestDeps(t *testing.T, pool *pgxpool.Pool) (*db.Queries, *catalog.Handler, *media.Service) {
+// throwaway on-disk media root (t.TempDir()) instead of MEDIA_DIR. The
+// returned *media.LocalStorage is the same instance mediaSvc writes
+// through, for tests (TestSeedCatalog_writesRealDerivativeFilesToDisk) that
+// need to open a derivative's actual bytes off disk rather than only
+// checking the media_files row exists.
+func newCatalogTestDeps(t *testing.T, pool *pgxpool.Pool) (*db.Queries, *catalog.Handler, *media.Service, *media.LocalStorage) {
 	t.Helper()
 	q := db.New(pool)
 
@@ -95,7 +105,7 @@ func newCatalogTestDeps(t *testing.T, pool *pgxpool.Pool) (*db.Queries, *catalog
 
 	mediaSvc := media.NewService(q, storage, "/media", 10<<20, 2, 8)
 	catalogSvc := catalog.NewService(pool, q, "uz", "/media")
-	return q, catalog.NewHandler(catalogSvc), mediaSvc
+	return q, catalog.NewHandler(catalogSvc), mediaSvc, storage
 }
 
 // TestSeedCatalog_seedsARealisticCatalogueIdempotently is this task's
@@ -114,7 +124,7 @@ func TestSeedCatalog_seedsARealisticCatalogueIdempotently(t *testing.T) {
 		t.Fatalf("Seed() error = %v", err)
 	}
 
-	q, catalogHandler, mediaSvc := newCatalogTestDeps(t, pool)
+	q, catalogHandler, mediaSvc, _ := newCatalogTestDeps(t, pool)
 
 	owner, err := q.GetOwner(ctx, shopReport.ShopID)
 	if err != nil {
@@ -240,6 +250,170 @@ func TestSeedCatalog_seedsARealisticCatalogueIdempotently(t *testing.T) {
 	}
 }
 
+// countMediaFiles counts every regular file under root, excluding
+// media.LocalStorage's own scratch subdirectory (".tmp" — spooled uploads
+// that never become a derivative, irrelevant to "did seeding write N
+// derivative files").
+func countMediaFiles(t *testing.T, root string) int {
+	t.Helper()
+	count := 0
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			return relErr
+		}
+		if rel == ".tmp" || strings.HasPrefix(rel, ".tmp"+string(filepath.Separator)) {
+			return nil
+		}
+		count++
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk media root %q: %v", root, err)
+	}
+	return count
+}
+
+// openDerivative opens one of storageKey's three WebP derivatives (suffix
+// one of "_thumb", "_card", "_full") through storage — the same Storage
+// interface media.Service.Upload wrote it through — by building the key
+// through the package's own exported media.URLs (baseURL "/media") and
+// stripping that prefix back off, rather than this test hand-rolling its
+// own copy of the "<stem><suffix>.webp" naming convention.
+func openDerivative(ctx context.Context, t *testing.T, storage *media.LocalStorage, storageKey, suffix string) []byte {
+	t.Helper()
+	urls := media.URLs("/media", storageKey)
+	var url string
+	switch suffix {
+	case "_thumb":
+		url = urls.Thumb
+	case "_card":
+		url = urls.Card
+	case "_full":
+		url = urls.Full
+	default:
+		t.Fatalf("openDerivative: unknown suffix %q", suffix)
+	}
+	key := strings.TrimPrefix(url, "/media/")
+
+	rc, err := storage.Open(ctx, key)
+	if err != nil {
+		t.Fatalf("storage.Open(%q) error = %v", key, err)
+	}
+	defer func() { _ = rc.Close() }()
+
+	data, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatalf("read derivative %q: %v", key, err)
+	}
+	return data
+}
+
+// TestSeedCatalog_writesRealDerivativeFilesToDisk is this task's acceptance
+// test (D-84): seeding the demo catalogue must write real WebP derivative
+// bytes to disk through the media pipeline — not just media_files/
+// product_images rows with nothing backing them on disk — and re-seeding
+// must not write any more files than the first run did (Catalog's own
+// idempotency, checked here at the filesystem level rather than only via
+// CatalogReport's counts).
+func TestSeedCatalog_writesRealDerivativeFilesToDisk(t *testing.T) {
+	pool := testdb.New(t)
+	testdb.Truncate(t, pool)
+	ctx := context.Background()
+
+	shopReport, err := seed.Seed(ctx, pool, seed.DefaultShopSlug)
+	if err != nil {
+		t.Fatalf("Seed() error = %v", err)
+	}
+
+	mediaRoot := t.TempDir()
+	storage, err := media.NewLocalStorage(mediaRoot, "/media")
+	if err != nil {
+		t.Fatalf("media.NewLocalStorage: %v", err)
+	}
+	t.Cleanup(func() { _ = storage.Close() })
+
+	q := db.New(pool)
+	mediaSvc := media.NewService(q, storage, "/media", 10<<20, 2, 8)
+	catalogSvc := catalog.NewService(pool, q, "uz", "/media")
+	catalogHandler := catalog.NewHandler(catalogSvc)
+
+	owner, err := q.GetOwner(ctx, shopReport.ShopID)
+	if err != nil {
+		t.Fatalf("GetOwner() error = %v", err)
+	}
+
+	first, err := seed.Catalog(ctx, q, catalogHandler, mediaSvc, shopReport.ShopID, owner.ID)
+	if err != nil {
+		t.Fatalf("first Catalog() error = %v", err)
+	}
+	if first.ImagesCreated == 0 {
+		t.Fatalf("first Catalog() ImagesCreated = 0, want > 0 (nothing to check on disk)")
+	}
+
+	products, err := q.ListProductsForStaff(ctx, db.ListProductsForStaffParams{
+		Locale: "uz", ShopID: shopReport.ShopID, IncludeInactive: true, Limit: 1000,
+	})
+	if err != nil {
+		t.Fatalf("ListProductsForStaff() error = %v", err)
+	}
+	target := findProductBySlug(t, products, taggedProductSlug)
+
+	images, err := q.ListProductImages(ctx, db.ListProductImagesParams{ShopID: shopReport.ShopID, ProductID: target.ID})
+	if err != nil {
+		t.Fatalf("ListProductImages(%s) error = %v", target.Slug, err)
+	}
+	if len(images) == 0 {
+		t.Fatalf("product %q has no images to check on disk", target.Slug)
+	}
+
+	mediaFile, err := q.GetMediaFile(ctx, db.GetMediaFileParams{ShopID: shopReport.ShopID, ID: images[0].MediaID})
+	if err != nil {
+		t.Fatalf("GetMediaFile(%s) error = %v", images[0].MediaID, err)
+	}
+
+	for _, suffix := range []string{"_thumb", "_card", "_full"} {
+		data := openDerivative(ctx, t, storage, mediaFile.StorageKey, suffix)
+		if len(data) == 0 {
+			t.Fatalf("derivative %q for %q is empty", suffix, target.Slug)
+		}
+		cfg, format, decodeErr := image.DecodeConfig(bytes.NewReader(data))
+		if decodeErr != nil {
+			t.Fatalf("derivative %q for %q: not a decodable image: %v", suffix, target.Slug, decodeErr)
+		}
+		if format != "webp" {
+			t.Errorf("derivative %q for %q: format = %q, want %q", suffix, target.Slug, format, "webp")
+		}
+		if cfg.Width <= 0 || cfg.Height <= 0 {
+			t.Errorf("derivative %q for %q: dimensions = %dx%d, want both > 0", suffix, target.Slug, cfg.Width, cfg.Height)
+		}
+	}
+
+	filesAfterFirst := countMediaFiles(t, mediaRoot)
+	if filesAfterFirst == 0 {
+		t.Fatalf("no files under media root %q after seeding, want at least 3 per image", mediaRoot)
+	}
+
+	second, err := seed.Catalog(ctx, q, catalogHandler, mediaSvc, shopReport.ShopID, owner.ID)
+	if err != nil {
+		t.Fatalf("second Catalog() error = %v", err)
+	}
+	if second != (seed.CatalogReport{}) {
+		t.Errorf("second Catalog() = %+v, want a zero report (nothing created, no duplicates)", second)
+	}
+
+	filesAfterSecond := countMediaFiles(t, mediaRoot)
+	if filesAfterSecond != filesAfterFirst {
+		t.Errorf("file count after second seed = %d, want %d (unchanged, no duplicate files)", filesAfterSecond, filesAfterFirst)
+	}
+}
+
 // ownerAuthContext builds the auth.Context catalog.Handler reads via
 // auth.FromContext, for this test's own direct handler calls (mirroring
 // seed's own unexported catalogAuthContext) — the shape Middleware would
@@ -270,7 +444,7 @@ func TestSeedCatalog_repairsMissingImagesOnAnExistingProduct(t *testing.T) {
 		t.Fatalf("Seed() error = %v", err)
 	}
 
-	q, catalogHandler, mediaSvc := newCatalogTestDeps(t, pool)
+	q, catalogHandler, mediaSvc, _ := newCatalogTestDeps(t, pool)
 
 	owner, err := q.GetOwner(ctx, shopReport.ShopID)
 	if err != nil {
