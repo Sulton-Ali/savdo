@@ -6,7 +6,7 @@ GOLANGCI_LINT := api/bin/golangci-lint
 
 .PHONY: verify format-check lint typecheck generate generate-check test guards \
         verify-go test-go test-ts \
-        dev-infra dev-infra-down migrate seed api bot
+        dev-infra dev-infra-down migrate seed api bot apk
 
 ## verify: THE GATE — format, lint, typecheck, generated-code-fresh, tests, guards.
 verify: format-check lint typecheck generate-check test guards
@@ -93,3 +93,7 @@ bot:
 	else \
 		echo "skip: cmd/bot not implemented yet (Phase 7)"; \
 	fi
+
+## apk: build the local Android release APK (D-72; needs the Android SDK + JDK 21 — see 07-DEVOPS.md).
+apk:
+	pnpm --filter mobile android:release
