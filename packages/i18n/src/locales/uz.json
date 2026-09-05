@@ -716,6 +716,27 @@
         "empty": "Hech narsa topilmadi",
         "qtyAvailable": "Mavjud: {{qty}}"
       }
+    },
+    "catalogEdit": {
+      "fields": {
+        "promoFrom": "Aksiya boshlanishi",
+        "promoTo": "Aksiya tugashi",
+        "promoDateHint": "Format: YYYY-MM-DD"
+      },
+      "actions": {
+        "takePhoto": "Suratga olish",
+        "choosePhoto": "Galereyadan tanlash"
+      },
+      "errors": {
+        "promoIncomplete": "Aksiya narxi, boshlanish va tugash sanasini to‘ldiring — yoki barchasini bo‘sh qoldiring.",
+        "promoInvalidDate": "YYYY-MM-DD formatidan foydalaning.",
+        "promoRangeInvalid": "Aksiya tugash sanasi boshlanish sanasidan oldin bo‘lmasligi kerak.",
+        "invalidPrice": "To‘g‘ri narx kiriting, masalan 12000 yoki 12000.50.",
+        "invalidThreshold": "0 yoki undan katta butun son kiriting.",
+        "retryAfter": "Juda ko‘p yuklash. {{seconds}} soniyadan so‘ng qayta urinib ko‘ring.",
+        "cameraPermissionDenied": "Suratga olish uchun kamera ruxsati kerak.",
+        "libraryPermissionDenied": "Rasm tanlash uchun galereya ruxsati kerak."
+      }
     }
   }
 }

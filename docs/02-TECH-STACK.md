@@ -80,6 +80,7 @@ pattern; revisit if bundle size becomes a landing performance issue.
 | expo-router   | 57.0.18  | File-based routing; app source lives in `mobile/src/app` (Expo default template)          |
 | NativeWind    | v4.2.6   | Tailwind classes in RN. **Requires Tailwind 3.4.x** (peer `>3.3.0`), not Tailwind 4 — mobile pins `tailwindcss@3.4.19`; `react-native-css-interop` is a direct dep so Metro resolves it under pnpm isolation |
 | expo-secure-store | 57.0.3 | Bearer token, server URL and locale storage (D-79, D-78); verified 2026-09-05 |
+| expo-image-picker | 57.0.16 | Product photo take/choose on the quick-edit screen (D-78, Phase 5 T3); SDK 57's own pinned line (`bundledNativeModules.json` `~57.0.16`), release older than 24 h at install time; config plugin (`camera`/`photos` permission strings) in `mobile/app.json` |
 | i18next / react-i18next | 26.4.1 / 17.0.13 | Same pins as `admin` (D-78); resources from `@savdo/i18n` |
 | lucide-react-native | 1.40.0 | Icon set shared with admin's `lucide-react` (D-25); 1.41.0 blocked by the 24 h release age at install time |
 | react-native-svg | 15.15.4 | Peer of `lucide-react-native`; version chosen by `expo install` for SDK 57 |
@@ -91,7 +92,7 @@ pattern; revisit if bundle size becomes a landing performance issue.
 | react-hook-form | 7.87.0 | Login form validation (D-76, no zod); verified 2026-09-05 |
 | openapi-fetch | 0.17.0 | Direct dependency (was transitive via `@savdo/api-client`): `lib/api.ts` imports `mergeHeaders`/`HeadersOptions` directly for D-79's per-request base URL; same pin as `packages/api-client` workspace-wide |
 | Android build | local | `expo prebuild` + Gradle release build on the dev machine, no EAS cloud (D-72); Android SDK + JDK prerequisites in `07-DEVOPS.md`; `expo-secure-store` for the session token |
-| Tests | Vitest (workspace) | Pure helpers under `mobile/src/lib` only (D-85); no jest-expo, no e2e (D-73/D-74) |
+| Tests | Vitest (workspace) | Pure, RN-free helpers under `mobile/src/lib` and `mobile/src/features/**` only (D-85, widened in Phase 5 T3 for `features/catalog/edit/form.ts`); no jest-expo, no e2e (D-73/D-74) |
 
 ## Infrastructure
 

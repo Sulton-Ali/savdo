@@ -716,6 +716,27 @@
         "empty": "No matches",
         "qtyAvailable": "{{qty}} available"
       }
+    },
+    "catalogEdit": {
+      "fields": {
+        "promoFrom": "Promo from",
+        "promoTo": "Promo to",
+        "promoDateHint": "Format: YYYY-MM-DD"
+      },
+      "actions": {
+        "takePhoto": "Take photo",
+        "choosePhoto": "Choose photo"
+      },
+      "errors": {
+        "promoIncomplete": "Fill in promo price, from and to — or leave all three empty.",
+        "promoInvalidDate": "Use the format YYYY-MM-DD.",
+        "promoRangeInvalid": "Promo end date must be on or after the start date.",
+        "invalidPrice": "Enter a valid price, e.g. 12000 or 12000.50.",
+        "invalidThreshold": "Enter a whole number of 0 or more.",
+        "retryAfter": "Too many uploads. Try again in {{seconds}}s.",
+        "cameraPermissionDenied": "Camera access is needed to take a photo.",
+        "libraryPermissionDenied": "Photo library access is needed to choose a photo."
+      }
     }
   }
 }
