@@ -105,7 +105,7 @@ movements. (kind `purchase_in`, negative qty, `ref_type = purchase_cancel`, D-51
 `total numeric(14,2)`, `note`, `completed_at`, `voided_at`, `voided_by`, `void_reason`.
 Unique `(shop_id, number)`. **Never updated after insert except the void columns.**
 
-**Rules (D-56 to D-66):** unit prices come from the catalogue (promo price when active), never from the client; the manual discount is a percent or a fixed sum recorded as `discount_amount`, capped at the subtotal; a void is allowed only on the sale's calendar day in the shop timezone; a return is a `return`-kind sale referencing `original_sale_id`, may be partial, never exceeds sold minus already returned per line, restores stock at the sale's location and refunds by the original payment method. A partial return refunds each line proportionally, net of its share of the sale discount (D-61); a sale with an existing return cannot be voided (D-62); cashiers read all sales but never `unit_cost` (D-63). The sale discount is attributed to lines proportionally for reporting (D-64). Returns cannot be voided (D-66). Discount shares use round-half-up per line with the last line taking the remainder (D-64).
+**Rules (D-56 to D-69):** unit prices come from the catalogue (promo price when active), never from the client; the manual discount is a percent or a fixed sum recorded as `discount_amount`, capped at the subtotal; a void is allowed only on the sale's calendar day in the shop timezone; a return is a `return`-kind sale referencing `original_sale_id`, may be partial, never exceeds sold minus already returned per line, restores stock at the sale's location and refunds by the original payment method. A partial return refunds each line proportionally, net of its share of the sale discount (D-61); a sale with an existing return cannot be voided (D-62); cashiers read all sales but never `unit_cost` (D-63). The sale discount is attributed to lines proportionally for reporting (D-64). Returns cannot be voided (D-66). Discount shares use round-half-up per line with the last line taking the remainder (D-64). Unit price precedence: promo price when active, else variant override, else base price (D-67); a variant with no cost freezes `unit_cost` 0.00, which overstates margin until a cost is set.
 
 **sale_items** — `sale_id`, `variant_id`, `qty numeric(12,3)`, `unit_price
 numeric(14,2)` (price at sale time, after promo), `unit_cost numeric(14,2)` (frozen for
@@ -182,8 +182,6 @@ voids, role changes, settings changes (created in Phase 3, D-47).
 7. **Soft delete** categories, products, variants, customers, suppliers (`deleted_at`); hard delete
    join rows (`product_images`). Never hard-delete a variant referenced by a movement
    or a sale item — the FK prevents it; do not weaken the FK.
-8. **`sale_items.unit_cost` and `products.cost_price` never appear in a query used by a
-   cashier-role or public/bot code path.** Keep separate sqlc queries
-   (`…ForStaff` vs `…Public`) rather than filtering in Go.
+8. **`sale_items.unit_cost` and `products.cost_price` never appear in a query that shapes a cashier-role or public/bot response.** Keep separate sqlc queries (`…ForStaff` vs `…ForCashier`/`…Public`) rather than filtering in Go. An internal query on a write path (e.g. pricing a sale) may read cost to freeze `unit_cost`, provided no cost value reaches the response (D-69).
 9. **Every timestamp `timestamptz`, UTC.** Shop timezone is applied in reports only.
 10. **Index every FK** and every `(shop_id, <lookup>)` pair a list endpoint filters on.
