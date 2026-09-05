@@ -11,6 +11,7 @@ import {
   LogOut,
   MapPin,
   Package,
+  Receipt,
   Settings,
   ShoppingCart,
   Tags,
@@ -62,6 +63,14 @@ function AppShell() {
       key: "/products",
       icon: <Package size={16} />,
       label: <Link to="/products">{t("nav.products")}</Link>,
+      permission: null,
+    },
+    // Phase 4 T6b: quick sale — visible to every role (`docs/04-DATA-MODEL.md`
+    // § 7: "Create sale, attach customer" is owner/manager/cashier).
+    {
+      key: "/quick-sale",
+      icon: <Receipt size={16} />,
+      label: <Link to="/quick-sale">{t("nav.quickSale")}</Link>,
       permission: null,
     },
     {

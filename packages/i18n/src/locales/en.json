@@ -47,6 +47,7 @@
     "stockLevels": "Stock levels",
     "stockMovements": "Stock movements",
     "stockLow": "Low stock",
+    "quickSale": "Quick sale",
     "reports": "Reports"
   },
   "auth": {
@@ -536,6 +537,66 @@
       "title": "Low stock",
       "count": "{{value}} variant(s) at or below threshold",
       "link": "View low stock"
+    }
+  },
+  "sales": {
+    "title": "Quick sale",
+    "fields": {
+      "location": "Location",
+      "customer": "Customer",
+      "paymentMethod": "Payment method",
+      "discountType": "Discount",
+      "discountValue": "Discount value",
+      "discountReason": "Discount reason",
+      "note": "Note"
+    },
+    "customerPlaceholder": "Search by name or phone",
+    "paymentMethod": {
+      "cash": "Cash",
+      "card": "Card",
+      "transfer": "Transfer"
+    },
+    "discountType": {
+      "percent": "Percent",
+      "fixed": "Fixed amount"
+    },
+    "items": {
+      "title": "Items",
+      "productPlaceholder": "Search by product name or SKU",
+      "variantPlaceholder": "Select variant",
+      "qty": "Qty",
+      "add": "Add",
+      "empty": "No items yet — search for a product above to add one.",
+      "required": "Add at least one item before completing the sale.",
+      "noLabel": "Default variant",
+      "remove": "Remove",
+      "columns": {
+        "product": "Product",
+        "variant": "Variant",
+        "unitPrice": "Unit price",
+        "qty": "Qty",
+        "lineTotal": "Line total"
+      }
+    },
+    "cart": {
+      "clear": "Clear cart"
+    },
+    "summary": {
+      "subtotal": "Subtotal",
+      "discount": "Discount",
+      "total": "Total"
+    },
+    "submit": "Complete sale",
+    "success": {
+      "title": "Sale completed",
+      "number": "Sale #{{number}}",
+      "total": "Total: {{total}}",
+      "newSale": "New sale"
+    },
+    "errors": {
+      "stockInsufficient": "Not enough stock: only {{available}} available.",
+      "discountExceedsSubtotal": "Discount cannot exceed the subtotal.",
+      "idempotencyKeyReused": "This sale may already be submitted. Please check and try again."
     }
   }
 }

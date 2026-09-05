@@ -47,6 +47,7 @@
     "stockLevels": "Остатки",
     "stockMovements": "Движения товара",
     "stockLow": "Низкий остаток",
+    "quickSale": "Быстрая продажа",
     "reports": "Отчёты"
   },
   "auth": {
@@ -536,6 +537,66 @@
       "title": "Низкий остаток",
       "count": "{{value}} вариант(ов) на пороге или ниже",
       "link": "Смотреть низкий остаток"
+    }
+  },
+  "sales": {
+    "title": "Быстрая продажа",
+    "fields": {
+      "location": "Точка продаж",
+      "customer": "Клиент",
+      "paymentMethod": "Способ оплаты",
+      "discountType": "Скидка",
+      "discountValue": "Размер скидки",
+      "discountReason": "Причина скидки",
+      "note": "Заметка"
+    },
+    "customerPlaceholder": "Поиск по имени или телефону",
+    "paymentMethod": {
+      "cash": "Наличные",
+      "card": "Карта",
+      "transfer": "Перевод"
+    },
+    "discountType": {
+      "percent": "Процент",
+      "fixed": "Фиксированная сумма"
+    },
+    "items": {
+      "title": "Товары",
+      "productPlaceholder": "Поиск по названию или SKU",
+      "variantPlaceholder": "Выберите вариант",
+      "qty": "Кол-во",
+      "add": "Добавить",
+      "empty": "Пока нет товаров — найдите товар выше, чтобы добавить.",
+      "required": "Добавьте хотя бы один товар, чтобы завершить продажу.",
+      "noLabel": "Вариант по умолчанию",
+      "remove": "Удалить",
+      "columns": {
+        "product": "Товар",
+        "variant": "Вариант",
+        "unitPrice": "Цена",
+        "qty": "Кол-во",
+        "lineTotal": "Сумма"
+      }
+    },
+    "cart": {
+      "clear": "Очистить корзину"
+    },
+    "summary": {
+      "subtotal": "Промежуточный итог",
+      "discount": "Скидка",
+      "total": "Итого"
+    },
+    "submit": "Завершить продажу",
+    "success": {
+      "title": "Продажа завершена",
+      "number": "Продажа №{{number}}",
+      "total": "Итого: {{total}}",
+      "newSale": "Новая продажа"
+    },
+    "errors": {
+      "stockInsufficient": "Недостаточно товара: доступно только {{available}}.",
+      "discountExceedsSubtotal": "Скидка не может превышать сумму продажи.",
+      "idempotencyKeyReused": "Эта продажа, возможно, уже оформлена. Проверьте и попробуйте снова."
     }
   }
 }
