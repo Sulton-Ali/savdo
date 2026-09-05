@@ -90,6 +90,7 @@ decomposition was wrong; the fix belongs in the task.
    time; the orchestrator sequences them because every client depends on it.
 6. **Shared local services.** One Compose project and one API port serve every worktree — see `07-DEVOPS.md` § Shared local services. Never take the stack down while another agent may be using it.
 7. **One heavy gate at a time.** Testcontainers-based gates are sequenced by the orchestrator (O-13); a merger that sees timeouts under load retries once after the machine is quiet, never in parallel.
+8. **One emulator session per agent.** Two implementers driving the same Android AVD (same package, same SecureStore and autofill state, queued `adb shell input` events) corrupt each other's smoke tests. Parallel mobile implementers each get their own AVD (`savdo36-<task>`) created by the orchestrator, their own API port and Metro port, and never kill processes they did not start (check the cwd of a PID before `kill`).
 
 ## Rules (non-negotiable, restated from `AGENTS.md`)
 
@@ -235,6 +236,7 @@ entries are added by `/phase-done` when a review catches one.
   spec said "cashier own-day rule" without spelling out how a return — always
   created by a manager — should attribute back to the original sale's cashier.
   Ask the attribution question per role, per report, at interview time.
+- **Shared emulator between parallel implementers.** In Phase 5 T1 and T2 both used AVD `savdo36`; autofill injected one task's credentials into the other's fields, input events drained minutes late, and a cleanup `kill` took down the other task's API server. See operating constraint 8.
 
 ## Tooling
 
