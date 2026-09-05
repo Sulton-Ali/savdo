@@ -1,5 +1,5 @@
-import { useQueries, useQuery } from "@tanstack/react-query";
-import { Search } from "lucide-react-native";
+import { useQuery } from "@tanstack/react-query";
+import { ArrowLeft, Search } from "lucide-react-native";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FlatList, Pressable, TextInput, View } from "react-native";
@@ -20,72 +20,15 @@ import { formatQty } from "./qty";
 const MIN_QUERY_LENGTH = 2;
 const SEARCH_DEBOUNCE_MS = 300;
 
-interface VariantRow {
-  product: Product;
-  variant: Variant;
-  qty: string;
-}
-
-/**
- * Resolves a free-text query into a flat list of matching variants at
- * `locationId`, joining three endpoints client-side: `GET /products?q=`,
- * then per matched product `GET /products/{id}/variants` and `GET
- * /stock/levels?productId&locationId` — the same "list vs get asymmetry"
- * `admin/src/routes/app/StockVariantPicker.tsx` and `StockLevelsPage.tsx`
- * work around, flattened into one search instead of admin's two cascading
- * selects. Bounded by the product search's own page size (50 products),
- * so the fan-out of per-product requests stays small for a single shop's
- * catalogue.
- */
-function useVariantSearch(query: string, locationId: string) {
-  const trimmed = query.trim();
-  const enabled = trimmed.length >= MIN_QUERY_LENGTH;
-
-  const productsQuery = useQuery({
-    queryKey: catalogKeys.products({ q: trimmed }),
-    queryFn: () => listProducts({ q: trimmed, cursor: null }),
-    enabled,
-  });
-  const products = useMemo(() => productsQuery.data?.items ?? [], [productsQuery.data]);
-
-  const variantQueries = useQueries({
-    queries: products.map((product) => ({
-      queryKey: catalogKeys.variants(product.id),
-      queryFn: () => listVariants(product.id),
-    })),
-  });
-  const stockQueries = useQueries({
-    queries: products.map((product) => ({
-      queryKey: catalogKeys.stockLevels({ productId: product.id, locationId }),
-      queryFn: () => listAllStockLevels({ productId: product.id, locationId }),
-    })),
-  });
-
-  const rows = useMemo<VariantRow[]>(() => {
-    const result: VariantRow[] = [];
-    products.forEach((product, index) => {
-      const variants = variantQueries[index]?.data ?? [];
-      const levels = stockQueries[index]?.data ?? [];
-      for (const variant of variants) {
-        const level = levels.find((l) => l.variantId === variant.id);
-        result.push({ product, variant, qty: level?.qty ?? "0" });
-      }
-    });
-    return result;
-  }, [products, variantQueries, stockQueries]);
-
-  const isFetching =
-    productsQuery.isFetching ||
-    variantQueries.some((q) => q.isFetching) ||
-    stockQueries.some((q) => q.isFetching);
-
-  return { rows, isFetching, searched: enabled };
-}
-
 function variantLabel(variant: Variant): string {
   return Object.entries(variant.attributes)
     .map(([key, val]) => `${key}: ${val}`)
     .join(", ");
+}
+
+interface VariantRow {
+  variant: Variant;
+  qty: string;
 }
 
 export interface VariantPickerProps {
@@ -99,9 +42,20 @@ export interface VariantPickerProps {
 /**
  * Search-and-pick a variant with its quantity at one location (deliverable
  * 6) — shared, presentational component for the quick-sale cart (T4) and
- * stock adjustment/transfer forms (T5). Owns no navigation: picking a row
- * calls `onPick` and leaves closing any host sheet/modal to the caller.
- * Rows are at least 48dp tall for a till/warehouse touch target.
+ * stock adjustment/transfer forms (T5). Two steps, mirroring the admin
+ * precedent (`admin/src/routes/app/StockVariantPicker.tsx`) rather than a
+ * per-keystroke fan-out across every matching product:
+ *
+ * 1. Search products by name (one debounced `GET /products?q=` call).
+ * 2. Tap a product to load its variants and its stock at `locationId`
+ *    (two calls, `GET /products/{id}/variants` and `GET
+ *    /stock/levels?productId&locationId`), then pick one of its variant
+ *    rows — a "Back" row returns to the step-1 results without re-querying
+ *    them (still cached under the same query key).
+ *
+ * Owns no navigation: picking a row calls `onPick` and leaves closing any
+ * host sheet/modal to the caller. Rows are at least 48dp tall for a
+ * till/warehouse touch target.
  */
 export function VariantPicker({ locationId, onPick, excludeVariantIds }: VariantPickerProps) {
   const { t } = useTranslation();
@@ -111,13 +65,89 @@ export function VariantPicker({ locationId, onPick, excludeVariantIds }: Variant
 
   const [rawQuery, setRawQuery] = useState("");
   const debouncedQuery = useDebouncedValue(rawQuery, SEARCH_DEBOUNCE_MS);
-  const { rows, isFetching, searched } = useVariantSearch(debouncedQuery, locationId);
+  const trimmedQuery = debouncedQuery.trim();
+  const searched = trimmedQuery.length >= MIN_QUERY_LENGTH;
+
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+
+  const productsQuery = useQuery({
+    queryKey: catalogKeys.products({ q: trimmedQuery }),
+    queryFn: () => listProducts({ q: trimmedQuery, cursor: null }),
+    enabled: searched,
+  });
+  const products = productsQuery.data?.items ?? [];
+
+  const variantsQuery = useQuery({
+    queryKey: catalogKeys.variants(selectedProduct?.id ?? ""),
+    queryFn: () => listVariants(selectedProduct?.id as string),
+    enabled: selectedProduct != null,
+  });
+  const stockQuery = useQuery({
+    queryKey: catalogKeys.stockLevels({ productId: selectedProduct?.id, locationId }),
+    queryFn: () => listAllStockLevels({ productId: selectedProduct?.id, locationId }),
+    enabled: selectedProduct != null,
+  });
 
   const excluded = useMemo(() => new Set(excludeVariantIds ?? []), [excludeVariantIds]);
-  const visibleRows = useMemo(
-    () => rows.filter((row) => !excluded.has(row.variant.id)),
-    [rows, excluded],
-  );
+  const variantRows = useMemo<VariantRow[]>(() => {
+    const levels = stockQuery.data ?? [];
+    return (variantsQuery.data ?? [])
+      .filter((variant) => !excluded.has(variant.id))
+      .map((variant) => ({
+        variant,
+        qty: levels.find((level) => level.variantId === variant.id)?.qty ?? "0",
+      }));
+  }, [variantsQuery.data, stockQuery.data, excluded]);
+
+  if (selectedProduct) {
+    return (
+      <View className="flex-1 gap-2">
+        <Pressable
+          accessibilityRole="button"
+          className="min-h-12 flex-row items-center gap-2 px-1"
+          onPress={() => setSelectedProduct(null)}
+        >
+          <ArrowLeft size={18} />
+          <Text numberOfLines={1} className="flex-1 font-medium">
+            {selectedProduct.name}
+          </Text>
+        </Pressable>
+        <FlatList
+          data={variantRows}
+          keyExtractor={(row) => row.variant.id}
+          ListEmptyComponent={
+            variantsQuery.isFetching || stockQuery.isFetching ? null : (
+              <Text variant="muted" className="p-4 text-center">
+                {t("mobile.catalog.picker.empty")}
+              </Text>
+            )
+          }
+          renderItem={({ item }) => (
+            <Pressable
+              accessibilityRole="button"
+              className="min-h-12 flex-row items-center justify-between border-border border-b px-3 py-3 active:bg-accent"
+              onPress={() => onPick(item.variant, item.qty)}
+            >
+              <Text numberOfLines={1} className="flex-1 pr-2">
+                {variantLabel(item.variant)}
+              </Text>
+              <View className="items-end gap-0.5">
+                <Text>
+                  {formatMoney(
+                    resolveEffectivePrice(selectedProduct, item.variant, timeZone),
+                    currency,
+                  )}
+                </Text>
+                <Text variant="muted">
+                  {t("mobile.catalog.picker.qtyAvailable", { qty: formatQty(item.qty) })}
+                </Text>
+              </View>
+            </Pressable>
+          )}
+        />
+      </View>
+    );
+  }
 
   return (
     <View className="flex-1 gap-2">
@@ -133,35 +163,22 @@ export function VariantPicker({ locationId, onPick, excludeVariantIds }: Variant
         />
       </View>
       <FlatList
-        data={visibleRows}
-        keyExtractor={(row) => row.variant.id}
+        data={products}
+        keyExtractor={(product) => product.id}
         ListEmptyComponent={
-          searched && !isFetching ? (
+          searched && !productsQuery.isFetching ? (
             <Text variant="muted" className="p-4 text-center">
               {t("mobile.catalog.picker.empty")}
             </Text>
           ) : null
         }
-        renderItem={({ item }) => (
+        renderItem={({ item: product }) => (
           <Pressable
             accessibilityRole="button"
-            className="min-h-12 flex-row items-center justify-between border-border border-b px-3 py-3 active:bg-accent"
-            onPress={() => onPick(item.variant, item.qty)}
+            className="min-h-12 justify-center border-border border-b px-3 py-3 active:bg-accent"
+            onPress={() => setSelectedProduct(product)}
           >
-            <View className="flex-1 gap-0.5 pr-2">
-              <Text numberOfLines={1}>{item.product.name}</Text>
-              <Text variant="muted" numberOfLines={1}>
-                {variantLabel(item.variant)}
-              </Text>
-            </View>
-            <View className="items-end gap-0.5">
-              <Text>
-                {formatMoney(resolveEffectivePrice(item.product, item.variant, timeZone), currency)}
-              </Text>
-              <Text variant="muted">
-                {t("mobile.catalog.picker.qtyAvailable", { qty: formatQty(item.qty) })}
-              </Text>
-            </View>
+            <Text numberOfLines={1}>{product.name}</Text>
           </Pressable>
         )}
       />

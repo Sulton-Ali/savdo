@@ -1,9 +1,7 @@
-import { useLocalSearchParams, useRouter } from "expo-router";
-import { ArrowLeft } from "lucide-react-native";
+import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { ActivityIndicator, Image, Pressable, ScrollView, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 
 import { Text } from "@/components/ui/text";
 import type { Variant } from "@/features/catalog/api";
@@ -33,11 +31,10 @@ function variantAttributesLabel(variant: Variant): string {
  * through against the regular price when active, D-67/D-68), and a
  * variants × locations grid — every role can view (`docs/04-DATA-MODEL.md`
  * § 7); manager/owner additionally get an Edit entry to the placeholder at
- * `products/[id]/edit` (T3 fills it in). This screen (and its sibling
- * `edit.tsx`) are declared as hidden extra screens of the existing
- * `(app)/_layout.tsx` Products tab (`options={{ href: null }}`) rather than
- * a nested Stack, so they render their own back button here instead of
- * relying on a native header — see this task's report for why.
+ * `products/[id]/edit` (T3 fills it in). Pushed within
+ * `products/_layout.tsx`'s Stack, so the header (title, back button) is
+ * native — this screen only overrides the title once the product's name is
+ * known and supplies the Edit button via `headerRight`.
  */
 export default function ProductDetailScreen() {
   const { t } = useTranslation();
@@ -62,23 +59,20 @@ export default function ProductDetailScreen() {
 
   if (productQuery.isPending) {
     return (
-      <SafeAreaView edges={["top"]} className="flex-1 items-center justify-center bg-background">
+      <View className="flex-1 items-center justify-center bg-background">
         <ActivityIndicator />
-      </SafeAreaView>
+      </View>
     );
   }
 
   if (productQuery.isError || !productQuery.data) {
     return (
-      <SafeAreaView
-        edges={["top"]}
-        className="flex-1 items-center justify-center gap-2 bg-background p-6"
-      >
+      <View className="flex-1 items-center justify-center gap-2 bg-background p-6">
         <Text variant="muted">{t("errors.notFound")}</Text>
         <Pressable accessibilityRole="button" onPress={() => router.back()}>
           <Text className="text-primary">{t("common.back")}</Text>
         </Pressable>
-      </SafeAreaView>
+      </View>
     );
   }
 
@@ -86,29 +80,23 @@ export default function ProductDetailScreen() {
   const promoActive = isPromoActive(product, timeZone, new Date());
 
   return (
-    <SafeAreaView edges={["top"]} className="flex-1 bg-background">
-      <View className="min-h-12 flex-row items-center gap-3 border-border border-b px-2 py-2">
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={t("common.back")}
-          className="h-12 w-12 items-center justify-center"
-          onPress={() => router.back()}
-        >
-          <ArrowLeft size={22} />
-        </Pressable>
-        <Text variant="h4" numberOfLines={1} className="flex-1">
-          {product.name}
-        </Text>
-        {canEdit && (
-          <Pressable
-            accessibilityRole="button"
-            className="min-h-12 justify-center px-3"
-            onPress={() => router.push(`/products/${product.id}/edit`)}
-          >
-            <Text className="text-primary">{t("catalog.products.edit")}</Text>
-          </Pressable>
-        )}
-      </View>
+    <View className="flex-1 bg-background">
+      <Stack.Screen
+        options={{
+          title: product.name,
+          headerRight: canEdit
+            ? () => (
+                <Pressable
+                  accessibilityRole="button"
+                  className="min-h-12 justify-center px-3"
+                  onPress={() => router.push(`/products/${product.id}/edit`)}
+                >
+                  <Text className="text-primary">{t("catalog.products.edit")}</Text>
+                </Pressable>
+              )
+            : undefined,
+        }}
+      />
 
       <ScrollView contentContainerStyle={{ padding: 16, gap: 16 }}>
         {coverUrl ? (
@@ -177,6 +165,6 @@ export default function ProductDetailScreen() {
           )}
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }

@@ -78,21 +78,12 @@ export function useVariantsWithStock(productId: string | undefined) {
     });
   }, [variantsQuery.data, stockQuery.data]);
 
-  // Bound to plain names rather than invoked inline below —
-  // `scripts/guards.sh`'s hard-rule-6 check for a hand-rolled fetch call is
-  // a plain substring match with no word boundary, so calling TanStack
-  // Query's own method under its usual name trips that same guard as a raw
-  // browser fetch would. Reported upstream; worked around locally rather
-  // than editing the shared script from this task's scope.
-  const reloadVariants = variantsQuery.refetch;
-  const reloadStock = stockQuery.refetch;
-
   return {
     variants,
     isLoading: variantsQuery.isLoading || stockQuery.isLoading,
     isError: variantsQuery.isError || stockQuery.isError,
     error: variantsQuery.error ?? stockQuery.error,
-    refetch: () => Promise.all([reloadVariants(), reloadStock()]),
+    refetch: () => Promise.all([variantsQuery.refetch(), stockQuery.refetch()]),
   };
 }
 

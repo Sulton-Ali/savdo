@@ -86,13 +86,7 @@ export default function ProductsScreen() {
     isPending,
     isError,
     isRefetching,
-    // Renamed to "reload" on destructure — `scripts/guards.sh`'s hard-rule-6
-    // check for a hand-rolled fetch call is a plain substring match with no
-    // word boundary, so invoking TanStack Query's own method here under its
-    // usual name trips that same guard as a raw browser fetch would.
-    // Reported upstream; worked around locally rather than editing the
-    // shared script from this task's scope.
-    refetch: reload,
+    refetch,
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
@@ -121,7 +115,7 @@ export default function ProductsScreen() {
       ) : isError ? (
         <View className="flex-1 items-center justify-center gap-2 p-6">
           <Text variant="muted">{t("errors.generic")}</Text>
-          <Pressable accessibilityRole="button" onPress={() => reload()}>
+          <Pressable accessibilityRole="button" onPress={() => refetch()}>
             <Text className="text-primary">{t("common.retry")}</Text>
           </Pressable>
         </View>
@@ -132,7 +126,7 @@ export default function ProductsScreen() {
           data={products}
           keyExtractor={(product) => product.id}
           refreshing={isRefetching}
-          onRefresh={reload}
+          onRefresh={refetch}
           onEndReachedThreshold={0.4}
           onEndReached={() => {
             if (hasNextPage && !isFetchingNextPage) {

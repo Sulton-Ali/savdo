@@ -56,24 +56,12 @@ export default function AppTabsLayout() {
           }}
         />
         <Tabs.Screen
-          name="products/index"
+          name="products"
           options={{
             title: t("nav.products"),
             tabBarIcon: ({ color, size }) => <Package color={color} size={size} />,
           }}
         />
-        {/*
-          Phase 5 T2: the product detail/edit screens live under this same
-          "products" tab (file scope), not a nested Stack — `href: null`
-          keeps them out of the tab bar while staying part of this Tabs
-          navigator; `headerShown: false` because both screens render their
-          own header with a manual back button (Tabs, unlike a Stack, has
-          no built-in back affordance between its screens). See T2's report
-          for why this couldn't be the more common "tab -> nested Stack"
-          shape without renaming the "products/index" screen above.
-        */}
-        <Tabs.Screen name="products/[id]" options={{ href: null, headerShown: false }} />
-        <Tabs.Screen name="products/[id]/edit" options={{ href: null, headerShown: false }} />
         <Tabs.Screen
           name="customers/index"
           options={{
