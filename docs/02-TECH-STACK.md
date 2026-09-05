@@ -79,7 +79,16 @@ pattern; revisit if bundle size becomes a landing performance issue.
 | Expo SDK      | 57.0.19  | React Native 0.86.3, **React 19.2.3**, TypeScript 6.0.3 (Expo's pins, do not raise), Node ≥ 22.13; Android package id `dev.sjalolov.savdo` (D-75) |
 | expo-router   | 57.0.18  | File-based routing; app source lives in `mobile/src/app` (Expo default template)          |
 | NativeWind    | v4.2.6   | Tailwind classes in RN. **Requires Tailwind 3.4.x** (peer `>3.3.0`), not Tailwind 4 — mobile pins `tailwindcss@3.4.19`; `react-native-css-interop` is a direct dep so Metro resolves it under pnpm isolation |
-| react-native-reusables | pin in Phase 5 | shadcn-style copy-in components on NativeWind (D-25); verify version at Phase 5      |
+| expo-secure-store | 57.0.3 | Bearer token, server URL and locale storage (D-79, D-78); verified 2026-09-05 |
+| i18next / react-i18next | 26.4.1 / 17.0.13 | Same pins as `admin` (D-78); resources from `@savdo/i18n` |
+| lucide-react-native | 1.40.0 | Icon set shared with admin's `lucide-react` (D-25); 1.41.0 blocked by the 24 h release age at install time |
+| react-native-svg | 15.15.4 | Peer of `lucide-react-native`; version chosen by `expo install` for SDK 57 |
+| react-native-reusables | copy-in, no version | shadcn-style copy-in components on NativeWind (D-25, T1 Phase 5): `button`, `input`, `text`, `card` copied into `mobile/src/components/ui` from `founded-labs/react-native-reusables` (`packages/registry/src/nativewind`, commit current as of 2026-09-05); no `@react-native-reusables/cli` dependency — the CLI hung non-interactively in this sandbox, so the four components were fetched and adapted by hand |
+| @rn-primitives/slot | 1.5.2 | Runtime peer of the copied `text.tsx` (`asChild`); verified 2026-09-05 |
+| class-variance-authority | 0.7.1 | Runtime peer of the copied components (`cva`); verified 2026-09-05 |
+| clsx | 2.1.1 | Runtime peer of the copied `cn()` helper; verified 2026-09-05 |
+| tailwind-merge | 3.6.0 | Runtime peer of the copied `cn()` helper; verified 2026-09-05 |
+| react-hook-form | 7.87.0 | Login form validation (D-76, no zod); verified 2026-09-05 |
 | Android build | local | `expo prebuild` + Gradle release build on the dev machine, no EAS cloud (D-72); Android SDK + JDK prerequisites in `07-DEVOPS.md`; `expo-secure-store` for the session token |
 | Tests | Vitest (workspace) | Pure helpers under `mobile/src/lib` only (D-85); no jest-expo, no e2e (D-73/D-74) |
 

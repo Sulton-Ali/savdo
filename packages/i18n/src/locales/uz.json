@@ -690,5 +690,13 @@
       "saleNotVoidable": "Bu qaytarish, uni bekor qilib bo‘lmaydi. Xato qaytarishni tuzatish uchun mahsulotni qayta soting.",
       "saleNotReturnable": "Bu qaytarish, unga nisbatan qaytarish rasmiylashtirib bo‘lmaydi."
     }
+  },
+  "mobile": {
+    "shell": {
+      "server": "Server manzili",
+      "tabs": {
+        "stock": "Qoldiq"
+      }
+    }
   }
 }

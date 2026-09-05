@@ -690,5 +690,13 @@
       "saleNotVoidable": "This is a return and cannot be voided. To correct a mistaken return, sell the item again.",
       "saleNotReturnable": "This is a return and cannot itself be returned."
     }
+  },
+  "mobile": {
+    "shell": {
+      "server": "Server address",
+      "tabs": {
+        "stock": "Stock"
+      }
+    }
   }
 }
