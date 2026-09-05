@@ -35,6 +35,7 @@
   },
   "nav": {
     "dashboard": "Boshqaruv paneli",
+    "sales": "Sotuvlar",
     "products": "Mahsulotlar",
     "categories": "Kategoriyalar",
     "attributes": "Atributlar",
@@ -541,6 +542,7 @@
   },
   "sales": {
     "title": "Tezkor sotuv",
+    "listTitle": "Sotuvlar",
     "fields": {
       "location": "Filial",
       "customer": "Mijoz",
@@ -593,10 +595,98 @@
       "total": "Jami: {{total}}",
       "newSale": "Yangi sotuv"
     },
+    "columns": {
+      "number": "Raqami",
+      "date": "Sana",
+      "kind": "Turi",
+      "status": "Holati",
+      "location": "Filial",
+      "cashier": "Kassir",
+      "customer": "Mijoz",
+      "total": "Jami",
+      "paymentMethod": "To‘lov"
+    },
+    "kind": {
+      "sale": "Sotuv",
+      "return": "Qaytarish"
+    },
+    "status": {
+      "completed": "Yakunlangan",
+      "voided": "Bekor qilingan"
+    },
+    "filters": {
+      "allLocations": "Barcha filiallar",
+      "allKinds": "Barcha turlar",
+      "allStatuses": "Barcha holatlar",
+      "allCashiers": "Barcha kassirlar",
+      "customerPlaceholder": "Mijozlarni qidirish",
+      "dateRangeLabel": "Sana oralig‘i"
+    },
+    "detail": {
+      "title": "Sotuv",
+      "notFound": "Sotuv topilmadi.",
+      "items": "Qatorlar",
+      "yes": "Ha",
+      "no": "Yo‘q",
+      "viewOriginal": "Asl sotuvni ko‘rish",
+      "fields": {
+        "number": "Raqami",
+        "kind": "Turi",
+        "status": "Holati",
+        "date": "Sana",
+        "location": "Filial",
+        "cashier": "Kassir",
+        "customer": "Mijoz",
+        "payment": "To‘lov",
+        "note": "Izoh",
+        "hasReturns": "Qaytarish mavjud",
+        "originalSale": "Asl sotuv",
+        "voidedAt": "Bekor qilingan vaqti",
+        "voidedBy": "Kim bekor qildi",
+        "voidReason": "Bekor qilish sababi"
+      },
+      "columns": {
+        "product": "Mahsulot",
+        "variant": "Variant",
+        "qty": "Miqdor",
+        "unitPrice": "Birlik narxi",
+        "lineTotal": "Qator summasi",
+        "returnedQty": "Qaytarilgan",
+        "unitCost": "Tannarx"
+      },
+      "totals": {
+        "subtotal": "Oraliq summa",
+        "discount": "Chegirma",
+        "total": "Jami"
+      }
+    },
+    "void": {
+      "action": "Sotuvni bekor qilish",
+      "title": "Sotuvni bekor qilish",
+      "reason": "Sabab",
+      "success": "Sotuv bekor qilindi"
+    },
+    "return": {
+      "action": "Qaytarish",
+      "title": "Mahsulotlarni qaytarish",
+      "submit": "Qaytarishni yuborish",
+      "note": "Izoh",
+      "success": "Qaytarish qayd etildi",
+      "columns": {
+        "sold": "Sotilgan",
+        "returned": "Qaytarilgan",
+        "qty": "Qaytariladigan miqdor"
+      }
+    },
     "errors": {
       "stockInsufficient": "Yetarli mahsulot yo‘q: faqat {{available}} mavjud.",
       "discountExceedsSubtotal": "Chegirma oraliq summadan oshmasligi kerak.",
-      "idempotencyKeyReused": "Bu sotuv allaqachon yuborilgan bo‘lishi mumkin. Tekshirib, qayta urinib ko‘ring."
+      "idempotencyKeyReused": "Bu sotuv allaqachon yuborilgan bo‘lishi mumkin. Tekshirib, qayta urinib ko‘ring.",
+      "returnIdempotencyKeyReused": "So‘rovni bajarib bo‘lmadi. Iltimos, qayta urinib ko‘ring.",
+      "voidWindowClosed": "Bu sotuvni endi bekor qilib bo‘lmaydi — uning kalendar kuni allaqachon o‘tgan.",
+      "saleHasReturns": "Bu sotuv bo‘yicha allaqachon qaytarish mavjud, uni bekor qilib bo‘lmaydi.",
+      "saleAlreadyVoided": "Bu sotuv allaqachon bekor qilingan.",
+      "returnExceedsSold": "Qaytariladigan miqdor qolgan miqdordan ko‘p."
     }
   }
 }
