@@ -76,7 +76,7 @@ func newShopTestFixture(t *testing.T) shopTestFixture {
 	crmSvc := crm.NewService(q)
 
 	return shopTestFixture{
-		router:        NewRouter(testLogger(), pool, authSvc, shopSvc, mediaSvc, nil, catalogSvc, stockSvc, crmSvc),
+		router:        NewRouter(testLogger(), pool, authSvc, shopSvc, mediaSvc, nil, catalogSvc, stockSvc, crmSvc, testReportsService()),
 		q:             q,
 		shopID:        shopRow.ID,
 		ownerUsername: owner.Username,

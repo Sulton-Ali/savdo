@@ -1121,23 +1121,23 @@ type SalesByProductList struct {
 
 // SalesByProductRow docs/00-DECISIONS.md D-55.
 type SalesByProductRow struct {
-	// Cost Present only for manager+ (ADR-010); kept optional here for symmetry even though this endpoint is manager+ only.
+	// Cost Present only for manager+ (ADR-010); kept optional here for symmetry even though this endpoint is manager+ only. Sum of `qty * unitCost` over items sold minus items returned (D-64).
 	Cost *Decimal `json:"cost,omitempty"`
 
-	// Margin Present only for manager+ (ADR-010); kept optional here for symmetry even though this endpoint is manager+ only.
+	// Margin Present only for manager+ (ADR-010); kept optional here for symmetry even though this endpoint is manager+ only. `revenue - cost` (D-64).
 	Margin    *Decimal           `json:"margin,omitempty"`
 	ProductId openapi_types.UUID `json:"productId"`
 
 	// ProductName Resolved for the caller's `Accept-Language` (ADR-012).
 	ProductName string `json:"productName"`
 
-	// QtyReturned money and quantities as decimal strings (ADR-007)
+	// QtyReturned Quantity returned (completed `return`-kind items) in the period.
 	QtyReturned Decimal `json:"qtyReturned"`
 
-	// QtySold money and quantities as decimal strings (ADR-007)
+	// QtySold Quantity sold (completed `sale`-kind items) in the period.
 	QtySold Decimal `json:"qtySold"`
 
-	// Revenue money and quantities as decimal strings (ADR-007)
+	// Revenue Net of this product's share of each sale's discount and of returns, so summing `revenue` across every row on every page equals the sales summary's `netRevenue` for the same period/ filters (D-64): each sale-leg line's discount share is `round(lineTotal * discountAmount / subtotal, 2)`, except the last line by `sale_items.id`, which takes the remainder so the shares always sum to exactly `discountAmount`; a returned line's already-net amount is then subtracted.
 	Revenue Decimal `json:"revenue"`
 }
 
@@ -1146,26 +1146,30 @@ type SalesSummaryReport struct {
 	// CashierId Non-null only when the report is scoped to one cashier (a cashier caller always gets their own id here; manager+ gets `null` for a whole-shop summary).
 	CashierId nullable.Nullable[openapi_types.UUID] `json:"cashierId"`
 
-	// Cost Present only for manager+ (ADR-010).
+	// Cost Present only for manager+ (ADR-010). Sum of `qty * unitCost` over items sold minus items returned in the period (D-64).
 	Cost *Decimal `json:"cost,omitempty"`
 
-	// Discounts money and quantities as decimal strings (ADR-007)
+	// Discounts Sum of `discount_amount` over completed `sale`-kind sales in the period (D-64).
 	Discounts  Decimal                               `json:"discounts"`
 	From       openapi_types.Date                    `json:"from"`
 	LocationId nullable.Nullable[openapi_types.UUID] `json:"locationId"`
 
-	// Margin Present only for manager+ (ADR-010).
+	// Margin Present only for manager+ (ADR-010). `netRevenue - cost` (D-64).
 	Margin *Decimal `json:"margin,omitempty"`
 
-	// NetRevenue money and quantities as decimal strings (ADR-007)
+	// NetRevenue `revenue - refunds` (D-64).
 	NetRevenue Decimal `json:"netRevenue"`
 
-	// Refunds money and quantities as decimal strings (ADR-007)
-	Refunds      Decimal `json:"refunds"`
-	ReturnsCount int     `json:"returnsCount"`
+	// Refunds Sum of `total` over completed `return`-kind sales (refunds) in the period (D-64).
+	Refunds Decimal `json:"refunds"`
 
-	// Revenue money and quantities as decimal strings (ADR-007)
-	Revenue    Decimal            `json:"revenue"`
+	// ReturnsCount Count of completed `return`-kind sales in the period (D-64).
+	ReturnsCount int `json:"returnsCount"`
+
+	// Revenue Sum of `total` over completed `sale`-kind sales in the period — already net of each sale's own discount (D-64).
+	Revenue Decimal `json:"revenue"`
+
+	// SalesCount Count of completed `sale`-kind sales in the period (D-64).
 	SalesCount int                `json:"salesCount"`
 	To         openapi_types.Date `json:"to"`
 }

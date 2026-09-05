@@ -4397,22 +4397,38 @@ components:
             `null` for a whole-shop summary).
         salesCount:
           type: integer
+          description: Count of completed `sale`-kind sales in the period (D-64).
         returnsCount:
           type: integer
+          description: Count of completed `return`-kind sales in the period (D-64).
         revenue:
           $ref: "#/components/schemas/Decimal"
+          description: >
+            Sum of `total` over completed `sale`-kind sales in the period —
+            already net of each sale's own discount (D-64).
         discounts:
           $ref: "#/components/schemas/Decimal"
+          description: >
+            Sum of `discount_amount` over completed `sale`-kind sales in
+            the period (D-64).
         refunds:
           $ref: "#/components/schemas/Decimal"
+          description: >
+            Sum of `total` over completed `return`-kind sales (refunds) in
+            the period (D-64).
         netRevenue:
           $ref: "#/components/schemas/Decimal"
+          description: "`revenue - refunds` (D-64)."
         cost:
           $ref: "#/components/schemas/Decimal"
-          description: Present only for manager+ (ADR-010).
+          description: >
+            Present only for manager+ (ADR-010). Sum of `qty * unitCost`
+            over items sold minus items returned in the period (D-64).
         margin:
           $ref: "#/components/schemas/Decimal"
-          description: Present only for manager+ (ADR-010).
+          description: >
+            Present only for manager+ (ADR-010). `netRevenue - cost`
+            (D-64).
 
     SalesByProductRow:
       type: object
@@ -4432,20 +4448,33 @@ components:
           description: Resolved for the caller's `Accept-Language` (ADR-012).
         qtySold:
           $ref: "#/components/schemas/Decimal"
+          description: Quantity sold (completed `sale`-kind items) in the period.
         qtyReturned:
           $ref: "#/components/schemas/Decimal"
+          description: Quantity returned (completed `return`-kind items) in the period.
         revenue:
           $ref: "#/components/schemas/Decimal"
+          description: >
+            Net of this product's share of each sale's discount and of
+            returns, so summing `revenue` across every row on every page
+            equals the sales summary's `netRevenue` for the same period/
+            filters (D-64): each sale-leg line's discount share is
+            `round(lineTotal * discountAmount / subtotal, 2)`, except the
+            last line by `sale_items.id`, which takes the remainder so the
+            shares always sum to exactly `discountAmount`; a returned
+            line's already-net amount is then subtracted.
         cost:
           $ref: "#/components/schemas/Decimal"
           description: >
             Present only for manager+ (ADR-010); kept optional here for
-            symmetry even though this endpoint is manager+ only.
+            symmetry even though this endpoint is manager+ only. Sum of
+            `qty * unitCost` over items sold minus items returned (D-64).
         margin:
           $ref: "#/components/schemas/Decimal"
           description: >
             Present only for manager+ (ADR-010); kept optional here for
             symmetry even though this endpoint is manager+ only.
+            `revenue - cost` (D-64).
 
     SalesByProductList:
       type: object

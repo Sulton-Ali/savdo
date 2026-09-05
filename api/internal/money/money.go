@@ -28,6 +28,24 @@ import (
 // exactly this, not "whatever the decimal library happens to tolerate".
 var amountPattern = regexp.MustCompile(`^\d+(\.\d{1,2})?$`)
 
+// signedAmountPattern is amountPattern with an optional leading "-" — for
+// the one wire value that is money-shaped but legitimately negative: a
+// sales report's net revenue over a period can be negative (a return with
+// no offsetting sale in the window), and its by-product paging cursor
+// round-trips that value (reports.decodeByProductCursor). Deliberately
+// still just digits and at most one dot: no exponent notation is
+// possible at all through this pattern, which matters more than it looks
+// — decimal.NewFromString happily accepts "1e-1000000" or "1e400" and
+// produces a Decimal whose Exponent() is that huge number; passing such a
+// value to money.ToNumeric and on into pgx's numeric encoder measured
+// tens of seconds of CPU per request (the encoder rescales by 10^exponent
+// as a big.Int). Restricting the input to this pattern first means
+// decimal.NewFromString only ever sees a plain, bounded-length digit
+// string, so its Exponent() is always in [-2, 0] — "more than 2 decimal
+// places" and "exponent < -2" are the same rejection by construction, not
+// two separate checks.
+var signedAmountPattern = regexp.MustCompile(`^-?\d+(\.\d{1,2})?$`)
+
 // maxAmount is the largest value a `NUMERIC(14,2)` column can hold: 14
 // total digits, 2 of them fractional, so 12 integer digits.
 var maxAmount = decimal.RequireFromString("999999999999.99")
@@ -92,6 +110,27 @@ func ParseAmount(s string) (decimal.Decimal, *apierr.Error) {
 		return decimal.Decimal{}, invalidAmount()
 	}
 	if d.GreaterThan(maxAmount) {
+		return decimal.Decimal{}, invalidAmount()
+	}
+	return d, nil
+}
+
+// ParseSignedAmount is ParseAmount but permits an optional leading "-",
+// for a value that is money-shaped yet legitimately negative (see
+// signedAmountPattern's own doc comment for why this exists and why it is
+// safe against a pathological exponent). Same bounds otherwise: at most
+// two decimal places, magnitude within NUMERIC(14,2) — checked on the
+// absolute value, so -999999999999.99 is accepted and -1000000000000.00
+// is not, symmetric with ParseAmount's own upper bound.
+func ParseSignedAmount(s string) (decimal.Decimal, *apierr.Error) {
+	if !signedAmountPattern.MatchString(s) {
+		return decimal.Decimal{}, invalidAmount()
+	}
+	d, err := decimal.NewFromString(s)
+	if err != nil {
+		return decimal.Decimal{}, invalidAmount()
+	}
+	if d.Abs().GreaterThan(maxAmount) {
 		return decimal.Decimal{}, invalidAmount()
 	}
 	return d, nil
