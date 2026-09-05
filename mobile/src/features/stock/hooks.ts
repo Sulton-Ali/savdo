@@ -7,13 +7,12 @@ import {
 } from "@tanstack/react-query";
 import { useMemo } from "react";
 
-import { getProduct } from "@/features/catalog/api";
-import { catalogKeys, stockKeys } from "@/lib/queryKeys";
+import { getProduct, listAllStockLevels } from "@/features/catalog/api";
+import { catalogKeys, purchasesKeys, stockKeys } from "@/lib/queryKeys";
 
 import {
   createStockAdjustment,
   listLowStock,
-  listStockLevels,
   listStockMovements,
   type StockAdjustmentCreate,
   type StockLowItem,
@@ -21,15 +20,16 @@ import {
 
 /** A variant's stock levels across every location it has a `stock_levels`
  * row for (deliverable 3's variant movements screen also wants this to show
- * "current qty" alongside the ledger). Not cursor-paginated for the caller —
- * a variant has at most a handful of locations. */
+ * "current qty" alongside the ledger). Reuses `features/catalog/api.ts`'s
+ * `listAllStockLevels`/`catalogKeys.stockLevels` — the same cache the shared
+ * `VariantPicker` (T2) already fills for this app's other screens, so a
+ * write here and a write there invalidate one cache, not two. Not
+ * cursor-paginated for the caller — a variant has at most a handful of
+ * locations. */
 export function useVariantStockLevels(variantId: string | undefined) {
   return useQuery({
-    queryKey: stockKeys.levels({ variantId }),
-    queryFn: async () => {
-      const page = await listStockLevels({ variantId });
-      return page.items;
-    },
+    queryKey: catalogKeys.stockLevels({ variantId }),
+    queryFn: () => listAllStockLevels({ variantId }),
     enabled: variantId != null,
   });
 }
@@ -112,9 +112,31 @@ export function useLowStockRows(enabled: boolean) {
   return { rows, ...lowStock };
 }
 
-/** `POST /stock/adjustments` — invalidates every stock view a successful
- * adjustment can change (levels, low stock, and this variant's movement
- * ledger) so the tab reflects it without a manual pull-to-refresh. */
+/**
+ * Invalidates every cache a stock-affecting write can change: stock levels
+ * (`catalogKeys.stockLevels` — the same cache `VariantPicker` fills, per
+ * this module's `useVariantStockLevels` doc), low stock, every variant's
+ * movement ledger, and the purchases list/detail. Shared by
+ * `useCreateStockAdjustment` below and `features/purchases/hooks.ts`'s
+ * `useReceivePurchase` — a receive changes a purchase's own status too, and
+ * an adjustment invalidating purchases costs nothing beyond an extra
+ * background refetch, so one shared helper stands in for two near-identical
+ * ones. Each `queryKey` here omits its `filters` argument, so it resolves to
+ * the bare namespace prefix (`catalogKeys.stockLevels`/`stockKeys.movements`'s
+ * docs) and matches every cached query under it, not just one variant's.
+ */
+export async function invalidateStockAndPurchases(
+  queryClient: ReturnType<typeof useQueryClient>,
+): Promise<void> {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: catalogKeys.stockLevels() }),
+    queryClient.invalidateQueries({ queryKey: stockKeys.low() }),
+    queryClient.invalidateQueries({ queryKey: stockKeys.movements() }),
+    queryClient.invalidateQueries({ queryKey: purchasesKeys.all }),
+  ]);
+}
+
+/** `POST /stock/adjustments`. */
 export function useCreateStockAdjustment() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -125,12 +147,6 @@ export function useCreateStockAdjustment() {
       body: StockAdjustmentCreate;
       idempotencyKey: string;
     }) => createStockAdjustment(body, idempotencyKey),
-    onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["stock", "levels"] }),
-        queryClient.invalidateQueries({ queryKey: ["stock", "low"] }),
-        queryClient.invalidateQueries({ queryKey: ["stock", "movements"] }),
-      ]);
-    },
+    onSuccess: () => invalidateStockAndPurchases(queryClient),
   });
 }

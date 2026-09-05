@@ -1,5 +1,6 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { invalidateStockAndPurchases } from "@/features/stock/hooks";
 import { purchasesKeys } from "@/lib/queryKeys";
 
 import {
@@ -43,7 +44,7 @@ export function usePurchase(id: string | undefined) {
 }
 
 function invalidatePurchases(queryClient: ReturnType<typeof useQueryClient>) {
-  return queryClient.invalidateQueries({ queryKey: ["purchases"] });
+  return queryClient.invalidateQueries({ queryKey: purchasesKeys.all });
 }
 
 /** `POST /purchases`. No `Idempotency-Key` on this operation (see
@@ -91,15 +92,10 @@ export function useReceivePurchase() {
     },
     onSuccess: async (purchase) => {
       queryClient.setQueryData(purchasesKeys.detail(purchase.id), purchase);
-      // Receiving writes `purchase_in` stock movements (D-42) — every stock
-      // view a successful receive can change, same set
-      // `features/stock/hooks.ts`'s `useCreateStockAdjustment` invalidates.
-      await Promise.all([
-        invalidatePurchases(queryClient),
-        queryClient.invalidateQueries({ queryKey: ["stock", "levels"] }),
-        queryClient.invalidateQueries({ queryKey: ["stock", "low"] }),
-        queryClient.invalidateQueries({ queryKey: ["stock", "movements"] }),
-      ]);
+      // Receiving writes `purchase_in` stock movements (D-42) — shared with
+      // `features/stock/hooks.ts`'s `useCreateStockAdjustment`, which also
+      // needs stock levels/low/movements invalidated after its own write.
+      await invalidateStockAndPurchases(queryClient);
     },
   });
 }

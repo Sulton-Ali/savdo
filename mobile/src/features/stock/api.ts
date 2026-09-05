@@ -2,7 +2,6 @@ import type { components } from "@savdo/api-client";
 import type { CursorPage } from "@/features/catalog/api";
 import { api } from "@/lib/api";
 
-export type StockLevel = components["schemas"]["StockLevel"];
 export type StockMovement = components["schemas"]["StockMovement"];
 export type StockMovementKind = components["schemas"]["StockMovementKind"];
 export type AdjustmentReason = components["schemas"]["AdjustmentReason"];
@@ -32,32 +31,6 @@ export class StockApiError extends Error {
     this.code = code;
     this.details = details ?? {};
   }
-}
-
-export interface ListStockLevelsParams {
-  variantId?: string;
-  productId?: string;
-  locationId?: string;
-  cursor?: string | null;
-}
-
-/** `GET /stock/levels` — any authenticated role, cashier included (D-40). No
- * cost anywhere on `StockLevel`. */
-export async function listStockLevels({
-  variantId,
-  productId,
-  locationId,
-  cursor,
-}: ListStockLevelsParams): Promise<CursorPage<StockLevel>> {
-  const { data, error } = await api.GET("/stock/levels", {
-    params: {
-      query: { limit: PAGE_LIMIT, cursor: cursor ?? undefined, variantId, productId, locationId },
-    },
-  });
-  if (error) {
-    throw new StockApiError(error.error.code, error.error.details);
-  }
-  return data;
 }
 
 export interface ListStockMovementsParams {
