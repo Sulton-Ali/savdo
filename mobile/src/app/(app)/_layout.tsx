@@ -1,5 +1,6 @@
 import { tokens } from "@savdo/ui-tokens";
 import { Tabs } from "expo-router";
+import { getFocusedRouteNameFromRoute } from "expo-router/react-navigation";
 import { Home, Package, Settings, ShoppingCart, Users, Warehouse } from "lucide-react-native";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -17,6 +18,20 @@ import { useSession } from "@/lib/session";
  * `stock.write`), not by hiding the tab itself — later Phase 5 tasks wire
  * that into the real screens. The header shows the shop name and a settings
  * button (language + logout).
+ *
+ * The Products tab nests its own Stack (`products/_layout.tsx`, T2) for
+ * `index` -> `[id]` -> `[id]/edit`; T4 (sale) and T5 (stock) will do the
+ * same. Left alone, this outer `<Tabs>` header would render *in addition
+ * to* that inner Stack's own header on every nested screen — the standard
+ * React Navigation fix is to key the outer tab's `headerShown` off the
+ * currently focused nested route name (`getFocusedRouteNameFromRoute`,
+ * re-exported by expo-router 57 from its vendored `@react-navigation/core`
+ * fork at `expo-router/react-navigation` — confirmed against that
+ * package's own `build/react-navigation/{core,native}` sources, not
+ * training data: expo-router 57 no longer depends on the external
+ * `@react-navigation/*` packages at all). Only the nested Stack's own
+ * `index` screen hides its header (`products/_layout.tsx`) to avoid the
+ * reverse doubling when this outer header is the one showing.
  */
 export default function AppTabsLayout() {
   const { t } = useTranslation();
@@ -57,10 +72,15 @@ export default function AppTabsLayout() {
         />
         <Tabs.Screen
           name="products"
-          options={{
+          options={({ route }) => ({
             title: t("nav.products"),
             tabBarIcon: ({ color, size }) => <Package color={color} size={size} />,
-          }}
+            // Only the nested Stack's initial "index" route reuses this
+            // outer header (shop name + settings) — "[id]" and
+            // "[id]/edit" show that Stack's own header instead, never
+            // both.
+            headerShown: (getFocusedRouteNameFromRoute(route) ?? "index") === "index",
+          })}
         />
         <Tabs.Screen
           name="customers/index"
