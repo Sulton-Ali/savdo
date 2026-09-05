@@ -40,19 +40,36 @@ function isSessionKey(queryKey: readonly unknown[]): boolean {
  * after a successful login, still inside the previous cashier's tabs after
  * logging out) until something unrelated forces a re-render.
  *
- * Instead: update the token flag on the *existing*, still-attached
- * `TOKEN_QUERY_KEY` query (so the mounted observer is notified
- * synchronously), reset `ME_QUERY_KEY`'s data rather than removing it (same
- * reason — a screen may be observing it right now) so a previous session's
- * `me` never lingers even for one frame, and only *remove* every other
- * query (product lists, customers, …) — those have no long-lived observer
- * tied to the session boundary the way the two session queries do, so
- * destroying them outright is safe.
+ * Instead: clear `ME_QUERY_KEY` first — *before* the token flag changes, so
+ * no mounted observer can ever read the new token value together with the
+ * previous session's stale `me` in the same tick (ADR-010) — then flip the
+ * token flag on the *existing*, still-attached `TOKEN_QUERY_KEY` query (so
+ * the mounted observer is notified synchronously), and only *remove* every
+ * other query (product lists, customers, …) — those have no long-lived
+ * observer tied to the session boundary the way the two session queries do,
+ * so destroying them outright is safe.
+ *
+ * `ME_QUERY_KEY` itself is cleared two different ways depending on
+ * direction, not reset the same way both times: logging in (`hasToken:
+ * true`) uses `resetQueries`, which puts the query back to its initial
+ * state *and* refetches it if it has a mounted, enabled observer — exactly
+ * what we want, since a screen observing `me` right after login should get
+ * the new session's data as soon as it's available. Logging out or an
+ * escape/401 (`hasToken: false`) instead uses `removeQueries`, which drops
+ * the cached data without triggering that refetch — `resetQueries` here
+ * would fire one more `GET /auth/me` with no token in flight (or against a
+ * server address that just proved unreachable, on the escape path), which
+ * can only ever fail and gains nothing since there is no session left to
+ * read.
  */
 export function resetSessionCache(queryClient: QueryClient, hasToken: boolean): void {
+  if (hasToken) {
+    queryClient.resetQueries({ queryKey: ME_QUERY_KEY });
+  } else {
+    queryClient.removeQueries({ queryKey: ME_QUERY_KEY });
+  }
   queryClient.setQueryData(TOKEN_QUERY_KEY, hasToken);
   queryClient.removeQueries({ predicate: (query) => !isSessionKey(query.queryKey) });
-  queryClient.resetQueries({ queryKey: ME_QUERY_KEY });
 }
 
 /**

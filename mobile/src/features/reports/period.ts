@@ -1,29 +1,18 @@
 /**
  * Pure date-range helpers for the home screen's summary card (T6). Reports
  * `from`/`to` are `YYYY-MM-DD`, inclusive, in the shop's timezone
- * (`docs/05-API.md` § Conventions) — computed here via `Intl`, the same
- * `en-CA`-formatting trick as `features/catalog/pricing.ts`'s
- * `calendarDateInTimeZone` (kept as a separate copy for the same reason
- * that file gives: no shared "business logic" package between `mobile`'s
- * own modules is assumed here either, and this one only needs the single
- * date, not a range check). No RN import (D-85) — plain Vitest-testable
- * logic.
+ * (`docs/05-API.md` § Conventions) — computed here via the shared
+ * `lib/date.ts`'s `calendarDateInTimeZone` (also used by
+ * `features/catalog/pricing.ts`'s D-67/D-68 promo-window checks). No RN
+ * import (D-85) — plain Vitest-testable logic.
  */
+import { calendarDateInTimeZone } from "../../lib/date";
+
 export type ReportPeriod = "today" | "last7Days";
 
 export interface PeriodRange {
   from: string;
   to: string;
-}
-
-/** `date`'s calendar date (`YYYY-MM-DD`) in `timeZone`. */
-function calendarDateInTimeZone(date: Date, timeZone: string): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(date);
 }
 
 /**

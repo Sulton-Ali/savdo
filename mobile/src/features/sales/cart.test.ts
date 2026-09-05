@@ -4,6 +4,7 @@ import {
   type CartState,
   cartReducer,
   estimateCartTotals,
+  generateIdempotencyKey,
   idempotencyOutcome,
   initialCartState,
   isValidDiscountValue,
@@ -15,7 +16,11 @@ import {
   sumMoney,
 } from "./cart";
 
-function addA(state: CartState, qty?: number): CartState {
+function addA(
+  state: CartState,
+  qty?: number,
+  idempotencyKey = generateIdempotencyKey(),
+): CartState {
   return cartReducer(state, {
     type: "addItem",
     variantId: "a",
@@ -24,10 +29,15 @@ function addA(state: CartState, qty?: number): CartState {
     unitPrice: "10000.00",
     availableQty: "5.000",
     qty,
+    idempotencyKey,
   });
 }
 
-function addB(state: CartState, qty?: number): CartState {
+function addB(
+  state: CartState,
+  qty?: number,
+  idempotencyKey = generateIdempotencyKey(),
+): CartState {
   return cartReducer(state, {
     type: "addItem",
     variantId: "b",
@@ -36,6 +46,7 @@ function addB(state: CartState, qty?: number): CartState {
     unitPrice: "25000.00",
     availableQty: "2.000",
     qty,
+    idempotencyKey,
   });
 }
 
@@ -97,6 +108,18 @@ describe("addItem", () => {
     const before = initialCartState();
     const after = addA(before);
     expect(after.idempotencyKey).not.toBe(before.idempotencyKey);
+  });
+
+  it("adopts the action's own idempotencyKey when filling an empty cart — the reducer never generates one itself", () => {
+    const before = initialCartState();
+    const after = addA(before, undefined, "caller-minted-key");
+    expect(after.idempotencyKey).toBe("caller-minted-key");
+  });
+
+  it("ignores the action's idempotencyKey when the cart was already non-empty", () => {
+    const first = addA(initialCartState(), undefined, "first-key");
+    const second = addB(first, 2, "second-key-should-be-ignored");
+    expect(second.idempotencyKey).toBe("first-key");
   });
 
   it("keeps the same idempotency key across further edits", () => {
@@ -277,16 +300,26 @@ describe("clear / completed", () => {
 });
 
 describe("rekey", () => {
-  it("mints a fresh idempotency key without touching lines or discount", () => {
+  it("adopts the action's idempotencyKey without touching lines or discount", () => {
     let before = addA(initialCartState(), 2);
     before = cartReducer(before, {
       type: "setDiscount",
       discount: { kind: "percent", value: "10", reason: "loyal" },
     });
-    const after = cartReducer(before, { type: "rekey" });
+    const after = cartReducer(before, { type: "rekey", idempotencyKey: "rekeyed" });
+    expect(after.idempotencyKey).toBe("rekeyed");
     expect(after.idempotencyKey).not.toBe(before.idempotencyKey);
     expect(after.lines).toEqual(before.lines);
     expect(after.discount).toEqual(before.discount);
+  });
+});
+
+describe("generateIdempotencyKey", () => {
+  it("mints a non-empty, practically-unique key on every call", () => {
+    const a = generateIdempotencyKey();
+    const b = generateIdempotencyKey();
+    expect(a.length).toBeGreaterThan(0);
+    expect(a).not.toBe(b);
   });
 });
 

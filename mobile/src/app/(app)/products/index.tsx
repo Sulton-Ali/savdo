@@ -29,17 +29,12 @@ function ProductRow({
   timeZone: string;
   onPress: () => void;
 }) {
-  // `GET /products` (list) never carries `images`/`variants` — only `GET
-  // /products/{id}` does (`api/internal/catalog/products.go`
-  // `toGenProductBase`/`buildFullProduct`; `docs/05-API.md` § "List vs get
-  // asymmetry" says only `description`/`translations` differ, which
-  // doesn't match this — noted in this task's report, not fixed here, out
-  // of scope). So `cover`/`coverUrl` are always `undefined` today; this
-  // stays correct (rather than a latent broken-image bug) if that gap is
-  // ever closed. Product-level pricing (base price, promo price when
-  // active) doesn't need a variant.
-  const cover = product.images?.find((image) => image.isCover) ?? product.images?.[0];
-  const coverUrl = useMediaUrl(cover?.urls.thumb);
+  // `GET /products` (list) sets `coverImage` (D-83): the product image
+  // flagged `isCover`, else the first by position, else absent — computed
+  // server-side so this row never needs the full `images` array (list
+  // items don't carry it, only `GET /products/{id}` does). Product-level
+  // pricing (base price, promo price when active) doesn't need a variant.
+  const coverUrl = useMediaUrl(product.coverImage?.urls.thumb);
   const price = resolveEffectivePrice(product, { priceOverride: null }, timeZone);
 
   return (

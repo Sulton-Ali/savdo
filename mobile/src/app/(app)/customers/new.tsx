@@ -55,15 +55,19 @@ export default function NewCustomerScreen() {
       if (returnTo === "sale") {
         // This screen was pushed onto the *Customers* tab's own stack
         // (its file lives under `app/(app)/customers/`, regardless of
-        // which tab's button pushed it): `replace` swaps this stack
-        // entry for `/sale` and switches the active tab there, which is
-        // what the round trip needs. A `router.dismissTo` alternative
-        // was tried here to also clear the Customers tab's own history
-        // (so switching back to it later shows its list, not this stale
-        // form) but did not navigate at all when tested on-device
-        // (T4's smoke test) — reverted to this known-working `replace`;
-        // the stale-Customers-tab-history nit is left for a follow-up,
-        // noted in this task's report.
+        // which tab's button pushed it). `dismissAll` first pops that
+        // stack back to its root (`customers/index.tsx`) — a `POP_TO_TOP`
+        // handled by the currently focused navigator, i.e. this same
+        // stack, not a cross-tab navigation itself — so this "new
+        // customer" form is gone from its history; the `replace` right
+        // after then swaps to `/sale` and switches the active tab there,
+        // which is what the round trip needs. A `router.dismissTo`
+        // alternative was tried in an earlier round to do both in one
+        // call but did not navigate at all when tested on-device (T4's
+        // smoke test); `dismissAll` (a same-stack reset, not a
+        // cross-navigator "dismiss to this route") does not have that
+        // problem.
+        router.dismissAll();
         router.replace({
           pathname: "/sale",
           params: {

@@ -10,6 +10,8 @@
  * packages with no shared "business logic" package (only `@savdo/i18n`,
  * `@savdo/ui-tokens` and the generated `@savdo/api-client` are shared).
  */
+import { calendarDateInTimeZone } from "../../lib/date";
+
 export interface PriceableProduct {
   basePrice: string;
   promoPrice: string | null;
@@ -19,18 +21,6 @@ export interface PriceableProduct {
 
 export interface PriceableVariant {
   priceOverride: string | null;
-}
-
-/** `date`'s calendar date (`YYYY-MM-DD`) in `timeZone`, via `Intl`'s `en-CA`
- * formatting (which happens to be ISO order) — no date library needed, and
- * the resulting strings compare correctly with plain `<=`/`>=`. */
-function calendarDateInTimeZone(date: Date, timeZone: string): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(date);
 }
 
 /** D-68: `promoFrom`/`promoTo` are calendar-day bounds in the shop
