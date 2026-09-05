@@ -19,6 +19,7 @@ import (
 	"github.com/Sulton-Ali/savdo/api/internal/catalog"
 	"github.com/Sulton-Ali/savdo/api/internal/crm"
 	"github.com/Sulton-Ali/savdo/api/internal/media"
+	"github.com/Sulton-Ali/savdo/api/internal/reports"
 	"github.com/Sulton-Ali/savdo/api/internal/shop"
 	"github.com/Sulton-Ali/savdo/api/internal/stock"
 )
@@ -53,8 +54,9 @@ import (
 // ReceivePurchase additionally use pool directly, for httpx.Idempotent's
 // Idempotency-Key bookkeeping (stock.go's/purchases.go's own doc
 // comments). crmSvc backs the five `/suppliers` and five `/customers`
-// operations via crm.NewHandler (crm.go).
-func NewRouter(logger *slog.Logger, pool *pgxpool.Pool, authSvc *auth.Service, shopSvc *shop.Service, mediaSvc *media.Service, devMedia http.Handler, catalogSvc *catalog.Service, stockSvc *stock.Service, crmSvc *crm.Service) http.Handler {
+// operations via crm.NewHandler (crm.go). reportsSvc backs the two
+// `/reports/sales/*` operations via reports.NewHandler (reports.go).
+func NewRouter(logger *slog.Logger, pool *pgxpool.Pool, authSvc *auth.Service, shopSvc *shop.Service, mediaSvc *media.Service, devMedia http.Handler, catalogSvc *catalog.Service, stockSvc *stock.Service, crmSvc *crm.Service, reportsSvc *reports.Service) http.Handler {
 	mux := http.NewServeMux()
 
 	strictHandler := gen.NewStrictHandlerWithOptions(
@@ -62,6 +64,7 @@ func NewRouter(logger *slog.Logger, pool *pgxpool.Pool, authSvc *auth.Service, s
 			pool: pool, Handler: auth.NewHandler(authSvc), shop: shop.NewHandler(shopSvc),
 			media: media.NewHandler(mediaSvc), catalog: catalog.NewHandler(catalogSvc),
 			crm: crm.NewHandler(crmSvc), stock: stock.NewHandler(stockSvc),
+			reports: reports.NewHandler(reportsSvc),
 		},
 		[]gen.StrictMiddlewareFunc{authSvc.Middleware, catalog.AcceptLanguageMiddleware},
 		gen.StrictHTTPServerOptions{

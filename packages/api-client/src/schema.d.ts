@@ -1899,15 +1899,21 @@ export interface components {
              * @description Non-null only when the report is scoped to one cashier (a cashier caller always gets their own id here; manager+ gets `null` for a whole-shop summary).
              */
             cashierId: string | null;
+            /** @description Count of completed `sale`-kind sales in the period (D-64). */
             salesCount: number;
+            /** @description Count of completed `return`-kind sales in the period (D-64). */
             returnsCount: number;
+            /** @description Sum of `total` over completed `sale`-kind sales in the period — already net of each sale's own discount (D-64). */
             revenue: components["schemas"]["Decimal"];
+            /** @description Sum of `discount_amount` over completed `sale`-kind sales in the period (D-64). */
             discounts: components["schemas"]["Decimal"];
+            /** @description Sum of `total` over completed `return`-kind sales (refunds) in the period (D-64). */
             refunds: components["schemas"]["Decimal"];
+            /** @description `revenue - refunds` (D-64). */
             netRevenue: components["schemas"]["Decimal"];
-            /** @description Present only for manager+ (ADR-010). */
+            /** @description Present only for manager+ (ADR-010). Sum of `qty * unitCost` over items sold minus items returned in the period (D-64). */
             cost?: components["schemas"]["Decimal"];
-            /** @description Present only for manager+ (ADR-010). */
+            /** @description Present only for manager+ (ADR-010). `netRevenue - cost` (D-64). */
             margin?: components["schemas"]["Decimal"];
         };
         /** @description docs/00-DECISIONS.md D-55. */
@@ -1916,12 +1922,15 @@ export interface components {
             productId: string;
             /** @description Resolved for the caller's `Accept-Language` (ADR-012). */
             productName: string;
+            /** @description Quantity sold (completed `sale`-kind items) in the period. */
             qtySold: components["schemas"]["Decimal"];
+            /** @description Quantity returned (completed `return`-kind items) in the period. */
             qtyReturned: components["schemas"]["Decimal"];
+            /** @description Net of this product's share of each sale's discount and of returns, so summing `revenue` across every row on every page equals the sales summary's `netRevenue` for the same period/ filters (D-64): each sale-leg line's discount share is `round(lineTotal * discountAmount / subtotal, 2)`, except the last line by `sale_items.id`, which takes the remainder so the shares always sum to exactly `discountAmount`; a returned line's already-net amount is then subtracted. */
             revenue: components["schemas"]["Decimal"];
-            /** @description Present only for manager+ (ADR-010); kept optional here for symmetry even though this endpoint is manager+ only. */
+            /** @description Present only for manager+ (ADR-010); kept optional here for symmetry even though this endpoint is manager+ only. Sum of `qty * unitCost` over items sold minus items returned (D-64). */
             cost?: components["schemas"]["Decimal"];
-            /** @description Present only for manager+ (ADR-010); kept optional here for symmetry even though this endpoint is manager+ only. */
+            /** @description Present only for manager+ (ADR-010); kept optional here for symmetry even though this endpoint is manager+ only. `revenue - cost` (D-64). */
             margin?: components["schemas"]["Decimal"];
         };
         /** @description Cursor-paginated envelope for `GET /reports/sales/by-product`, sorted by `revenue` descending. */

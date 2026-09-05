@@ -49,6 +49,23 @@ func TestPermissionsPerRole(t *testing.T) {
 	}
 }
 
+// TestReportsReadImpliesCostRead pins an invariant reports.GetSalesSummaryReport
+// relies on instead of checking (docs/04-DATA-MODEL.md § 7): no role ever
+// holds PermReportsRead without also holding PermCostRead, so "a manager+
+// caller without cost.read" is not a reachable configuration — the
+// summary/by-product reports show cost/margin to every manager+ caller
+// unconditionally, with no separate per-field permission check. If a
+// future role change ever grants PermReportsRead without PermCostRead,
+// this test catches it before the reports module's own assumption goes
+// stale.
+func TestReportsReadImpliesCostRead(t *testing.T) {
+	for role, perms := range rolePermissions {
+		if slices.Contains(perms, PermReportsRead) && !slices.Contains(perms, PermCostRead) {
+			t.Errorf("role %s holds PermReportsRead without PermCostRead", role)
+		}
+	}
+}
+
 func TestPermissionsUnknownRoleIsEmptyNotNil(t *testing.T) {
 	got := Permissions(db.UserRole("bogus"))
 	if got == nil {

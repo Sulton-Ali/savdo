@@ -103,6 +103,54 @@ func TestParseAmount(t *testing.T) {
 	}
 }
 
+func TestParseSignedAmount(t *testing.T) {
+	tests := []struct {
+		in      string
+		wantErr bool
+		want    string
+	}{
+		{"125000.00", false, "125000.00"},
+		{"-125000.00", false, "-125000.00"},
+		{"-0.01", false, "-0.01"},
+		{"0", false, "0.00"},
+		{"-999999999999.99", false, "-999999999999.99"}, // exactly -max
+		{"999999999999.99", false, "999999999999.99"},   // exactly +max
+		{"-1000000000000.00", true, ""},                 // one cent past -max
+		{"1000000000000.00", true, ""},                  // one cent past +max
+		{"12.345", true, ""},                            // more than 2 decimal places
+		{"abc", true, ""},
+		{"", true, ""},
+		{"--5.00", true, ""},
+		{"1.2.3", true, ""},
+		// The two exponent-notation payloads a malformed report cursor
+		// (reports.decodeByProductCursor) could otherwise smuggle into
+		// decimal.NewFromString, each shaped to make a naive
+		// money.ToNumeric->pgx numeric encode rescale by an astronomical
+		// power of ten. Both must be rejected by the pattern alone —
+		// never reaching decimal.NewFromString at all.
+		{"1e-1000000", true, ""},
+		{"1e400", true, ""},
+		{"-1e400", true, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			d, err := money.ParseSignedAmount(tt.in)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("ParseSignedAmount(%q) = %v, want an error", tt.in, d)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseSignedAmount(%q): %v", tt.in, err)
+			}
+			if money.String(d) != tt.want {
+				t.Fatalf("ParseSignedAmount(%q) = %q, want %q", tt.in, money.String(d), tt.want)
+			}
+		})
+	}
+}
+
 func TestString_fixesTwoDecimals(t *testing.T) {
 	d := decimal.RequireFromString("5")
 	if got := money.String(d); got != "5.00" {
