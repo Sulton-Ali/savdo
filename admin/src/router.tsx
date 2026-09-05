@@ -16,6 +16,8 @@ import { purchaseNewRoute } from "./routes/app/purchaseNewRoute";
 import { purchasesRoute } from "./routes/app/purchasesRoute";
 import { quickSaleRoute } from "./routes/app/quickSaleRoute";
 import { reportsRoute } from "./routes/app/reportsRoute";
+import { saleDetailRoute } from "./routes/app/saleDetailRoute";
+import { salesListRoute } from "./routes/app/salesListRoute";
 import { settingsRoute } from "./routes/app/settingsRoute";
 import { staffRoute } from "./routes/app/staffRoute";
 import { stockLevelsRoute } from "./routes/app/stockLevelsRoute";
@@ -47,6 +49,9 @@ const routeTree = rootRoute.addChildren([
     customerDetailRoute,
     // Phase 4 T6b: quick sale (every role).
     quickSaleRoute,
+    // Phase 4 T6c: sales list/detail (cashier+ read; void/return manager+).
+    salesListRoute,
+    saleDetailRoute,
     reportsRoute,
     settingsRoute,
     stockLevelsRoute,

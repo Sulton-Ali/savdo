@@ -35,6 +35,7 @@
   },
   "nav": {
     "dashboard": "Панель управления",
+    "sales": "Продажи",
     "products": "Товары",
     "categories": "Категории",
     "attributes": "Атрибуты",
@@ -541,6 +542,7 @@
   },
   "sales": {
     "title": "Быстрая продажа",
+    "listTitle": "Продажи",
     "fields": {
       "location": "Точка продаж",
       "customer": "Клиент",
@@ -593,10 +595,98 @@
       "total": "Итого: {{total}}",
       "newSale": "Новая продажа"
     },
+    "columns": {
+      "number": "Номер",
+      "date": "Дата",
+      "kind": "Тип",
+      "status": "Статус",
+      "location": "Филиал",
+      "cashier": "Кассир",
+      "customer": "Клиент",
+      "total": "Итого",
+      "paymentMethod": "Оплата"
+    },
+    "kind": {
+      "sale": "Продажа",
+      "return": "Возврат"
+    },
+    "status": {
+      "completed": "Завершена",
+      "voided": "Отменена"
+    },
+    "filters": {
+      "allLocations": "Все филиалы",
+      "allKinds": "Все типы",
+      "allStatuses": "Все статусы",
+      "allCashiers": "Все кассиры",
+      "customerPlaceholder": "Поиск клиентов",
+      "dateRangeLabel": "Период"
+    },
+    "detail": {
+      "title": "Продажа",
+      "notFound": "Продажа не найдена.",
+      "items": "Позиции",
+      "yes": "Да",
+      "no": "Нет",
+      "viewOriginal": "Открыть исходную продажу",
+      "fields": {
+        "number": "Номер",
+        "kind": "Тип",
+        "status": "Статус",
+        "date": "Дата",
+        "location": "Филиал",
+        "cashier": "Кассир",
+        "customer": "Клиент",
+        "payment": "Оплата",
+        "note": "Заметка",
+        "hasReturns": "Есть возврат",
+        "originalSale": "Исходная продажа",
+        "voidedAt": "Отменена",
+        "voidedBy": "Кем отменена",
+        "voidReason": "Причина отмены"
+      },
+      "columns": {
+        "product": "Товар",
+        "variant": "Вариант",
+        "qty": "Кол-во",
+        "unitPrice": "Цена за единицу",
+        "lineTotal": "Сумма позиции",
+        "returnedQty": "Возвращено",
+        "unitCost": "Себестоимость"
+      },
+      "totals": {
+        "subtotal": "Промежуточный итог",
+        "discount": "Скидка",
+        "total": "Итого"
+      }
+    },
+    "void": {
+      "action": "Отменить продажу",
+      "title": "Отменить продажу",
+      "reason": "Причина",
+      "success": "Продажа отменена"
+    },
+    "return": {
+      "action": "Возврат",
+      "title": "Оформить возврат",
+      "submit": "Оформить возврат",
+      "note": "Заметка",
+      "success": "Возврат оформлен",
+      "columns": {
+        "sold": "Продано",
+        "returned": "Возвращено",
+        "qty": "Кол-во к возврату"
+      }
+    },
     "errors": {
       "stockInsufficient": "Недостаточно товара: доступно только {{available}}.",
       "discountExceedsSubtotal": "Скидка не может превышать сумму продажи.",
-      "idempotencyKeyReused": "Эта продажа, возможно, уже оформлена. Проверьте и попробуйте снова."
+      "idempotencyKeyReused": "Эта продажа, возможно, уже оформлена. Проверьте и попробуйте снова.",
+      "returnIdempotencyKeyReused": "Не удалось выполнить запрос. Попробуйте ещё раз.",
+      "voidWindowClosed": "Эту продажу больше нельзя отменить — её календарный день уже прошёл.",
+      "saleHasReturns": "По этой продаже уже есть возврат, отменить её больше нельзя.",
+      "saleAlreadyVoided": "Эта продажа уже отменена.",
+      "returnExceedsSold": "Количество к возврату превышает то, что ещё можно вернуть."
     }
   }
 }

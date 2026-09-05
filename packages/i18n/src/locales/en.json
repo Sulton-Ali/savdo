@@ -35,6 +35,7 @@
   },
   "nav": {
     "dashboard": "Dashboard",
+    "sales": "Sales",
     "products": "Products",
     "categories": "Categories",
     "attributes": "Attributes",
@@ -541,6 +542,7 @@
   },
   "sales": {
     "title": "Quick sale",
+    "listTitle": "Sales",
     "fields": {
       "location": "Location",
       "customer": "Customer",
@@ -593,10 +595,98 @@
       "total": "Total: {{total}}",
       "newSale": "New sale"
     },
+    "columns": {
+      "number": "Number",
+      "date": "Date",
+      "kind": "Kind",
+      "status": "Status",
+      "location": "Location",
+      "cashier": "Cashier",
+      "customer": "Customer",
+      "total": "Total",
+      "paymentMethod": "Payment"
+    },
+    "kind": {
+      "sale": "Sale",
+      "return": "Return"
+    },
+    "status": {
+      "completed": "Completed",
+      "voided": "Voided"
+    },
+    "filters": {
+      "allLocations": "All locations",
+      "allKinds": "All kinds",
+      "allStatuses": "All statuses",
+      "allCashiers": "All cashiers",
+      "customerPlaceholder": "Search customers",
+      "dateRangeLabel": "Date range"
+    },
+    "detail": {
+      "title": "Sale",
+      "notFound": "Sale not found.",
+      "items": "Items",
+      "yes": "Yes",
+      "no": "No",
+      "viewOriginal": "View original sale",
+      "fields": {
+        "number": "Number",
+        "kind": "Kind",
+        "status": "Status",
+        "date": "Date",
+        "location": "Location",
+        "cashier": "Cashier",
+        "customer": "Customer",
+        "payment": "Payment",
+        "note": "Note",
+        "hasReturns": "Has returns",
+        "originalSale": "Original sale",
+        "voidedAt": "Voided at",
+        "voidedBy": "Voided by",
+        "voidReason": "Void reason"
+      },
+      "columns": {
+        "product": "Product",
+        "variant": "Variant",
+        "qty": "Qty",
+        "unitPrice": "Unit price",
+        "lineTotal": "Line total",
+        "returnedQty": "Returned",
+        "unitCost": "Unit cost"
+      },
+      "totals": {
+        "subtotal": "Subtotal",
+        "discount": "Discount",
+        "total": "Total"
+      }
+    },
+    "void": {
+      "action": "Void sale",
+      "title": "Void sale",
+      "reason": "Reason",
+      "success": "Sale voided"
+    },
+    "return": {
+      "action": "Return",
+      "title": "Return items",
+      "submit": "Submit return",
+      "note": "Note",
+      "success": "Return recorded",
+      "columns": {
+        "sold": "Sold",
+        "returned": "Returned",
+        "qty": "Return qty"
+      }
+    },
     "errors": {
       "stockInsufficient": "Not enough stock: only {{available}} available.",
       "discountExceedsSubtotal": "Discount cannot exceed the subtotal.",
-      "idempotencyKeyReused": "This sale may already be submitted. Please check and try again."
+      "idempotencyKeyReused": "This sale may already be submitted. Please check and try again.",
+      "returnIdempotencyKeyReused": "This request could not be completed. Please try again.",
+      "voidWindowClosed": "This sale can no longer be voided — its calendar day has passed.",
+      "saleHasReturns": "This sale already has a return and can no longer be voided.",
+      "saleAlreadyVoided": "This sale is already voided.",
+      "returnExceedsSold": "The return quantity exceeds what is left to return."
     }
   }
 }
