@@ -54,3 +54,26 @@ export function resetSessionCache(queryClient: QueryClient, hasToken: boolean): 
   queryClient.removeQueries({ predicate: (query) => !isSessionKey(query.queryKey) });
   queryClient.resetQueries({ queryKey: ME_QUERY_KEY });
 }
+
+/**
+ * Catalog query keys (Phase 5 T2), added to this shared file rather than
+ * declared ad hoc in `features/catalog/hooks.ts` — T1 left no key-builder
+ * extension point (the keys above are fixed, param-less arrays), so these
+ * are the first to need a `filters`/`id` dimension and are grouped under
+ * one namespace object to keep the export surface small.
+ */
+export const catalogKeys = {
+  products: (filters: { q?: string }) => ["catalog", "products", filters] as const,
+  product: (id: string) => ["catalog", "product", id] as const,
+  variants: (productId: string) => ["catalog", "variants", productId] as const,
+  stockLevels: (filters: { variantId?: string; productId?: string; locationId?: string }) =>
+    ["catalog", "stockLevels", filters] as const,
+  locations: () => ["catalog", "locations"] as const,
+  /** Caches `getServerUrl()` for `features/catalog/hooks.ts`'s `useMediaUrl`
+   * (resolving a relative `MediaUrls` path to an absolute one) — this
+   * module used to export a shared `SERVER_URL_QUERY_KEY` for exactly this
+   * kind of reactive read, removed when nothing else needed it; this is its
+   * only other consumer now, so the key lives locally under this namespace
+   * instead. */
+  serverUrl: () => ["catalog", "serverUrl"] as const,
+};

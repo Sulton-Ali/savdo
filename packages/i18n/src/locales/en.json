@@ -699,6 +699,23 @@
       "tabs": {
         "stock": "Stock"
       }
+    },
+    "catalog": {
+      "list": {
+        "empty": "No products found"
+      },
+      "detail": {
+        "variantsTitle": "Variants",
+        "columns": {
+          "variant": "Variant",
+          "price": "Price"
+        }
+      },
+      "picker": {
+        "searchPlaceholder": "Search product or variant",
+        "empty": "No matches",
+        "qtyAvailable": "{{qty}} available"
+      }
     }
   }
 }
