@@ -743,6 +743,17 @@
         "title": "Топ товаров",
         "empty": "Нет продаж за этот период"
       }
+    },
+    "stock": {
+      "lowEmpty": "Товаров с низким остатком нет",
+      "lowQty": "{{qty}} / {{threshold}}",
+      "movementsEmpty": "Движений пока нет",
+      "noLocations": "Нет доступных филиалов"
+    },
+    "purchases": {
+      "drafts": "Черновики",
+      "draftsEmpty": "Черновиков закупок нет",
+      "saveAndReceive": "Сохранить и принять"
     }
   }
 }

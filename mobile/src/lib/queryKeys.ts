@@ -66,8 +66,18 @@ export const catalogKeys = {
   products: (filters: { q?: string }) => ["catalog", "products", filters] as const,
   product: (id: string) => ["catalog", "product", id] as const,
   variants: (productId: string) => ["catalog", "variants", productId] as const,
-  stockLevels: (filters: { variantId?: string; productId?: string; locationId?: string }) =>
-    ["catalog", "stockLevels", filters] as const,
+  /** Omitting `filters` returns the bare `["catalog", "stockLevels"]` prefix
+   * — every specific-filter query key below is a TanStack partial match of
+   * it, so `queryClient.invalidateQueries({ queryKey: catalogKeys.stockLevels() })`
+   * invalidates every stock-levels query regardless of its filters
+   * (`features/stock/hooks.ts`'s `useCreateStockAdjustment`,
+   * `features/purchases/hooks.ts`'s `useReceivePurchase`) without needing to
+   * know which variant/product/location was actually cached. */
+  stockLevels(filters?: { variantId?: string; productId?: string; locationId?: string }) {
+    return filters
+      ? (["catalog", "stockLevels", filters] as const)
+      : (["catalog", "stockLevels"] as const);
+  },
   locations: () => ["catalog", "locations"] as const,
   /** Caches `getServerUrl()` for `features/catalog/hooks.ts`'s `useMediaUrl`
    * (resolving a relative `MediaUrls` path to an absolute one) — this
@@ -89,4 +99,35 @@ export const reportsKeys = {
   summary: (filters: { from?: string; to?: string }) => ["reports", "summary", filters] as const,
   byProduct: (filters: { from: string; to: string }) => ["reports", "byProduct", filters] as const,
   lowStock: () => ["reports", "lowStock"] as const,
+};
+
+/**
+ * Stock/purchases query keys (Phase 5 T5), added alongside `catalogKeys`
+ * above for the same reason: a `filters`/`id` dimension each feature's
+ * `hooks.ts` needs, kept here rather than declared ad hoc so every mutation's
+ * `invalidateQueries` call (create/receive a purchase, post an adjustment)
+ * targets the exact same keys the list/detail queries use. Stock *levels*
+ * are deliberately not duplicated here — the shared `VariantPicker` (T2, used
+ * by both the levels browser and the adjustment/purchase item pickers here)
+ * already caches them under `catalogKeys.stockLevels`, so `features/stock`
+ * reuses that key/fetcher instead of a second cache for the same data.
+ */
+export const stockKeys = {
+  low: () => ["stock", "low"] as const,
+  /** Omitting `filters` returns the bare `["stock", "movements"]` prefix —
+   * see `catalogKeys.stockLevels`'s doc for why this shape exists. */
+  movements(filters?: { variantId?: string; locationId?: string }) {
+    return filters ? (["stock", "movements", filters] as const) : (["stock", "movements"] as const);
+  },
+};
+
+export const purchasesKeys = {
+  /** The bare `["purchases"]` prefix — every key below is a TanStack partial
+   * match of it, so invalidating this one covers suppliers, every purchase
+   * list filter and every purchase detail at once (`useReceivePurchase`). */
+  all: ["purchases"] as const,
+  suppliers: () => ["purchases", "suppliers"] as const,
+  list: (filters: { status?: "draft" | "received" | "cancelled" }) =>
+    ["purchases", "list", filters] as const,
+  detail: (id: string) => ["purchases", "detail", id] as const,
 };

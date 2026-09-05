@@ -743,6 +743,17 @@
         "title": "Top products",
         "empty": "No sales in this period yet"
       }
+    },
+    "stock": {
+      "lowEmpty": "Nothing is low on stock",
+      "lowQty": "{{qty}} / {{threshold}}",
+      "movementsEmpty": "No movements yet",
+      "noLocations": "No locations available"
+    },
+    "purchases": {
+      "drafts": "Drafts",
+      "draftsEmpty": "No draft purchases",
+      "saveAndReceive": "Save and receive"
     }
   }
 }

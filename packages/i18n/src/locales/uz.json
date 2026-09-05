@@ -743,6 +743,17 @@
         "title": "Top mahsulotlar",
         "empty": "Bu davrda sotuvlar yo‘q"
       }
+    },
+    "stock": {
+      "lowEmpty": "Kam qoldiq yo'q",
+      "lowQty": "{{qty}} / {{threshold}}",
+      "movementsEmpty": "Hali harakatlar yo'q",
+      "noLocations": "Filiallar mavjud emas"
+    },
+    "purchases": {
+      "drafts": "Qoralamalar",
+      "draftsEmpty": "Qoralama xaridlar yo'q",
+      "saveAndReceive": "Saqlash va qabul qilish"
     }
   }
 }
