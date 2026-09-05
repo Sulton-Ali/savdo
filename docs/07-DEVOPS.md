@@ -81,26 +81,21 @@ release`) also works and additionally installs and launches it.
 The APK lands at `mobile/android/app/build/outputs/apk/release/app-release.apk`. Neither
 `mobile/android/` (regenerated every prebuild, gitignored) nor the APK is committed.
 
-**Known issue (found 2026-09-05, not fixed in this task — needs an owner decision):** the
-Gradle-invoked JS bundling step (`:app:createBundleReleaseJsAndAssets`, which runs the
-Expo CLI's internal `export:embed` command) reproducibly fails in this pnpm workspace with
-`Cannot find module '@babel/plugin-transform-react-jsx'`, while the equivalent
-`pnpm --filter mobile export:android` (`expo export --platform android`, our `make verify`
-and CI check) reliably succeeds using the exact same babel config. Root cause: `nativewind/babel`
-(via `react-native-css-interop@0.2.6`'s `babel.js`) declares `"@babel/plugin-transform-react-jsx"`
+**Fixed issue (found and fixed 2026-09-05, D-86):** the Gradle-invoked JS bundling step
+(`:app:createBundleReleaseJsAndAssets`, which runs the Expo CLI's internal `export:embed`
+command) reproducibly failed in this pnpm workspace with `Cannot find module
+'@babel/plugin-transform-react-jsx'`, while the equivalent `pnpm --filter mobile
+export:android` (`expo export --platform android`, our `make verify` and CI check)
+reliably succeeded using the exact same babel config. Root cause: `nativewind/babel` (via
+`react-native-css-interop@0.2.6`'s `babel.js`) declares `"@babel/plugin-transform-react-jsx"`
 as a plugin **by string name** without listing it as `react-native-css-interop`'s own
 dependency; under pnpm's strict, non-hoisted `node_modules`, Babel's string-based plugin
 resolution can only find it once it's hoisted into a package that resolves in that lookup
 chain, and the CLI's `export` and `export:embed` commands hit this resolution in a way that
-happens to differ in this workspace layout. Confirmed fix (validated locally, then reverted
-— it is a new dependency and needs approval per the hard rule): add
-`@babel/plugin-transform-react-jsx` (exact version already resolved transitively at build
-time, currently `7.29.7` — check `pnpm why @babel/plugin-transform-react-jsx` for the
-current one) as a `mobile` devDependency, which makes pnpm symlink it directly into
-`mobile/node_modules/@babel/`. No new supply-chain surface — the package is already locked
-and used transitively via `babel-preset-expo`. Until this is approved and added, a local
-release build may need a retry or two, or fails outright on some machines; `export:android`
-(the `make verify`/CI gate) is unaffected.
+differs in this workspace layout. Fixed by declaring `@babel/plugin-transform-react-jsx`
+(pinned `7.29.7`, the exact version already resolved transitively via `babel-preset-expo`
+— no new supply-chain surface) as an explicit `mobile` devDependency, which makes pnpm
+symlink it directly into `mobile/node_modules/@babel/`.
 
 ### Install on a phone over USB (owner's workflow)
 
