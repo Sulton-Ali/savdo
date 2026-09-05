@@ -798,6 +798,182 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/customers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the shop's customers.
+         * @description Requires `cashier+`. Cursor-paginated.
+         */
+        get: operations["listCustomers"];
+        put?: never;
+        /**
+         * Create a customer.
+         * @description Requires `cashier+`.
+         */
+        post: operations["createCustomer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/customers/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a customer.
+         * @description Requires `cashier+`.
+         */
+        get: operations["getCustomer"];
+        put?: never;
+        post?: never;
+        /**
+         * Soft-delete a customer.
+         * @description Requires `manager+`.
+         */
+        delete: operations["deleteCustomer"];
+        options?: never;
+        head?: never;
+        /**
+         * Update a customer.
+         * @description Requires `manager+`. Partial update — only provided fields change; `phone`, `telegramUsername` and `note` are nullable (D-35 clearing rule, same as `SupplierPatch`): explicit `null` clears the field. `tags`, when provided, replaces the full array.
+         */
+        patch: operations["updateCustomer"];
+        trace?: never;
+    };
+    "/sales": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the shop's sales.
+         * @description Requires `cashier+` — a cashier may list every sale for the whole shop and any day, not only their own (D-63); `unitCost` and margin never appear on this shape regardless. Cursor-paginated, newest first.
+         */
+        get: operations["listSales"];
+        put?: never;
+        /**
+         * Complete a quick sale.
+         * @description Requires `cashier+`. Line prices always come from the catalogue (promo price when active) — `items` carries only `variantId` and `qty`, never a price (D-56); the manual `discount`, if any, is capped at the subtotal (D-57). Writes one `sale_out` stock movement per line and the sale in the same transaction (docs/03-ARCHITECTURE.md § Quick sale); the response is the completed, immutable sale (ADR-014). Accepts `Idempotency-Key` (docs/05-API.md § Conventions): a replay with the same key returns the original result.
+         */
+        post: operations["createSale"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sales/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a sale.
+         * @description Requires `cashier+` — a cashier may view any sale (D-63); `unitCost` on `items` is present only for manager+ (ADR-010).
+         */
+        get: operations["getSale"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sales/{id}/void": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Void a completed sale.
+         * @description Requires `manager+`. Allowed only on the sale's own calendar day in the shop timezone (D-59) and only while it has no return referencing it (D-62) — afterwards the correction is a return. Writes a `sale_void_in` movement for every line and sets `status: voided` (ADR-014); a voided sale is otherwise unchanged and stays immutable.
+         */
+        post: operations["voidSale"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sales/{id}/return": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Return part or all of a completed sale.
+         * @description Requires `manager+`. Per line, the returned quantity may not exceed sold minus already returned (D-58); stock returns to the sale's location with `return_in` movements. The refund for each returned line is its `lineTotal` minus that line's proportional share of the sale's discount (share = `lineTotal / subtotal`, rounded to 2 decimals so the sum never exceeds the sale's `total`, D-61); the refund is recorded with the sale's original payment method, with no time limit. The response is a new sale of `kind: return` whose `originalSaleId` is `{id}`. Accepts `Idempotency-Key` (docs/05-API.md § Conventions): a replay with the same key returns the original result.
+         */
+        post: operations["createSaleReturn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/reports/sales/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Sales summary for a period.
+         * @description Requires `cashier+`. For manager+, `from`/`to` are required (`400 VALIDATION_FAILED` if missing) and scope the whole shop unless `locationId` narrows it; `cost` and `margin` are present only for manager+ (ADR-010). For a cashier, `from`, `to` and `locationId` are ignored — the server always uses today in the shop timezone and that cashier's own sales, and echoes the effective `from`/`to`/`cashierId` it used in the response (D-55).
+         */
+        get: operations["getSalesSummaryReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/reports/sales/by-product": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Sales by product for a period.
+         * @description Requires `manager+`. Sorted by `revenue` descending, cursor-paginated. `cost`/`margin` are present for manager+ (ADR-010) — kept optional in the schema for symmetry with other role-shaped responses, not because a cashier can call this endpoint.
+         */
+        get: operations["listSalesByProduct"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -820,7 +996,7 @@ export interface components {
          * @description Machine-readable error codes (ADR-013). A client translates a code to a display sentence; the API never returns one. Adding a new error code means adding it here first.
          * @enum {string}
          */
-        ErrorCode: "VALIDATION_FAILED" | "UNAUTHENTICATED" | "FORBIDDEN" | "NOT_FOUND" | "CONFLICT" | "RATE_LIMITED" | "INTERNAL" | "STOCK_INSUFFICIENT" | "PURCHASE_NOT_DRAFT" | "PURCHASE_ALREADY_RECEIVED" | "PURCHASE_ALREADY_CANCELLED" | "SAME_LOCATION" | "IDEMPOTENCY_KEY_REUSED";
+        ErrorCode: "VALIDATION_FAILED" | "UNAUTHENTICATED" | "FORBIDDEN" | "NOT_FOUND" | "CONFLICT" | "RATE_LIMITED" | "INTERNAL" | "STOCK_INSUFFICIENT" | "PURCHASE_NOT_DRAFT" | "PURCHASE_ALREADY_RECEIVED" | "PURCHASE_ALREADY_CANCELLED" | "SAME_LOCATION" | "IDEMPOTENCY_KEY_REUSED" | "DISCOUNT_EXCEEDS_SUBTOTAL" | "SALE_ALREADY_VOIDED" | "SALE_VOID_WINDOW_CLOSED" | "SALE_HAS_RETURNS" | "RETURN_EXCEEDS_SOLD";
         /** @description The error envelope every non-2xx JSON response uses (ADR-013). */
         Error: {
             error: {
@@ -1511,6 +1687,246 @@ export interface components {
         /** @description Cursor-paginated envelope for `GET /stock/low`. */
         StockLowList: {
             items: components["schemas"]["StockLowItem"][];
+            nextCursor: string | null;
+        };
+        /** @description docs/04-DATA-MODEL.md § 5. */
+        Customer: {
+            /** Format: uuid */
+            id: string;
+            fullName: string;
+            phone: string | null;
+            telegramUsername: string | null;
+            note: string | null;
+            tags: string[];
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        CustomerCreate: {
+            fullName: string;
+            phone?: string;
+            telegramUsername?: string;
+            note?: string;
+            tags?: string[];
+        };
+        /** @description Partial update — only provided fields change. `phone`, `telegramUsername` and `note` are nullable (D-35), same as `SupplierPatch`: explicit `null` clears the field. `tags`, when provided, replaces the full array. */
+        CustomerPatch: {
+            fullName?: string;
+            phone?: string | null;
+            telegramUsername?: string | null;
+            note?: string | null;
+            tags?: string[];
+        };
+        /** @description Cursor-paginated envelope for `GET /customers`. */
+        CustomerList: {
+            items: components["schemas"]["Customer"][];
+            nextCursor: string | null;
+        };
+        /**
+         * @description docs/04-DATA-MODEL.md § 4.
+         * @enum {string}
+         */
+        SaleKind: "sale" | "return";
+        /**
+         * @description docs/04-DATA-MODEL.md § 4.
+         * @enum {string}
+         */
+        SaleStatus: "completed" | "voided";
+        /**
+         * @description docs/04-DATA-MODEL.md § 4 (D-54).
+         * @enum {string}
+         */
+        PaymentMethod: "cash" | "card" | "transfer";
+        /**
+         * @description docs/04-DATA-MODEL.md § 4.
+         * @enum {string}
+         */
+        DiscountType: "percent" | "fixed";
+        /** @description A manual per-sale discount (D-52). `value` is a percentage (0..100) when `type: percent`, or a fixed sum (>= 0, in shop currency) when `type: fixed`; either way it is capped at the computed subtotal — `409 DISCOUNT_EXCEEDS_SUBTOTAL` otherwise (D-57). Validated server-side; not enforceable by JSON Schema since `Decimal` is a string. */
+        SaleDiscount: {
+            type: components["schemas"]["DiscountType"];
+            value: components["schemas"]["Decimal"];
+        };
+        SalePaymentCreate: {
+            method: components["schemas"]["PaymentMethod"];
+        };
+        SalePayment: {
+            method: components["schemas"]["PaymentMethod"];
+            amount: components["schemas"]["Decimal"];
+        };
+        /** @description No price field — the unit price always comes from the catalogue, never the client (D-56, hard rule 8). */
+        SaleItemCreate: {
+            /** Format: uuid */
+            variantId: string;
+            /** @description Must be greater than zero (validated server-side; not enforceable by JSON Schema since `Decimal` is a string). */
+            qty: components["schemas"]["Decimal"];
+        };
+        /** @description One line of a sale or return (docs/04-DATA-MODEL.md § 4). `productName` is resolved in the caller's `Accept-Language` (same `requested -> uz -> any` fallback as `Product.name`, ADR-012, and the same resolution `PurchaseItem.productName` uses); `variantLabel` follows the same rule as `PurchaseItem.variantLabel`. `unitCost` is present only for a caller with the `cost.read` permission — absent (not null) for a cashier (D-63, ADR-010). */
+        SaleItem: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            variantId: string;
+            /** Format: uuid */
+            productId: string;
+            productName: string;
+            variantLabel: string;
+            qty: components["schemas"]["Decimal"];
+            /** @description The price actually charged for this line. On a return, the effective refunded unit price (D-61). */
+            unitPrice: components["schemas"]["Decimal"];
+            lineTotal: components["schemas"]["Decimal"];
+            /** @description Quantity of this line already returned. Always `0` on a return-kind sale's own items. */
+            returnedQty: components["schemas"]["Decimal"];
+            /** @description Present only when the caller has the `cost.read` permission; absent (not null) otherwise (ADR-010, D-63). */
+            unitCost?: components["schemas"]["Decimal"];
+        };
+        /** @description `items` carries only `variantId` and `qty` — a client-supplied price is rejected by the contract shape itself (D-56). */
+        SaleCreate: {
+            /** Format: uuid */
+            locationId: string;
+            /** Format: uuid */
+            customerId?: string;
+            items: components["schemas"]["SaleItemCreate"][];
+            discount?: components["schemas"]["SaleDiscount"];
+            discountReason?: string;
+            note?: string;
+            payment: components["schemas"]["SalePaymentCreate"];
+        };
+        /** @description A completed sale is immutable except for the void columns (ADR-014). A return is its own `Sale` of `kind: return`, with `originalSaleId` pointing at the sale it corrects (D-58). */
+        Sale: {
+            /** Format: uuid */
+            id: string;
+            /** @description Per-shop, sequential, gap-free (`shops.next_sale_number` under row lock). Read-only. */
+            number: number;
+            kind: components["schemas"]["SaleKind"];
+            status: components["schemas"]["SaleStatus"];
+            /** Format: uuid */
+            locationId: string;
+            locationName: string;
+            /** Format: uuid */
+            customerId: string | null;
+            customerName: string | null;
+            /** Format: uuid */
+            cashierId: string;
+            cashierName: string;
+            /**
+             * Format: uuid
+             * @description Set only on a `kind: return` sale — the sale it corrects.
+             */
+            originalSaleId: string | null;
+            subtotal: components["schemas"]["Decimal"];
+            discountAmount: components["schemas"]["Decimal"];
+            discountReason: string | null;
+            total: components["schemas"]["Decimal"];
+            note: string | null;
+            /** Format: date-time */
+            completedAt: string;
+            /** Format: date-time */
+            voidedAt: string | null;
+            /**
+             * Format: uuid
+             * @description The staff id who voided the sale.
+             */
+            voidedBy: string | null;
+            voidReason: string | null;
+            payment: components["schemas"]["SalePayment"];
+            items: components["schemas"]["SaleItem"][];
+            /** @description `true` when a `kind: return` sale references this sale as `originalSaleId` (D-62 — such a sale can no longer be voided). */
+            hasReturns: boolean;
+        };
+        /** @description `Sale` without `items` and without payment details beyond `paymentMethod` — the shape `GET /sales` returns (list vs get asymmetry, docs/05-API.md § Conventions). */
+        SaleSummary: {
+            /** Format: uuid */
+            id: string;
+            number: number;
+            kind: components["schemas"]["SaleKind"];
+            status: components["schemas"]["SaleStatus"];
+            /** Format: uuid */
+            locationId: string;
+            locationName: string;
+            /** Format: uuid */
+            customerId: string | null;
+            customerName: string | null;
+            /** Format: uuid */
+            cashierId: string;
+            cashierName: string;
+            /** Format: uuid */
+            originalSaleId: string | null;
+            subtotal: components["schemas"]["Decimal"];
+            discountAmount: components["schemas"]["Decimal"];
+            discountReason: string | null;
+            total: components["schemas"]["Decimal"];
+            note: string | null;
+            /** Format: date-time */
+            completedAt: string;
+            /** Format: date-time */
+            voidedAt: string | null;
+            /** Format: uuid */
+            voidedBy: string | null;
+            voidReason: string | null;
+            paymentMethod: components["schemas"]["PaymentMethod"];
+            hasReturns: boolean;
+        };
+        /** @description Cursor-paginated envelope for `GET /sales`. */
+        SaleList: {
+            items: components["schemas"]["SaleSummary"][];
+            nextCursor: string | null;
+        };
+        SaleVoid: {
+            reason?: string;
+        };
+        SaleReturnItemCreate: {
+            /** Format: uuid */
+            saleItemId: string;
+            /** @description Must be greater than zero (validated server-side; not enforceable by JSON Schema since `Decimal` is a string); may not exceed that line's sold quantity minus already returned (`409 RETURN_EXCEEDS_SOLD`, D-58). */
+            qty: components["schemas"]["Decimal"];
+        };
+        SaleReturnCreate: {
+            items: components["schemas"]["SaleReturnItemCreate"][];
+            note?: string;
+        };
+        /** @description docs/00-DECISIONS.md D-55. For a cashier, `from`/`to`/`cashierId` are the effective values the server used (today, shop timezone, that cashier), not necessarily what was requested. */
+        SalesSummaryReport: {
+            /** Format: date */
+            from: string;
+            /** Format: date */
+            to: string;
+            /** Format: uuid */
+            locationId: string | null;
+            /**
+             * Format: uuid
+             * @description Non-null only when the report is scoped to one cashier (a cashier caller always gets their own id here; manager+ gets `null` for a whole-shop summary).
+             */
+            cashierId: string | null;
+            salesCount: number;
+            returnsCount: number;
+            revenue: components["schemas"]["Decimal"];
+            discounts: components["schemas"]["Decimal"];
+            refunds: components["schemas"]["Decimal"];
+            netRevenue: components["schemas"]["Decimal"];
+            /** @description Present only for manager+ (ADR-010). */
+            cost?: components["schemas"]["Decimal"];
+            /** @description Present only for manager+ (ADR-010). */
+            margin?: components["schemas"]["Decimal"];
+        };
+        /** @description docs/00-DECISIONS.md D-55. */
+        SalesByProductRow: {
+            /** Format: uuid */
+            productId: string;
+            /** @description Resolved for the caller's `Accept-Language` (ADR-012). */
+            productName: string;
+            qtySold: components["schemas"]["Decimal"];
+            qtyReturned: components["schemas"]["Decimal"];
+            revenue: components["schemas"]["Decimal"];
+            /** @description Present only for manager+ (ADR-010); kept optional here for symmetry even though this endpoint is manager+ only. */
+            cost?: components["schemas"]["Decimal"];
+            /** @description Present only for manager+ (ADR-010); kept optional here for symmetry even though this endpoint is manager+ only. */
+            margin?: components["schemas"]["Decimal"];
+        };
+        /** @description Cursor-paginated envelope for `GET /reports/sales/by-product`, sorted by `revenue` descending. */
+        SalesByProductList: {
+            items: components["schemas"]["SalesByProductRow"][];
             nextCursor: string | null;
         };
     };
@@ -3116,6 +3532,399 @@ export interface operations {
                     "application/json": components["schemas"]["StockLowList"];
                 };
             };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    listCustomers: {
+        parameters: {
+            query?: {
+                /** @description Free-text search over `fullName` or `phone` (Postgres ILIKE/trigram), same style as `GET /suppliers`. */
+                q?: string;
+                /** @description Maximum number of items to return. */
+                limit?: components["parameters"]["Limit"];
+                /** @description Opaque cursor from a previous page's `nextCursor`. */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CustomerList"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createCustomer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CustomerCreate"];
+            };
+        };
+        responses: {
+            /** @description Created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Customer"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            /** @description `409 CONFLICT details.field: "phone"` — a customer with this phone already exists in the shop (same pattern as supplier name uniqueness). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getCustomer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Customer"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteCustomer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateCustomer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CustomerPatch"];
+            };
+        };
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Customer"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description `409 CONFLICT details.field: "phone"` — another customer in the shop already has this phone. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listSales: {
+        parameters: {
+            query?: {
+                /** @description Inclusive lower bound, `YYYY-MM-DD`, interpreted as the start of that calendar day in the shop timezone. */
+                from?: string;
+                /** @description Inclusive upper bound, `YYYY-MM-DD`, interpreted as the end of that calendar day in the shop timezone. */
+                to?: string;
+                locationId?: string;
+                cashierId?: string;
+                customerId?: string;
+                kind?: components["schemas"]["SaleKind"];
+                status?: components["schemas"]["SaleStatus"];
+                /** @description Maximum number of items to return. */
+                limit?: components["parameters"]["Limit"];
+                /** @description Opaque cursor from a previous page's `nextCursor`. */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SaleList"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createSale: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client-generated key (docs/05-API.md § Conventions); a replay with the same key returns the original result instead of repeating the operation. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaleCreate"];
+            };
+        };
+        responses: {
+            /** @description Created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Sale"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            /** @description `409 STOCK_INSUFFICIENT details.variantId/locationId/available` when a line would take a level below zero (unless the shop allows negative stock); `409 DISCOUNT_EXCEEDS_SUBTOTAL` when `discount` is greater than the computed subtotal (D-57); `409 IDEMPOTENCY_KEY_REUSED` when the same key was already used for a different request; `409 CONFLICT details.reason: "deadlock"` when a concurrent write could not be serialized — safe to retry. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getSale: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Sale"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    voidSale: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["SaleVoid"];
+            };
+        };
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Sale"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description `409 SALE_ALREADY_VOIDED` when the sale is already voided; `409 SALE_VOID_WINDOW_CLOSED` once its calendar day has passed in the shop timezone (D-59); `409 SALE_HAS_RETURNS` when a return already references this sale (D-62). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    createSaleReturn: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client-generated key (docs/05-API.md § Conventions); a replay with the same key returns the original result instead of repeating the operation. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaleReturnCreate"];
+            };
+        };
+        responses: {
+            /** @description Created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Sale"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description `409 RETURN_EXCEEDS_SOLD details.saleItemId` when a line's returned quantity would exceed sold minus already returned; `409 SALE_ALREADY_VOIDED` when the original sale is voided; `409 IDEMPOTENCY_KEY_REUSED` when the same key was already used for a different request. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getSalesSummaryReport: {
+        parameters: {
+            query?: {
+                /** @description `YYYY-MM-DD`, inclusive. Required for manager+; ignored for a cashier (see summary above). */
+                from?: string;
+                /** @description `YYYY-MM-DD`, inclusive. Required for manager+; ignored for a cashier (see summary above). */
+                to?: string;
+                locationId?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SalesSummaryReport"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+        };
+    };
+    listSalesByProduct: {
+        parameters: {
+            query: {
+                /** @description `YYYY-MM-DD`, inclusive. */
+                from: string;
+                /** @description `YYYY-MM-DD`, inclusive. */
+                to: string;
+                locationId?: string;
+                /** @description Maximum number of items to return. */
+                limit?: components["parameters"]["Limit"];
+                /** @description Opaque cursor from a previous page's `nextCursor`. */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SalesByProductList"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
         };

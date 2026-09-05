@@ -53,6 +53,24 @@ tags:
       authenticated role (D-40); every other stock operation is
       `manager+`. Quantities are signed decimal strings (ADR-007); a
       movement never takes a level below zero (D-41).
+  - name: customers
+    description: >
+      CRM customers (Phase 4). `cashier+` may list, search and create;
+      `manager+` may update and soft-delete.
+  - name: sales
+    description: >
+      Sales, voids and returns (Phase 4, correctness-critical, ADR-014).
+      Line prices always come from the catalogue, never the client
+      (D-56); a completed sale is never mutated — only voided (same
+      calendar day, manager+, D-59) or corrected with a partial return
+      (manager+, D-58, D-61). `unitCost` and margin are omitted from a
+      cashier's view (D-63, ADR-010).
+  - name: reports
+    description: >
+      Sales reports (Phase 4). `manager+`, except `/reports/sales/summary`
+      which a cashier may also call, scoped to their own current day
+      (D-55). `cost`/`margin` are present only for manager+ (ADR-010). Low
+      stock reporting reuses `GET /stock/low` (Phase 3, D-55).
 
 paths:
   /healthz:
@@ -1690,6 +1708,515 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
 
+  /customers:
+    get:
+      operationId: listCustomers
+      tags: [customers]
+      summary: List the shop's customers.
+      description: Requires `cashier+`. Cursor-paginated.
+      parameters:
+        - name: q
+          in: query
+          description: >
+            Free-text search over `fullName` or `phone` (Postgres
+            ILIKE/trigram), same style as `GET /suppliers`.
+          required: false
+          schema:
+            type: string
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      operationId: createCustomer
+      tags: [customers]
+      summary: Create a customer.
+      description: Requires `cashier+`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomerCreate"
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Customer"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: >
+            `409 CONFLICT details.field: "phone"` — a customer with this
+            phone already exists in the shop (same pattern as supplier
+            name uniqueness).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /customers/{id}:
+    get:
+      operationId: getCustomer
+      tags: [customers]
+      summary: Get a customer.
+      description: Requires `cashier+`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Customer"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: updateCustomer
+      tags: [customers]
+      summary: Update a customer.
+      description: >
+        Requires `manager+`. Partial update — only provided fields
+        change; `phone`, `telegramUsername` and `note` are nullable
+        (D-35 clearing rule, same as `SupplierPatch`): explicit `null`
+        clears the field. `tags`, when provided, replaces the full array.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomerPatch"
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Customer"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: >
+            `409 CONFLICT details.field: "phone"` — another customer in
+            the shop already has this phone.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      operationId: deleteCustomer
+      tags: [customers]
+      summary: Soft-delete a customer.
+      description: Requires `manager+`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Deleted.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /sales:
+    get:
+      operationId: listSales
+      tags: [sales]
+      summary: List the shop's sales.
+      description: >
+        Requires `cashier+` — a cashier may list every sale for the whole
+        shop and any day, not only their own (D-63); `unitCost` and
+        margin never appear on this shape regardless. Cursor-paginated,
+        newest first.
+      parameters:
+        - name: from
+          in: query
+          description: >
+            Inclusive lower bound, `YYYY-MM-DD`, interpreted as the start
+            of that calendar day in the shop timezone.
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          description: >
+            Inclusive upper bound, `YYYY-MM-DD`, interpreted as the end
+            of that calendar day in the shop timezone.
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: locationId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: cashierId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: customerId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: kind
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/SaleKind"
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/SaleStatus"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SaleList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      operationId: createSale
+      tags: [sales]
+      summary: Complete a quick sale.
+      description: >
+        Requires `cashier+`. Line prices always come from the catalogue
+        (promo price when active) — `items` carries only `variantId` and
+        `qty`, never a price (D-56); the manual `discount`, if any, is
+        capped at the subtotal (D-57). Writes one `sale_out` stock
+        movement per line and the sale in the same transaction
+        (docs/03-ARCHITECTURE.md § Quick sale); the response is the
+        completed, immutable sale (ADR-014). Accepts `Idempotency-Key`
+        (docs/05-API.md § Conventions): a replay with the same key
+        returns the original result.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaleCreate"
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Sale"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: >
+            `409 STOCK_INSUFFICIENT details.variantId/locationId/available`
+            when a line would take a level below zero (unless the shop
+            allows negative stock); `409 DISCOUNT_EXCEEDS_SUBTOTAL` when
+            `discount` is greater than the computed subtotal (D-57); `409
+            IDEMPOTENCY_KEY_REUSED` when the same key was already used
+            for a different request; `409 CONFLICT details.reason:
+            "deadlock"` when a concurrent write could not be serialized —
+            safe to retry.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /sales/{id}:
+    get:
+      operationId: getSale
+      tags: [sales]
+      summary: Get a sale.
+      description: >
+        Requires `cashier+` — a cashier may view any sale (D-63);
+        `unitCost` on `items` is present only for manager+ (ADR-010).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Sale"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /sales/{id}/void:
+    post:
+      operationId: voidSale
+      tags: [sales]
+      summary: Void a completed sale.
+      description: >
+        Requires `manager+`. Allowed only on the sale's own calendar day
+        in the shop timezone (D-59) and only while it has no return
+        referencing it (D-62) — afterwards the correction is a return.
+        Writes a `sale_void_in` movement for every line and sets `status:
+        voided` (ADR-014); a voided sale is otherwise unchanged and
+        stays immutable.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaleVoid"
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Sale"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: >
+            `409 SALE_ALREADY_VOIDED` when the sale is already voided;
+            `409 SALE_VOID_WINDOW_CLOSED` once its calendar day has
+            passed in the shop timezone (D-59); `409 SALE_HAS_RETURNS`
+            when a return already references this sale (D-62).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /sales/{id}/return:
+    post:
+      operationId: createSaleReturn
+      tags: [sales]
+      summary: Return part or all of a completed sale.
+      description: >
+        Requires `manager+`. Per line, the returned quantity may not
+        exceed sold minus already returned (D-58); stock returns to the
+        sale's location with `return_in` movements. The refund for each
+        returned line is its `lineTotal` minus that line's proportional
+        share of the sale's discount (share = `lineTotal / subtotal`,
+        rounded to 2 decimals so the sum never exceeds the sale's `total`,
+        D-61); the refund is recorded with the sale's original payment
+        method, with no time limit. The response is a new sale of `kind:
+        return` whose `originalSaleId` is `{id}`. Accepts
+        `Idempotency-Key` (docs/05-API.md § Conventions): a replay with
+        the same key returns the original result.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaleReturnCreate"
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Sale"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: >
+            `409 RETURN_EXCEEDS_SOLD details.saleItemId` when a line's
+            returned quantity would exceed sold minus already returned;
+            `409 SALE_ALREADY_VOIDED` when the original sale is voided;
+            `409 IDEMPOTENCY_KEY_REUSED` when the same key was already
+            used for a different request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /reports/sales/summary:
+    get:
+      operationId: getSalesSummaryReport
+      tags: [reports]
+      summary: Sales summary for a period.
+      description: >
+        Requires `cashier+`. For manager+, `from`/`to` are required
+        (`400 VALIDATION_FAILED` if missing) and scope the whole shop
+        unless `locationId` narrows it; `cost` and `margin` are present
+        only for manager+ (ADR-010). For a cashier, `from`, `to` and
+        `locationId` are ignored — the server always uses today in the
+        shop timezone and that cashier's own sales, and echoes the
+        effective `from`/`to`/`cashierId` it used in the response (D-55).
+      parameters:
+        - name: from
+          in: query
+          description: >
+            `YYYY-MM-DD`, inclusive. Required for manager+; ignored for
+            a cashier (see summary above).
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          description: >
+            `YYYY-MM-DD`, inclusive. Required for manager+; ignored for
+            a cashier (see summary above).
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: locationId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SalesSummaryReport"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+
+  /reports/sales/by-product:
+    get:
+      operationId: listSalesByProduct
+      tags: [reports]
+      summary: Sales by product for a period.
+      description: >
+        Requires `manager+`. Sorted by `revenue` descending,
+        cursor-paginated. `cost`/`margin` are present for manager+
+        (ADR-010) — kept optional in the schema for symmetry with other
+        role-shaped responses, not because a cashier can call this
+        endpoint.
+      parameters:
+        - name: from
+          in: query
+          description: "`YYYY-MM-DD`, inclusive."
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          description: "`YYYY-MM-DD`, inclusive."
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: locationId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SalesByProductList"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
 components:
   securitySchemes:
     cookieAuth:
@@ -1759,6 +2286,11 @@ components:
         - PURCHASE_ALREADY_CANCELLED
         - SAME_LOCATION
         - IDEMPOTENCY_KEY_REUSED
+        - DISCOUNT_EXCEEDS_SUBTOTAL
+        - SALE_ALREADY_VOIDED
+        - SALE_VOID_WINDOW_CLOSED
+        - SALE_HAS_RETURNS
+        - RETURN_EXCEEDS_SOLD
 
     Error:
       type: object
@@ -3346,6 +3878,588 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/StockLowItem"
+        nextCursor:
+          type: ["string", "null"]
+
+    Customer:
+      type: object
+      description: docs/04-DATA-MODEL.md § 5.
+      required:
+        - id
+        - fullName
+        - phone
+        - telegramUsername
+        - note
+        - tags
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        fullName:
+          type: string
+        phone:
+          type: ["string", "null"]
+        telegramUsername:
+          type: ["string", "null"]
+        note:
+          type: ["string", "null"]
+        tags:
+          type: array
+          items:
+            type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    CustomerCreate:
+      type: object
+      required:
+        - fullName
+      properties:
+        fullName:
+          type: string
+        phone:
+          type: string
+        telegramUsername:
+          type: string
+        note:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+
+    CustomerPatch:
+      type: object
+      description: >
+        Partial update — only provided fields change. `phone`,
+        `telegramUsername` and `note` are nullable (D-35), same as
+        `SupplierPatch`: explicit `null` clears the field. `tags`, when
+        provided, replaces the full array.
+      properties:
+        fullName:
+          type: string
+        phone:
+          type: ["string", "null"]
+        telegramUsername:
+          type: ["string", "null"]
+        note:
+          type: ["string", "null"]
+        tags:
+          type: array
+          items:
+            type: string
+
+    CustomerList:
+      type: object
+      description: Cursor-paginated envelope for `GET /customers`.
+      required:
+        - items
+        - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Customer"
+        nextCursor:
+          type: ["string", "null"]
+
+    SaleKind:
+      type: string
+      description: docs/04-DATA-MODEL.md § 4.
+      enum: [sale, return]
+
+    SaleStatus:
+      type: string
+      description: docs/04-DATA-MODEL.md § 4.
+      enum: [completed, voided]
+
+    PaymentMethod:
+      type: string
+      description: docs/04-DATA-MODEL.md § 4 (D-54).
+      enum: [cash, card, transfer]
+
+    DiscountType:
+      type: string
+      description: docs/04-DATA-MODEL.md § 4.
+      enum: [percent, fixed]
+
+    SaleDiscount:
+      type: object
+      description: >
+        A manual per-sale discount (D-52). `value` is a percentage
+        (0..100) when `type: percent`, or a fixed sum (>= 0, in shop
+        currency) when `type: fixed`; either way it is capped at the
+        computed subtotal — `409 DISCOUNT_EXCEEDS_SUBTOTAL` otherwise
+        (D-57). Validated server-side; not enforceable by JSON Schema
+        since `Decimal` is a string.
+      required:
+        - type
+        - value
+      properties:
+        type:
+          $ref: "#/components/schemas/DiscountType"
+        value:
+          $ref: "#/components/schemas/Decimal"
+
+    SalePaymentCreate:
+      type: object
+      required:
+        - method
+      properties:
+        method:
+          $ref: "#/components/schemas/PaymentMethod"
+
+    SalePayment:
+      type: object
+      required:
+        - method
+        - amount
+      properties:
+        method:
+          $ref: "#/components/schemas/PaymentMethod"
+        amount:
+          $ref: "#/components/schemas/Decimal"
+
+    SaleItemCreate:
+      type: object
+      description: >
+        No price field — the unit price always comes from the catalogue,
+        never the client (D-56, hard rule 8).
+      required:
+        - variantId
+        - qty
+      properties:
+        variantId:
+          type: string
+          format: uuid
+        qty:
+          $ref: "#/components/schemas/Decimal"
+          description: >
+            Must be greater than zero (validated server-side; not
+            enforceable by JSON Schema since `Decimal` is a string).
+
+    SaleItem:
+      type: object
+      description: >
+        One line of a sale or return (docs/04-DATA-MODEL.md § 4).
+        `productName` is resolved in the caller's `Accept-Language`
+        (same `requested -> uz -> any` fallback as `Product.name`,
+        ADR-012, and the same resolution `PurchaseItem.productName`
+        uses); `variantLabel` follows the same rule as
+        `PurchaseItem.variantLabel`. `unitCost` is present only for a
+        caller with the `cost.read` permission — absent (not null) for a
+        cashier (D-63, ADR-010).
+      required:
+        - id
+        - variantId
+        - productId
+        - productName
+        - variantLabel
+        - qty
+        - unitPrice
+        - lineTotal
+        - returnedQty
+      properties:
+        id:
+          type: string
+          format: uuid
+        variantId:
+          type: string
+          format: uuid
+        productId:
+          type: string
+          format: uuid
+        productName:
+          type: string
+        variantLabel:
+          type: string
+        qty:
+          $ref: "#/components/schemas/Decimal"
+        unitPrice:
+          $ref: "#/components/schemas/Decimal"
+          description: >
+            The price actually charged for this line. On a return, the
+            effective refunded unit price (D-61).
+        lineTotal:
+          $ref: "#/components/schemas/Decimal"
+        returnedQty:
+          $ref: "#/components/schemas/Decimal"
+          description: >
+            Quantity of this line already returned. Always `0` on a
+            return-kind sale's own items.
+        unitCost:
+          $ref: "#/components/schemas/Decimal"
+          description: >
+            Present only when the caller has the `cost.read` permission;
+            absent (not null) otherwise (ADR-010, D-63).
+
+    SaleCreate:
+      type: object
+      description: >
+        `items` carries only `variantId` and `qty` — a client-supplied
+        price is rejected by the contract shape itself (D-56).
+      required:
+        - locationId
+        - items
+        - payment
+      properties:
+        locationId:
+          type: string
+          format: uuid
+        customerId:
+          type: string
+          format: uuid
+        items:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/SaleItemCreate"
+        discount:
+          $ref: "#/components/schemas/SaleDiscount"
+        discountReason:
+          type: string
+        note:
+          type: string
+        payment:
+          $ref: "#/components/schemas/SalePaymentCreate"
+
+    Sale:
+      type: object
+      description: >
+        A completed sale is immutable except for the void columns
+        (ADR-014). A return is its own `Sale` of `kind: return`, with
+        `originalSaleId` pointing at the sale it corrects (D-58).
+      required:
+        - id
+        - number
+        - kind
+        - status
+        - locationId
+        - locationName
+        - customerId
+        - customerName
+        - cashierId
+        - cashierName
+        - originalSaleId
+        - subtotal
+        - discountAmount
+        - discountReason
+        - total
+        - note
+        - completedAt
+        - voidedAt
+        - voidedBy
+        - voidReason
+        - payment
+        - items
+        - hasReturns
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: integer
+          description: >
+            Per-shop, sequential, gap-free (`shops.next_sale_number`
+            under row lock). Read-only.
+        kind:
+          $ref: "#/components/schemas/SaleKind"
+        status:
+          $ref: "#/components/schemas/SaleStatus"
+        locationId:
+          type: string
+          format: uuid
+        locationName:
+          type: string
+        customerId:
+          type: ["string", "null"]
+          format: uuid
+        customerName:
+          type: ["string", "null"]
+        cashierId:
+          type: string
+          format: uuid
+        cashierName:
+          type: string
+        originalSaleId:
+          type: ["string", "null"]
+          format: uuid
+          description: "Set only on a `kind: return` sale — the sale it corrects."
+        subtotal:
+          $ref: "#/components/schemas/Decimal"
+        discountAmount:
+          $ref: "#/components/schemas/Decimal"
+        discountReason:
+          type: ["string", "null"]
+        total:
+          $ref: "#/components/schemas/Decimal"
+        note:
+          type: ["string", "null"]
+        completedAt:
+          type: string
+          format: date-time
+        voidedAt:
+          type: ["string", "null"]
+          format: date-time
+        voidedBy:
+          type: ["string", "null"]
+          format: uuid
+          description: The staff id who voided the sale.
+        voidReason:
+          type: ["string", "null"]
+        payment:
+          $ref: "#/components/schemas/SalePayment"
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/SaleItem"
+        hasReturns:
+          type: boolean
+          description: >
+            `true` when a `kind: return` sale references this sale as
+            `originalSaleId` (D-62 — such a sale can no longer be
+            voided).
+
+    SaleSummary:
+      type: object
+      description: >
+        `Sale` without `items` and without payment details beyond
+        `paymentMethod` — the shape `GET /sales` returns (list vs get
+        asymmetry, docs/05-API.md § Conventions).
+      required:
+        - id
+        - number
+        - kind
+        - status
+        - locationId
+        - locationName
+        - customerId
+        - customerName
+        - cashierId
+        - cashierName
+        - originalSaleId
+        - subtotal
+        - discountAmount
+        - discountReason
+        - total
+        - note
+        - completedAt
+        - voidedAt
+        - voidedBy
+        - voidReason
+        - paymentMethod
+        - hasReturns
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: integer
+        kind:
+          $ref: "#/components/schemas/SaleKind"
+        status:
+          $ref: "#/components/schemas/SaleStatus"
+        locationId:
+          type: string
+          format: uuid
+        locationName:
+          type: string
+        customerId:
+          type: ["string", "null"]
+          format: uuid
+        customerName:
+          type: ["string", "null"]
+        cashierId:
+          type: string
+          format: uuid
+        cashierName:
+          type: string
+        originalSaleId:
+          type: ["string", "null"]
+          format: uuid
+        subtotal:
+          $ref: "#/components/schemas/Decimal"
+        discountAmount:
+          $ref: "#/components/schemas/Decimal"
+        discountReason:
+          type: ["string", "null"]
+        total:
+          $ref: "#/components/schemas/Decimal"
+        note:
+          type: ["string", "null"]
+        completedAt:
+          type: string
+          format: date-time
+        voidedAt:
+          type: ["string", "null"]
+          format: date-time
+        voidedBy:
+          type: ["string", "null"]
+          format: uuid
+        voidReason:
+          type: ["string", "null"]
+        paymentMethod:
+          $ref: "#/components/schemas/PaymentMethod"
+        hasReturns:
+          type: boolean
+
+    SaleList:
+      type: object
+      description: Cursor-paginated envelope for `GET /sales`.
+      required:
+        - items
+        - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/SaleSummary"
+        nextCursor:
+          type: ["string", "null"]
+
+    SaleVoid:
+      type: object
+      properties:
+        reason:
+          type: string
+
+    SaleReturnItemCreate:
+      type: object
+      required:
+        - saleItemId
+        - qty
+      properties:
+        saleItemId:
+          type: string
+          format: uuid
+        qty:
+          $ref: "#/components/schemas/Decimal"
+          description: >
+            Must be greater than zero (validated server-side; not
+            enforceable by JSON Schema since `Decimal` is a string); may
+            not exceed that line's sold quantity minus already returned
+            (`409 RETURN_EXCEEDS_SOLD`, D-58).
+
+    SaleReturnCreate:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/SaleReturnItemCreate"
+        note:
+          type: string
+
+    SalesSummaryReport:
+      type: object
+      description: >
+        docs/00-DECISIONS.md D-55. For a cashier, `from`/`to`/`cashierId`
+        are the effective values the server used (today, shop timezone,
+        that cashier), not necessarily what was requested.
+      required:
+        - from
+        - to
+        - locationId
+        - cashierId
+        - salesCount
+        - returnsCount
+        - revenue
+        - discounts
+        - refunds
+        - netRevenue
+      properties:
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+        locationId:
+          type: ["string", "null"]
+          format: uuid
+        cashierId:
+          type: ["string", "null"]
+          format: uuid
+          description: >
+            Non-null only when the report is scoped to one cashier (a
+            cashier caller always gets their own id here; manager+ gets
+            `null` for a whole-shop summary).
+        salesCount:
+          type: integer
+        returnsCount:
+          type: integer
+        revenue:
+          $ref: "#/components/schemas/Decimal"
+        discounts:
+          $ref: "#/components/schemas/Decimal"
+        refunds:
+          $ref: "#/components/schemas/Decimal"
+        netRevenue:
+          $ref: "#/components/schemas/Decimal"
+        cost:
+          $ref: "#/components/schemas/Decimal"
+          description: Present only for manager+ (ADR-010).
+        margin:
+          $ref: "#/components/schemas/Decimal"
+          description: Present only for manager+ (ADR-010).
+
+    SalesByProductRow:
+      type: object
+      description: docs/00-DECISIONS.md D-55.
+      required:
+        - productId
+        - productName
+        - qtySold
+        - qtyReturned
+        - revenue
+      properties:
+        productId:
+          type: string
+          format: uuid
+        productName:
+          type: string
+          description: Resolved for the caller's `Accept-Language` (ADR-012).
+        qtySold:
+          $ref: "#/components/schemas/Decimal"
+        qtyReturned:
+          $ref: "#/components/schemas/Decimal"
+        revenue:
+          $ref: "#/components/schemas/Decimal"
+        cost:
+          $ref: "#/components/schemas/Decimal"
+          description: >
+            Present only for manager+ (ADR-010); kept optional here for
+            symmetry even though this endpoint is manager+ only.
+        margin:
+          $ref: "#/components/schemas/Decimal"
+          description: >
+            Present only for manager+ (ADR-010); kept optional here for
+            symmetry even though this endpoint is manager+ only.
+
+    SalesByProductList:
+      type: object
+      description: >
+        Cursor-paginated envelope for `GET /reports/sales/by-product`,
+        sorted by `revenue` descending.
+      required:
+        - items
+        - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/SalesByProductRow"
         nextCursor:
           type: ["string", "null"]
 
