@@ -754,6 +754,43 @@
       "drafts": "Drafts",
       "draftsEmpty": "No draft purchases",
       "saveAndReceive": "Save and receive"
+    },
+    "sale": {
+      "location": {
+        "title": "Choose location",
+        "placeholder": "Select a location"
+      },
+      "addItem": "Add item",
+      "cart": {
+        "empty": "Cart is empty — tap \"Add item\" to search a product."
+      },
+      "discount": {
+        "kindNone": "No discount",
+        "valuePlaceholder": "Value",
+        "reasonPlaceholder": "Reason (optional)"
+      },
+      "customer": {
+        "none": "No customer attached",
+        "attach": "Attach customer",
+        "change": "Change customer",
+        "newCustomer": "New customer"
+      },
+      "pay": "Pay",
+      "paying": "Processing…",
+      "locationRequired": "Pick a location before completing the sale.",
+      "list": {
+        "title": "Today's sales",
+        "empty": "No sales today yet."
+      }
+    },
+    "customers": {
+      "list": {
+        "empty": "No customers found"
+      },
+      "new": {
+        "duplicatePhone": "A customer with this phone already exists.",
+        "forSaleHint": "This customer will be attached to the current sale."
+      }
     }
   }
 }

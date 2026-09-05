@@ -1,15 +1,620 @@
+import { tokens } from "@savdo/ui-tokens";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { Minus, Plus, Trash2, UserPlus } from "lucide-react-native";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { View } from "react-native";
+import {
+  ActivityIndicator,
+  FlatList,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  TextInput,
+  View,
+} from "react-native";
 
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Text } from "@/components/ui/text";
+import type { Location, Variant } from "@/features/catalog/api";
+import { useDebouncedValue, useLocations } from "@/features/catalog/hooks";
+import { VariantPicker } from "@/features/catalog/VariantPicker";
+import type { Customer } from "@/features/customers/api";
+import { useCustomersSearch } from "@/features/customers/hooks";
+import {
+  type PaymentMethod,
+  type Sale,
+  type SaleCreate,
+  SalesApiError,
+} from "@/features/sales/api";
+import {
+  cartReducer,
+  type DiscountKind,
+  initialCartState,
+  isValidDiscountValue,
+  isZeroDecimalString,
+} from "@/features/sales/cart";
+import { useCreateSale } from "@/features/sales/hooks";
+import { persistLocationId, readStoredLocationId } from "@/features/sales/locationStorage";
+import { formatMoney } from "@/lib/money";
+import { useSession } from "@/lib/session";
 
-/** Placeholder — a later Phase 5 task replaces this with quick sale. */
-export default function SaleScreen() {
+const PAYMENT_METHODS: PaymentMethod[] = ["cash", "card", "transfer"];
+const DISCOUNT_KINDS: Array<"none" | DiscountKind> = ["none", "percent", "fixed"];
+
+/** `409 STOCK_INSUFFICIENT details.variantId/available` (`docs/05-API.md`
+ * § Conventions). */
+interface StockInsufficientDetails {
+  variantId?: string;
+  available?: string;
+}
+
+interface SelectedCustomer {
+  id: string;
+  fullName: string;
+  phone: string | null;
+}
+
+/** Search-and-pick (or create) a customer to attach to the sale — a
+ * simpler cousin of `features/catalog/VariantPicker.tsx`, one step, no
+ * product/variant nesting, plus a "New customer" footer that hands off to
+ * `customers/new.tsx` and back (`sale/index.tsx`'s own `attachCustomerId`
+ * handling below has the full round-trip). */
+function CustomerPickerModal({
+  visible,
+  onClose,
+  onPick,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  onPick: (customer: SelectedCustomer) => void;
+}) {
+  const { t } = useTranslation();
+  const router = useRouter();
+  const [rawQuery, setRawQuery] = useState("");
+  const debouncedQuery = useDebouncedValue(rawQuery, 300);
+  const { data, isFetching } = useCustomersSearch(debouncedQuery);
+  const customers = useMemo(() => data?.pages.flatMap((page) => page.items) ?? [], [data]);
+
+  function handlePick(customer: Customer) {
+    onPick({ id: customer.id, fullName: customer.fullName, phone: customer.phone });
+    setRawQuery("");
+    onClose();
+  }
+
+  function handleNewCustomer() {
+    setRawQuery("");
+    onClose();
+    router.push({ pathname: "/customers/new", params: { returnTo: "sale" } });
+  }
+
+  return (
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+      <View className="flex-1 gap-3 bg-background p-4 pt-12">
+        <View className="flex-row items-center justify-between">
+          <Text variant="h4">{t("sales.fields.customer")}</Text>
+          <Pressable
+            accessibilityRole="button"
+            onPress={onClose}
+            className="min-h-11 justify-center"
+          >
+            <Text className="text-primary">{t("common.cancel")}</Text>
+          </Pressable>
+        </View>
+        <TextInput
+          className="h-12 rounded-md border border-input bg-background px-3 text-base text-foreground"
+          placeholder={t("sales.customerPlaceholder")}
+          value={rawQuery}
+          onChangeText={setRawQuery}
+          autoCorrect={false}
+          accessibilityLabel={t("sales.customerPlaceholder")}
+        />
+        <FlatList
+          data={customers}
+          keyExtractor={(customer) => customer.id}
+          ListEmptyComponent={
+            !isFetching ? (
+              <Text variant="muted" className="p-4 text-center">
+                {t("mobile.customers.list.empty")}
+              </Text>
+            ) : null
+          }
+          renderItem={({ item }) => (
+            <Pressable
+              accessibilityRole="button"
+              className="min-h-12 justify-center border-border border-b px-2 py-3 active:bg-accent"
+              onPress={() => handlePick(item)}
+            >
+              <Text numberOfLines={1}>{item.fullName}</Text>
+              {item.phone ? (
+                <Text variant="muted" numberOfLines={1}>
+                  {item.phone}
+                </Text>
+              ) : null}
+            </Pressable>
+          )}
+        />
+        <Button variant="outline" onPress={handleNewCustomer}>
+          <UserPlus size={18} color={tokens.color.primary} />
+          <Text>{t("mobile.sale.customer.newCustomer")}</Text>
+        </Button>
+      </View>
+    </Modal>
+  );
+}
+
+function LocationPickerModal({
+  visible,
+  locations,
+  onClose,
+  onPick,
+}: {
+  visible: boolean;
+  locations: Location[];
+  onClose: () => void;
+  onPick: (location: Location) => void;
+}) {
   const { t } = useTranslation();
   return (
-    <View className="flex-1 items-center justify-center gap-2 bg-background p-6">
-      <Text variant="h3">{t("nav.quickSale")}</Text>
-      <Text variant="muted">{t("common.comingSoon")}</Text>
-    </View>
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+      <Pressable className="flex-1 justify-end bg-black/40" onPress={onClose}>
+        <Pressable
+          onPress={(event) => event.stopPropagation()}
+          className="rounded-t-xl bg-card p-4"
+        >
+          <Text variant="h4" className="mb-2">
+            {t("mobile.sale.location.title")}
+          </Text>
+          {locations.map((location) => (
+            <Pressable
+              key={location.id}
+              accessibilityRole="button"
+              className="min-h-12 justify-center border-border border-b px-2 py-3 active:bg-accent"
+              onPress={() => {
+                onPick(location);
+                onClose();
+              }}
+            >
+              <Text>{location.name}</Text>
+            </Pressable>
+          ))}
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
+/**
+ * One-handed quick sale (T4, `docs/03-ARCHITECTURE.md` § Quick sale flow,
+ * D-52..D-57): pick a location (remembered), search/pick variants with the
+ * shared `VariantPicker` (T2), adjust quantities, optionally discount and
+ * attach a customer, choose a payment method, and pay. Every total shown
+ * after payment comes from the server's response — this screen never
+ * computes or sends one (D-56, hard rule 8); a cart line therefore has no
+ * price at all (see `features/sales/cart.ts`'s own doc comment for why:
+ * the shared `VariantPicker`'s `onPick` reports back only the picked
+ * `Variant`, which itself carries no product name either).
+ */
+export default function SaleScreen() {
+  const { t } = useTranslation();
+  const router = useRouter();
+  const { shop } = useSession();
+  const currency = shop?.currency ?? "UZS";
+  const params = useLocalSearchParams<{
+    attachCustomerId?: string;
+    attachCustomerName?: string;
+    attachCustomerPhone?: string;
+  }>();
+
+  const [cart, dispatch] = useReducer(cartReducer, undefined, initialCartState);
+  const [lineErrors, setLineErrors] = useState<Record<string, string>>({});
+  const [generalError, setGeneralError] = useState<string | null>(null);
+  const [completedSale, setCompletedSale] = useState<Sale | null>(null);
+
+  const { data: locations } = useLocations();
+  const activeLocations = useMemo(() => (locations ?? []).filter((l) => l.isActive), [locations]);
+  const [locationId, setLocationId] = useState<string | null>(() => readStoredLocationId());
+  const selectedLocation = activeLocations.find((l) => l.id === locationId) ?? null;
+  // Once the shop's locations load, fall back to the remembered id (if it's
+  // still active), else the shop's default location, else the first active
+  // one — a cashier who has never picked one yet still gets a location
+  // pre-selected rather than a mandatory extra tap every single sale.
+  useEffect(() => {
+    if (locationId != null || activeLocations.length === 0) {
+      return;
+    }
+    const fallback = activeLocations.find((l) => l.isDefault) ?? (activeLocations[0] as Location);
+    setLocationId(fallback.id);
+  }, [locationId, activeLocations]);
+
+  const [locationModalOpen, setLocationModalOpen] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [customerModalOpen, setCustomerModalOpen] = useState(false);
+  const [customer, setCustomer] = useState<SelectedCustomer | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
+  const [discountKind, setDiscountKind] = useState<"none" | DiscountKind>("none");
+
+  // A customer created from `customers/new.tsx` (reached via this screen's
+  // "New customer" button) comes back as three route params rather than a
+  // second `GET /customers/{id}` round trip — `new.tsx`'s own doc comment
+  // has the full round-trip. Applied at most once per created customer (the
+  // ref guards a re-render from re-applying the same params after the user
+  // has since changed the attached customer again).
+  const appliedAttachIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!params.attachCustomerId || params.attachCustomerId === appliedAttachIdRef.current) {
+      return;
+    }
+    appliedAttachIdRef.current = params.attachCustomerId;
+    setCustomer({
+      id: params.attachCustomerId,
+      fullName: params.attachCustomerName ?? "",
+      phone: params.attachCustomerPhone || null,
+    });
+    router.setParams({
+      attachCustomerId: undefined,
+      attachCustomerName: undefined,
+      attachCustomerPhone: undefined,
+    });
+  }, [params.attachCustomerId, params.attachCustomerName, params.attachCustomerPhone, router]);
+
+  const discountValueInvalid =
+    discountKind !== "none" &&
+    cart.discount != null &&
+    cart.discount.value.trim() !== "" &&
+    !isValidDiscountValue(discountKind, cart.discount.value);
+
+  function handleDiscountKindChange(kind: "none" | DiscountKind) {
+    setDiscountKind(kind);
+    if (kind === "none") {
+      dispatch({ type: "setDiscount", discount: null });
+      return;
+    }
+    dispatch({
+      type: "setDiscount",
+      discount: { kind, value: cart.discount?.value ?? "", reason: cart.discount?.reason ?? "" },
+    });
+  }
+
+  function handleDiscountValueChange(value: string) {
+    if (discountKind === "none") {
+      return;
+    }
+    dispatch({
+      type: "setDiscount",
+      discount: { kind: discountKind, value, reason: cart.discount?.reason ?? "" },
+    });
+  }
+
+  function handleDiscountReasonChange(reason: string) {
+    if (discountKind === "none" || cart.discount == null) {
+      return;
+    }
+    dispatch({ type: "setDiscount", discount: { ...cart.discount, reason } });
+  }
+
+  const createSale = useCreateSale();
+
+  function handlePickLocation(location: Location) {
+    setLocationId(location.id);
+    persistLocationId(location.id);
+  }
+
+  function handlePickVariant(variant: Variant) {
+    const attrs = Object.values(variant.attributes).filter(Boolean).join(" / ");
+    const label = [variant.sku, attrs].filter(Boolean).join(" — ") || t("sales.items.noLabel");
+    dispatch({ type: "addItem", variantId: variant.id, label });
+    setLineErrors((prev) => {
+      if (!(variant.id in prev)) {
+        return prev;
+      }
+      const { [variant.id]: _removed, ...rest } = prev;
+      return rest;
+    });
+    setPickerOpen(false);
+  }
+
+  function handlePay() {
+    setGeneralError(null);
+    if (!locationId) {
+      setGeneralError(t("mobile.sale.locationRequired"));
+      return;
+    }
+    if (cart.lines.length === 0) {
+      setGeneralError(t("sales.items.required"));
+      return;
+    }
+    if (discountValueInvalid) {
+      setGeneralError(t("errors.field.invalid"));
+      return;
+    }
+
+    const hasDiscount =
+      discountKind !== "none" &&
+      cart.discount != null &&
+      cart.discount.value.trim() !== "" &&
+      isValidDiscountValue(discountKind, cart.discount.value) &&
+      !isZeroDecimalString(cart.discount.value);
+
+    const body: SaleCreate = {
+      locationId,
+      items: cart.lines.map((line) => ({ variantId: line.variantId, qty: String(line.qty) })),
+      payment: { method: paymentMethod },
+      ...(customer ? { customerId: customer.id } : {}),
+      ...(hasDiscount && cart.discount
+        ? { discount: { type: cart.discount.kind, value: cart.discount.value.trim() } }
+        : {}),
+      ...(hasDiscount && cart.discount?.reason.trim()
+        ? { discountReason: cart.discount.reason.trim() }
+        : {}),
+    };
+
+    createSale.mutate(
+      { body, idempotencyKey: cart.idempotencyKey },
+      {
+        onSuccess: (sale) => {
+          setCompletedSale(sale);
+          dispatch({ type: "completed" });
+          setCustomer(null);
+          setDiscountKind("none");
+          setLineErrors({});
+        },
+        onError: (error) => {
+          if (error instanceof SalesApiError) {
+            if (error.code === "STOCK_INSUFFICIENT") {
+              const details = error.details as StockInsufficientDetails | undefined;
+              if (details?.variantId) {
+                setLineErrors((prev) => ({
+                  ...prev,
+                  [details.variantId as string]: t("sales.errors.stockInsufficient", {
+                    available: details.available ?? "0",
+                  }),
+                }));
+                return;
+              }
+            }
+            if (error.code === "DISCOUNT_EXCEEDS_SUBTOTAL") {
+              setGeneralError(t("sales.errors.discountExceedsSubtotal"));
+              return;
+            }
+            if (error.code === "IDEMPOTENCY_KEY_REUSED") {
+              setGeneralError(t("sales.errors.idempotencyKeyReused"));
+              return;
+            }
+          }
+          setGeneralError(t("errors.generic"));
+        },
+      },
+    );
+  }
+
+  if (completedSale) {
+    return (
+      <View className="flex-1 items-center justify-center gap-4 bg-background p-6">
+        <Text variant="h3">{t("sales.success.title")}</Text>
+        <Text variant="large">{t("sales.success.number", { number: completedSale.number })}</Text>
+        <Text>
+          {t("sales.success.total", { total: formatMoney(completedSale.total, currency) })}
+        </Text>
+        <Button size="lg" onPress={() => setCompletedSale(null)}>
+          <Text>{t("sales.success.newSale")}</Text>
+        </Button>
+      </View>
+    );
+  }
+
+  return (
+    <KeyboardAvoidingView
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      className="flex-1 bg-background"
+    >
+      <ScrollView
+        className="flex-1"
+        contentContainerStyle={{ padding: 16, gap: 16 }}
+        keyboardShouldPersistTaps="handled"
+      >
+        {generalError ? (
+          <View className="rounded-md bg-destructive/10 p-3">
+            <Text className="text-destructive">{generalError}</Text>
+          </View>
+        ) : null}
+
+        <Pressable
+          accessibilityRole="button"
+          className="min-h-14 justify-center rounded-md border border-input bg-background px-3"
+          onPress={() => setLocationModalOpen(true)}
+        >
+          <Text variant="small">{t("sales.fields.location")}</Text>
+          <Text>{selectedLocation?.name ?? t("mobile.sale.location.placeholder")}</Text>
+        </Pressable>
+
+        <View className="gap-2">
+          <View className="flex-row items-center justify-between">
+            <Text variant="large">{t("sales.items.title")}</Text>
+            <Button size="sm" disabled={!locationId} onPress={() => setPickerOpen(true)}>
+              <Plus size={16} color={tokens.color.surface} />
+              <Text>{t("mobile.sale.addItem")}</Text>
+            </Button>
+          </View>
+
+          {cart.lines.length === 0 ? (
+            <Text variant="muted">{t("mobile.sale.cart.empty")}</Text>
+          ) : (
+            cart.lines.map((line) => (
+              <View key={line.variantId} className="gap-2 rounded-md border border-border p-3">
+                <View className="flex-row items-start justify-between gap-2">
+                  <Text className="flex-1" numberOfLines={2}>
+                    {line.label}
+                  </Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={t("sales.items.remove")}
+                    className="h-9 w-9 items-center justify-center"
+                    onPress={() => dispatch({ type: "removeItem", variantId: line.variantId })}
+                  >
+                    <Trash2 size={18} color={tokens.color.danger} />
+                  </Pressable>
+                </View>
+                <View className="flex-row items-center gap-3">
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="-"
+                    className="h-11 w-11 items-center justify-center rounded-md border border-border active:bg-accent"
+                    onPress={() => dispatch({ type: "decrementQty", variantId: line.variantId })}
+                  >
+                    <Minus size={20} color={tokens.color.text} />
+                  </Pressable>
+                  <Text variant="large" className="w-10 text-center">
+                    {line.qty}
+                  </Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="+"
+                    className="h-11 w-11 items-center justify-center rounded-md border border-border active:bg-accent"
+                    onPress={() => dispatch({ type: "incrementQty", variantId: line.variantId })}
+                  >
+                    <Plus size={20} color={tokens.color.text} />
+                  </Pressable>
+                </View>
+                {lineErrors[line.variantId] ? (
+                  <Text variant="small" className="text-destructive">
+                    {lineErrors[line.variantId]}
+                  </Text>
+                ) : null}
+              </View>
+            ))
+          )}
+        </View>
+
+        <View className="gap-2">
+          <Text variant="small">{t("sales.fields.discountType")}</Text>
+          <View className="flex-row gap-2">
+            {DISCOUNT_KINDS.map((kind) => (
+              <Button
+                key={kind}
+                size="sm"
+                className="flex-1"
+                variant={discountKind === kind ? "default" : "outline"}
+                onPress={() => handleDiscountKindChange(kind)}
+              >
+                <Text>
+                  {kind === "none"
+                    ? t("mobile.sale.discount.kindNone")
+                    : t(`sales.discountType.${kind}`)}
+                </Text>
+              </Button>
+            ))}
+          </View>
+          {discountKind !== "none" ? (
+            <>
+              <Input
+                keyboardType="decimal-pad"
+                placeholder={t("mobile.sale.discount.valuePlaceholder")}
+                value={cart.discount?.value ?? ""}
+                onChangeText={handleDiscountValueChange}
+              />
+              {discountValueInvalid ? (
+                <Text variant="small" className="text-destructive">
+                  {t("errors.field.invalid")}
+                </Text>
+              ) : null}
+              <Input
+                placeholder={t("mobile.sale.discount.reasonPlaceholder")}
+                value={cart.discount?.reason ?? ""}
+                onChangeText={handleDiscountReasonChange}
+              />
+            </>
+          ) : null}
+        </View>
+
+        <View className="gap-2">
+          <Pressable
+            accessibilityRole="button"
+            className="min-h-14 justify-center rounded-md border border-input bg-background px-3"
+            onPress={() => setCustomerModalOpen(true)}
+          >
+            <Text variant="small">{t("sales.fields.customer")}</Text>
+            <Text>
+              {customer
+                ? [customer.fullName, customer.phone].filter(Boolean).join(" · ")
+                : t("mobile.sale.customer.none")}
+            </Text>
+          </Pressable>
+          {customer ? (
+            <Pressable accessibilityRole="button" onPress={() => setCustomer(null)}>
+              <Text className="text-primary">{t("sales.items.remove")}</Text>
+            </Pressable>
+          ) : null}
+        </View>
+
+        <View className="gap-2">
+          <Text variant="small">{t("sales.fields.paymentMethod")}</Text>
+          <View className="flex-row gap-2">
+            {PAYMENT_METHODS.map((method) => (
+              <Button
+                key={method}
+                size="sm"
+                className="flex-1"
+                variant={paymentMethod === method ? "default" : "outline"}
+                onPress={() => setPaymentMethod(method)}
+              >
+                <Text>{t(`sales.paymentMethod.${method}`)}</Text>
+              </Button>
+            ))}
+          </View>
+        </View>
+
+        <Pressable accessibilityRole="button" onPress={() => router.push("/sale/list")}>
+          <Text className="text-center text-primary">{t("mobile.sale.list.title")}</Text>
+        </Pressable>
+      </ScrollView>
+
+      <View className="border-border border-t bg-background p-4">
+        <Button size="lg" disabled={createSale.isPending} onPress={handlePay}>
+          {createSale.isPending ? (
+            <ActivityIndicator color={tokens.color.surface} />
+          ) : (
+            <Text>{t("mobile.sale.pay")}</Text>
+          )}
+        </Button>
+      </View>
+
+      <LocationPickerModal
+        visible={locationModalOpen}
+        locations={activeLocations}
+        onClose={() => setLocationModalOpen(false)}
+        onPick={handlePickLocation}
+      />
+
+      <Modal visible={pickerOpen} animationType="slide" onRequestClose={() => setPickerOpen(false)}>
+        <View className="flex-1 gap-2 bg-background p-4 pt-12">
+          <View className="flex-row items-center justify-between">
+            <Text variant="h4">{t("mobile.sale.addItem")}</Text>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setPickerOpen(false)}
+              className="min-h-11 justify-center"
+            >
+              <Text className="text-primary">{t("common.cancel")}</Text>
+            </Pressable>
+          </View>
+          {locationId ? (
+            <VariantPicker
+              locationId={locationId}
+              excludeVariantIds={cart.lines.map((line) => line.variantId)}
+              onPick={(variant) => handlePickVariant(variant)}
+            />
+          ) : null}
+        </View>
+      </Modal>
+
+      <CustomerPickerModal
+        visible={customerModalOpen}
+        onClose={() => setCustomerModalOpen(false)}
+        onPick={setCustomer}
+      />
+    </KeyboardAvoidingView>
   );
 }
