@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"time"
@@ -68,9 +69,28 @@ func (e Availability) Valid() bool {
 	}
 }
 
+// Defines values for DiscountType.
+const (
+	Fixed   DiscountType = "fixed"
+	Percent DiscountType = "percent"
+)
+
+// Valid indicates whether the value is a known member of the DiscountType enum.
+func (e DiscountType) Valid() bool {
+	switch e {
+	case Fixed:
+		return true
+	case Percent:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ErrorCode.
 const (
 	CONFLICT                 ErrorCode = "CONFLICT"
+	DISCOUNTEXCEEDSSUBTOTAL  ErrorCode = "DISCOUNT_EXCEEDS_SUBTOTAL"
 	FORBIDDEN                ErrorCode = "FORBIDDEN"
 	IDEMPOTENCYKEYREUSED     ErrorCode = "IDEMPOTENCY_KEY_REUSED"
 	INTERNAL                 ErrorCode = "INTERNAL"
@@ -79,6 +99,10 @@ const (
 	PURCHASEALREADYRECEIVED  ErrorCode = "PURCHASE_ALREADY_RECEIVED"
 	PURCHASENOTDRAFT         ErrorCode = "PURCHASE_NOT_DRAFT"
 	RATELIMITED              ErrorCode = "RATE_LIMITED"
+	RETURNEXCEEDSSOLD        ErrorCode = "RETURN_EXCEEDS_SOLD"
+	SALEALREADYVOIDED        ErrorCode = "SALE_ALREADY_VOIDED"
+	SALEHASRETURNS           ErrorCode = "SALE_HAS_RETURNS"
+	SALEVOIDWINDOWCLOSED     ErrorCode = "SALE_VOID_WINDOW_CLOSED"
 	SAMELOCATION             ErrorCode = "SAME_LOCATION"
 	STOCKINSUFFICIENT        ErrorCode = "STOCK_INSUFFICIENT"
 	UNAUTHENTICATED          ErrorCode = "UNAUTHENTICATED"
@@ -89,6 +113,8 @@ const (
 func (e ErrorCode) Valid() bool {
 	switch e {
 	case CONFLICT:
+		return true
+	case DISCOUNTEXCEEDSSUBTOTAL:
 		return true
 	case FORBIDDEN:
 		return true
@@ -105,6 +131,14 @@ func (e ErrorCode) Valid() bool {
 	case PURCHASENOTDRAFT:
 		return true
 	case RATELIMITED:
+		return true
+	case RETURNEXCEEDSSOLD:
+		return true
+	case SALEALREADYVOIDED:
+		return true
+	case SALEHASRETURNS:
+		return true
+	case SALEVOIDWINDOWCLOSED:
 		return true
 	case SAMELOCATION:
 		return true
@@ -167,6 +201,27 @@ func (e LocationKind) Valid() bool {
 	case Store:
 		return true
 	case Warehouse:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PaymentMethod.
+const (
+	Card     PaymentMethod = "card"
+	Cash     PaymentMethod = "cash"
+	Transfer PaymentMethod = "transfer"
+)
+
+// Valid indicates whether the value is a known member of the PaymentMethod enum.
+func (e PaymentMethod) Valid() bool {
+	switch e {
+	case Card:
+		return true
+	case Cash:
+		return true
+	case Transfer:
 		return true
 	default:
 		return false
@@ -245,6 +300,42 @@ func (e Role) Valid() bool {
 	case RoleManager:
 		return true
 	case RoleOwner:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SaleKind.
+const (
+	SaleKindReturn SaleKind = "return"
+	SaleKindSale   SaleKind = "sale"
+)
+
+// Valid indicates whether the value is a known member of the SaleKind enum.
+func (e SaleKind) Valid() bool {
+	switch e {
+	case SaleKindReturn:
+		return true
+	case SaleKindSale:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SaleStatus.
+const (
+	Completed SaleStatus = "completed"
+	Voided    SaleStatus = "voided"
+)
+
+// Valid indicates whether the value is a known member of the SaleStatus enum.
+func (e SaleStatus) Valid() bool {
+	switch e {
+	case Completed:
+		return true
+	case Voided:
 		return true
 	default:
 		return false
@@ -443,8 +534,47 @@ type CategoryPatch struct {
 	Translations *Translations `json:"translations,omitempty"`
 }
 
+// Customer docs/04-DATA-MODEL.md § 5.
+type Customer struct {
+	CreatedAt        time.Time                 `json:"createdAt"`
+	FullName         string                    `json:"fullName"`
+	Id               openapi_types.UUID        `json:"id"`
+	Note             nullable.Nullable[string] `json:"note"`
+	Phone            nullable.Nullable[string] `json:"phone"`
+	Tags             []string                  `json:"tags"`
+	TelegramUsername nullable.Nullable[string] `json:"telegramUsername"`
+	UpdatedAt        time.Time                 `json:"updatedAt"`
+}
+
+// CustomerCreate defines model for CustomerCreate.
+type CustomerCreate struct {
+	FullName         string    `json:"fullName"`
+	Note             *string   `json:"note,omitempty"`
+	Phone            *string   `json:"phone,omitempty"`
+	Tags             *[]string `json:"tags,omitempty"`
+	TelegramUsername *string   `json:"telegramUsername,omitempty"`
+}
+
+// CustomerList Cursor-paginated envelope for `GET /customers`.
+type CustomerList struct {
+	Items      []Customer                `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"nextCursor"`
+}
+
+// CustomerPatch Partial update — only provided fields change. `phone`, `telegramUsername` and `note` are nullable (D-35), same as `SupplierPatch`: explicit `null` clears the field. `tags`, when provided, replaces the full array.
+type CustomerPatch struct {
+	FullName         *string                   `json:"fullName,omitempty"`
+	Note             nullable.Nullable[string] `json:"note,omitempty"`
+	Phone            nullable.Nullable[string] `json:"phone,omitempty"`
+	Tags             *[]string                 `json:"tags,omitempty"`
+	TelegramUsername nullable.Nullable[string] `json:"telegramUsername,omitempty"`
+}
+
 // Decimal money and quantities as decimal strings (ADR-007)
 type Decimal = string
+
+// DiscountType docs/04-DATA-MODEL.md § 4.
+type DiscountType string
 
 // Error The error envelope every non-2xx JSON response uses (ADR-013).
 type Error struct {
@@ -550,6 +680,9 @@ type MediaUrls struct {
 	Full  string `json:"full"`
 	Thumb string `json:"thumb"`
 }
+
+// PaymentMethod docs/04-DATA-MODEL.md § 4 (D-54).
+type PaymentMethod string
 
 // Product `costPrice` and `translations` are present only when the caller has the `cost.read` / `catalog.write` permission; absent (not null) otherwise (ADR-010).
 type Product struct {
@@ -798,6 +931,244 @@ type ReadinessStatus string
 
 // Role A user's role (04-DATA-MODEL.md § 7 Permissions).
 type Role string
+
+// Sale A completed sale is immutable except for the void columns (ADR-014). A return is its own `Sale` of `kind: return`, with `originalSaleId` pointing at the sale it corrects (D-58).
+type Sale struct {
+	CashierId    openapi_types.UUID                    `json:"cashierId"`
+	CashierName  string                                `json:"cashierName"`
+	CompletedAt  time.Time                             `json:"completedAt"`
+	CustomerId   nullable.Nullable[openapi_types.UUID] `json:"customerId"`
+	CustomerName nullable.Nullable[string]             `json:"customerName"`
+
+	// DiscountAmount money and quantities as decimal strings (ADR-007)
+	DiscountAmount Decimal                   `json:"discountAmount"`
+	DiscountReason nullable.Nullable[string] `json:"discountReason"`
+
+	// HasReturns `true` when a `kind: return` sale references this sale as `originalSaleId` (D-62 — such a sale can no longer be voided).
+	HasReturns bool               `json:"hasReturns"`
+	Id         openapi_types.UUID `json:"id"`
+	Items      []SaleItem         `json:"items"`
+
+	// Kind docs/04-DATA-MODEL.md § 4.
+	Kind         SaleKind                  `json:"kind"`
+	LocationId   openapi_types.UUID        `json:"locationId"`
+	LocationName string                    `json:"locationName"`
+	Note         nullable.Nullable[string] `json:"note"`
+
+	// Number Per-shop, sequential, gap-free (`shops.next_sale_number` under row lock). Read-only.
+	Number int `json:"number"`
+
+	// OriginalSaleId Set only on a `kind: return` sale — the sale it corrects.
+	OriginalSaleId nullable.Nullable[openapi_types.UUID] `json:"originalSaleId"`
+	Payment        SalePayment                           `json:"payment"`
+
+	// Status docs/04-DATA-MODEL.md § 4.
+	Status SaleStatus `json:"status"`
+
+	// Subtotal money and quantities as decimal strings (ADR-007)
+	Subtotal Decimal `json:"subtotal"`
+
+	// Total money and quantities as decimal strings (ADR-007)
+	Total      Decimal                      `json:"total"`
+	VoidReason nullable.Nullable[string]    `json:"voidReason"`
+	VoidedAt   nullable.Nullable[time.Time] `json:"voidedAt"`
+
+	// VoidedBy The staff id who voided the sale.
+	VoidedBy nullable.Nullable[openapi_types.UUID] `json:"voidedBy"`
+}
+
+// SaleCreate `items` carries only `variantId` and `qty` — a client-supplied price is rejected by the contract shape itself (D-56).
+type SaleCreate struct {
+	CustomerId *openapi_types.UUID `json:"customerId,omitempty"`
+
+	// Discount A manual per-sale discount (D-52). `value` is a percentage (0..100) when `type: percent`, or a fixed sum (>= 0, in shop currency) when `type: fixed`; either way it is capped at the computed subtotal — `409 DISCOUNT_EXCEEDS_SUBTOTAL` otherwise (D-57). Validated server-side; not enforceable by JSON Schema since `Decimal` is a string.
+	Discount       *SaleDiscount      `json:"discount,omitempty"`
+	DiscountReason *string            `json:"discountReason,omitempty"`
+	Items          []SaleItemCreate   `json:"items"`
+	LocationId     openapi_types.UUID `json:"locationId"`
+	Note           *string            `json:"note,omitempty"`
+	Payment        SalePaymentCreate  `json:"payment"`
+}
+
+// SaleDiscount A manual per-sale discount (D-52). `value` is a percentage (0..100) when `type: percent`, or a fixed sum (>= 0, in shop currency) when `type: fixed`; either way it is capped at the computed subtotal — `409 DISCOUNT_EXCEEDS_SUBTOTAL` otherwise (D-57). Validated server-side; not enforceable by JSON Schema since `Decimal` is a string.
+type SaleDiscount struct {
+	// Type docs/04-DATA-MODEL.md § 4.
+	Type DiscountType `json:"type"`
+
+	// Value money and quantities as decimal strings (ADR-007)
+	Value Decimal `json:"value"`
+}
+
+// SaleItem One line of a sale or return (docs/04-DATA-MODEL.md § 4). `productName` is resolved in the caller's `Accept-Language` (same `requested -> uz -> any` fallback as `Product.name`, ADR-012, and the same resolution `PurchaseItem.productName` uses); `variantLabel` follows the same rule as `PurchaseItem.variantLabel`. `unitCost` is present only for a caller with the `cost.read` permission — absent (not null) for a cashier (D-63, ADR-010).
+type SaleItem struct {
+	Id openapi_types.UUID `json:"id"`
+
+	// LineTotal money and quantities as decimal strings (ADR-007)
+	LineTotal   Decimal            `json:"lineTotal"`
+	ProductId   openapi_types.UUID `json:"productId"`
+	ProductName string             `json:"productName"`
+
+	// Qty money and quantities as decimal strings (ADR-007)
+	Qty Decimal `json:"qty"`
+
+	// ReturnedQty Quantity of this line already returned. Always `0` on a return-kind sale's own items.
+	ReturnedQty Decimal `json:"returnedQty"`
+
+	// UnitCost Present only when the caller has the `cost.read` permission; absent (not null) otherwise (ADR-010, D-63).
+	UnitCost *Decimal `json:"unitCost,omitempty"`
+
+	// UnitPrice The price actually charged for this line. On a return, the effective refunded unit price (D-61).
+	UnitPrice    Decimal            `json:"unitPrice"`
+	VariantId    openapi_types.UUID `json:"variantId"`
+	VariantLabel string             `json:"variantLabel"`
+}
+
+// SaleItemCreate No price field — the unit price always comes from the catalogue, never the client (D-56, hard rule 8).
+type SaleItemCreate struct {
+	// Qty Must be greater than zero (validated server-side; not enforceable by JSON Schema since `Decimal` is a string).
+	Qty       Decimal            `json:"qty"`
+	VariantId openapi_types.UUID `json:"variantId"`
+}
+
+// SaleKind docs/04-DATA-MODEL.md § 4.
+type SaleKind string
+
+// SaleList Cursor-paginated envelope for `GET /sales`.
+type SaleList struct {
+	Items      []SaleSummary             `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"nextCursor"`
+}
+
+// SalePayment defines model for SalePayment.
+type SalePayment struct {
+	// Amount money and quantities as decimal strings (ADR-007)
+	Amount Decimal `json:"amount"`
+
+	// Method docs/04-DATA-MODEL.md § 4 (D-54).
+	Method PaymentMethod `json:"method"`
+}
+
+// SalePaymentCreate defines model for SalePaymentCreate.
+type SalePaymentCreate struct {
+	// Method docs/04-DATA-MODEL.md § 4 (D-54).
+	Method PaymentMethod `json:"method"`
+}
+
+// SaleReturnCreate defines model for SaleReturnCreate.
+type SaleReturnCreate struct {
+	Items []SaleReturnItemCreate `json:"items"`
+	Note  *string                `json:"note,omitempty"`
+}
+
+// SaleReturnItemCreate defines model for SaleReturnItemCreate.
+type SaleReturnItemCreate struct {
+	// Qty Must be greater than zero (validated server-side; not enforceable by JSON Schema since `Decimal` is a string); may not exceed that line's sold quantity minus already returned (`409 RETURN_EXCEEDS_SOLD`, D-58).
+	Qty        Decimal            `json:"qty"`
+	SaleItemId openapi_types.UUID `json:"saleItemId"`
+}
+
+// SaleStatus docs/04-DATA-MODEL.md § 4.
+type SaleStatus string
+
+// SaleSummary `Sale` without `items` and without payment details beyond `paymentMethod` — the shape `GET /sales` returns (list vs get asymmetry, docs/05-API.md § Conventions).
+type SaleSummary struct {
+	CashierId    openapi_types.UUID                    `json:"cashierId"`
+	CashierName  string                                `json:"cashierName"`
+	CompletedAt  time.Time                             `json:"completedAt"`
+	CustomerId   nullable.Nullable[openapi_types.UUID] `json:"customerId"`
+	CustomerName nullable.Nullable[string]             `json:"customerName"`
+
+	// DiscountAmount money and quantities as decimal strings (ADR-007)
+	DiscountAmount Decimal                   `json:"discountAmount"`
+	DiscountReason nullable.Nullable[string] `json:"discountReason"`
+	HasReturns     bool                      `json:"hasReturns"`
+	Id             openapi_types.UUID        `json:"id"`
+
+	// Kind docs/04-DATA-MODEL.md § 4.
+	Kind           SaleKind                              `json:"kind"`
+	LocationId     openapi_types.UUID                    `json:"locationId"`
+	LocationName   string                                `json:"locationName"`
+	Note           nullable.Nullable[string]             `json:"note"`
+	Number         int                                   `json:"number"`
+	OriginalSaleId nullable.Nullable[openapi_types.UUID] `json:"originalSaleId"`
+
+	// PaymentMethod docs/04-DATA-MODEL.md § 4 (D-54).
+	PaymentMethod PaymentMethod `json:"paymentMethod"`
+
+	// Status docs/04-DATA-MODEL.md § 4.
+	Status SaleStatus `json:"status"`
+
+	// Subtotal money and quantities as decimal strings (ADR-007)
+	Subtotal Decimal `json:"subtotal"`
+
+	// Total money and quantities as decimal strings (ADR-007)
+	Total      Decimal                               `json:"total"`
+	VoidReason nullable.Nullable[string]             `json:"voidReason"`
+	VoidedAt   nullable.Nullable[time.Time]          `json:"voidedAt"`
+	VoidedBy   nullable.Nullable[openapi_types.UUID] `json:"voidedBy"`
+}
+
+// SaleVoid defines model for SaleVoid.
+type SaleVoid struct {
+	Reason *string `json:"reason,omitempty"`
+}
+
+// SalesByProductList Cursor-paginated envelope for `GET /reports/sales/by-product`, sorted by `revenue` descending.
+type SalesByProductList struct {
+	Items      []SalesByProductRow       `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"nextCursor"`
+}
+
+// SalesByProductRow docs/00-DECISIONS.md D-55.
+type SalesByProductRow struct {
+	// Cost Present only for manager+ (ADR-010); kept optional here for symmetry even though this endpoint is manager+ only.
+	Cost *Decimal `json:"cost,omitempty"`
+
+	// Margin Present only for manager+ (ADR-010); kept optional here for symmetry even though this endpoint is manager+ only.
+	Margin    *Decimal           `json:"margin,omitempty"`
+	ProductId openapi_types.UUID `json:"productId"`
+
+	// ProductName Resolved for the caller's `Accept-Language` (ADR-012).
+	ProductName string `json:"productName"`
+
+	// QtyReturned money and quantities as decimal strings (ADR-007)
+	QtyReturned Decimal `json:"qtyReturned"`
+
+	// QtySold money and quantities as decimal strings (ADR-007)
+	QtySold Decimal `json:"qtySold"`
+
+	// Revenue money and quantities as decimal strings (ADR-007)
+	Revenue Decimal `json:"revenue"`
+}
+
+// SalesSummaryReport docs/00-DECISIONS.md D-55. For a cashier, `from`/`to`/`cashierId` are the effective values the server used (today, shop timezone, that cashier), not necessarily what was requested.
+type SalesSummaryReport struct {
+	// CashierId Non-null only when the report is scoped to one cashier (a cashier caller always gets their own id here; manager+ gets `null` for a whole-shop summary).
+	CashierId nullable.Nullable[openapi_types.UUID] `json:"cashierId"`
+
+	// Cost Present only for manager+ (ADR-010).
+	Cost *Decimal `json:"cost,omitempty"`
+
+	// Discounts money and quantities as decimal strings (ADR-007)
+	Discounts  Decimal                               `json:"discounts"`
+	From       openapi_types.Date                    `json:"from"`
+	LocationId nullable.Nullable[openapi_types.UUID] `json:"locationId"`
+
+	// Margin Present only for manager+ (ADR-010).
+	Margin *Decimal `json:"margin,omitempty"`
+
+	// NetRevenue money and quantities as decimal strings (ADR-007)
+	NetRevenue Decimal `json:"netRevenue"`
+
+	// Refunds money and quantities as decimal strings (ADR-007)
+	Refunds      Decimal `json:"refunds"`
+	ReturnsCount int     `json:"returnsCount"`
+
+	// Revenue money and quantities as decimal strings (ADR-007)
+	Revenue    Decimal            `json:"revenue"`
+	SalesCount int                `json:"salesCount"`
+	To         openapi_types.Date `json:"to"`
+}
 
 // Session defines model for Session.
 type Session struct {
@@ -1193,6 +1564,18 @@ type ListCategoriesParams struct {
 	IncludeInactive *bool `form:"includeInactive,omitempty" json:"includeInactive,omitempty"`
 }
 
+// ListCustomersParams defines parameters for ListCustomers.
+type ListCustomersParams struct {
+	// Q Free-text search over `fullName` or `phone` (Postgres ILIKE/trigram), same style as `GET /suppliers`.
+	Q *string `form:"q,omitempty" json:"q,omitempty"`
+
+	// Limit Maximum number of items to return.
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque cursor from a previous page's `nextCursor`.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
 // ListLocationsParams defines parameters for ListLocations.
 type ListLocationsParams struct {
 	// Limit Maximum number of items to return.
@@ -1230,6 +1613,64 @@ type ListPurchasesParams struct {
 
 // ReceivePurchaseParams defines parameters for ReceivePurchase.
 type ReceivePurchaseParams struct {
+	// IdempotencyKey Client-generated key (docs/05-API.md § Conventions); a replay with the same key returns the original result instead of repeating the operation.
+	IdempotencyKey *IdempotencyKey `json:"Idempotency-Key,omitempty"`
+}
+
+// ListSalesByProductParams defines parameters for ListSalesByProduct.
+type ListSalesByProductParams struct {
+	// From `YYYY-MM-DD`, inclusive.
+	From openapi_types.Date `form:"from" json:"from"`
+
+	// To `YYYY-MM-DD`, inclusive.
+	To         openapi_types.Date  `form:"to" json:"to"`
+	LocationId *openapi_types.UUID `form:"locationId,omitempty" json:"locationId,omitempty"`
+
+	// Limit Maximum number of items to return.
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque cursor from a previous page's `nextCursor`.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// GetSalesSummaryReportParams defines parameters for GetSalesSummaryReport.
+type GetSalesSummaryReportParams struct {
+	// From `YYYY-MM-DD`, inclusive. Required for manager+; ignored for a cashier (see summary above).
+	From *openapi_types.Date `form:"from,omitempty" json:"from,omitempty"`
+
+	// To `YYYY-MM-DD`, inclusive. Required for manager+; ignored for a cashier (see summary above).
+	To         *openapi_types.Date `form:"to,omitempty" json:"to,omitempty"`
+	LocationId *openapi_types.UUID `form:"locationId,omitempty" json:"locationId,omitempty"`
+}
+
+// ListSalesParams defines parameters for ListSales.
+type ListSalesParams struct {
+	// From Inclusive lower bound, `YYYY-MM-DD`, interpreted as the start of that calendar day in the shop timezone.
+	From *openapi_types.Date `form:"from,omitempty" json:"from,omitempty"`
+
+	// To Inclusive upper bound, `YYYY-MM-DD`, interpreted as the end of that calendar day in the shop timezone.
+	To         *openapi_types.Date `form:"to,omitempty" json:"to,omitempty"`
+	LocationId *openapi_types.UUID `form:"locationId,omitempty" json:"locationId,omitempty"`
+	CashierId  *openapi_types.UUID `form:"cashierId,omitempty" json:"cashierId,omitempty"`
+	CustomerId *openapi_types.UUID `form:"customerId,omitempty" json:"customerId,omitempty"`
+	Kind       *SaleKind           `form:"kind,omitempty" json:"kind,omitempty"`
+	Status     *SaleStatus         `form:"status,omitempty" json:"status,omitempty"`
+
+	// Limit Maximum number of items to return.
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque cursor from a previous page's `nextCursor`.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// CreateSaleParams defines parameters for CreateSale.
+type CreateSaleParams struct {
+	// IdempotencyKey Client-generated key (docs/05-API.md § Conventions); a replay with the same key returns the original result instead of repeating the operation.
+	IdempotencyKey *IdempotencyKey `json:"Idempotency-Key,omitempty"`
+}
+
+// CreateSaleReturnParams defines parameters for CreateSaleReturn.
+type CreateSaleReturnParams struct {
 	// IdempotencyKey Client-generated key (docs/05-API.md § Conventions); a replay with the same key returns the original result instead of repeating the operation.
 	IdempotencyKey *IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
@@ -1313,6 +1754,12 @@ type CreateCategoryJSONRequestBody = CategoryCreate
 // UpdateCategoryJSONRequestBody defines body for UpdateCategory for application/json ContentType.
 type UpdateCategoryJSONRequestBody = CategoryPatch
 
+// CreateCustomerJSONRequestBody defines body for CreateCustomer for application/json ContentType.
+type CreateCustomerJSONRequestBody = CustomerCreate
+
+// UpdateCustomerJSONRequestBody defines body for UpdateCustomer for application/json ContentType.
+type UpdateCustomerJSONRequestBody = CustomerPatch
+
 // CreateLocationJSONRequestBody defines body for CreateLocation for application/json ContentType.
 type CreateLocationJSONRequestBody = LocationCreate
 
@@ -1345,6 +1792,15 @@ type CreatePurchaseJSONRequestBody = PurchaseCreate
 
 // UpdatePurchaseJSONRequestBody defines body for UpdatePurchase for application/json ContentType.
 type UpdatePurchaseJSONRequestBody = PurchasePatch
+
+// CreateSaleJSONRequestBody defines body for CreateSale for application/json ContentType.
+type CreateSaleJSONRequestBody = SaleCreate
+
+// CreateSaleReturnJSONRequestBody defines body for CreateSaleReturn for application/json ContentType.
+type CreateSaleReturnJSONRequestBody = SaleReturnCreate
+
+// VoidSaleJSONRequestBody defines body for VoidSale for application/json ContentType.
+type VoidSaleJSONRequestBody = SaleVoid
 
 // UpdateShopJSONRequestBody defines body for UpdateShop for application/json ContentType.
 type UpdateShopJSONRequestBody = ShopPatch
@@ -1414,6 +1870,21 @@ type ServerInterface interface {
 	// UpdateCategory Update a category.
 	// (PATCH /categories/{id})
 	UpdateCategory(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
+	// ListCustomers List the shop's customers.
+	// (GET /customers)
+	ListCustomers(w http.ResponseWriter, r *http.Request, params ListCustomersParams)
+	// CreateCustomer Create a customer.
+	// (POST /customers)
+	CreateCustomer(w http.ResponseWriter, r *http.Request)
+	// DeleteCustomer Soft-delete a customer.
+	// (DELETE /customers/{id})
+	DeleteCustomer(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
+	// GetCustomer Get a customer.
+	// (GET /customers/{id})
+	GetCustomer(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
+	// UpdateCustomer Update a customer.
+	// (PATCH /customers/{id})
+	UpdateCustomer(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
 	// GetHealthz Liveness check.
 	// (GET /healthz)
 	GetHealthz(w http.ResponseWriter, r *http.Request)
@@ -1483,6 +1954,27 @@ type ServerInterface interface {
 	// GetReadyz Readiness check.
 	// (GET /readyz)
 	GetReadyz(w http.ResponseWriter, r *http.Request)
+	// ListSalesByProduct Sales by product for a period.
+	// (GET /reports/sales/by-product)
+	ListSalesByProduct(w http.ResponseWriter, r *http.Request, params ListSalesByProductParams)
+	// GetSalesSummaryReport Sales summary for a period.
+	// (GET /reports/sales/summary)
+	GetSalesSummaryReport(w http.ResponseWriter, r *http.Request, params GetSalesSummaryReportParams)
+	// ListSales List the shop's sales.
+	// (GET /sales)
+	ListSales(w http.ResponseWriter, r *http.Request, params ListSalesParams)
+	// CreateSale Complete a quick sale.
+	// (POST /sales)
+	CreateSale(w http.ResponseWriter, r *http.Request, params CreateSaleParams)
+	// GetSale Get a sale.
+	// (GET /sales/{id})
+	GetSale(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
+	// CreateSaleReturn Return part or all of a completed sale.
+	// (POST /sales/{id}/return)
+	CreateSaleReturn(w http.ResponseWriter, r *http.Request, id openapi_types.UUID, params CreateSaleReturnParams)
+	// VoidSale Void a completed sale.
+	// (POST /sales/{id}/void)
+	VoidSale(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
 	// GetShop The current shop's settings.
 	// (GET /shop)
 	GetShop(w http.ResponseWriter, r *http.Request)
@@ -1835,6 +2327,157 @@ func (siw *ServerInterfaceWrapper) UpdateCategory(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.UpdateCategory(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListCustomers operation middleware
+func (siw *ServerInterfaceWrapper) ListCustomers(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListCustomersParams
+
+	// ------------- Optional query parameter "q" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "q", r.URL.Query(), &params.Q, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "q"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "q", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListCustomers(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateCustomer operation middleware
+func (siw *ServerInterfaceWrapper) CreateCustomer(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateCustomer(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteCustomer operation middleware
+func (siw *ServerInterfaceWrapper) DeleteCustomer(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteCustomer(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetCustomer operation middleware
+func (siw *ServerInterfaceWrapper) GetCustomer(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetCustomer(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateCustomer operation middleware
+func (siw *ServerInterfaceWrapper) UpdateCustomer(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateCustomer(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2528,6 +3171,430 @@ func (siw *ServerInterfaceWrapper) GetReadyz(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetReadyz(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListSalesByProduct operation middleware
+func (siw *ServerInterfaceWrapper) ListSalesByProduct(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListSalesByProductParams
+
+	// ------------- Required query parameter "from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: "date"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Required query parameter "to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: "date"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "locationId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "locationId", r.URL.Query(), &params.LocationId, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "locationId"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "locationId", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListSalesByProduct(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetSalesSummaryReport operation middleware
+func (siw *ServerInterfaceWrapper) GetSalesSummaryReport(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetSalesSummaryReportParams
+
+	// ------------- Optional query parameter "from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: "date"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: "date"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "locationId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "locationId", r.URL.Query(), &params.LocationId, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "locationId"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "locationId", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetSalesSummaryReport(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListSales operation middleware
+func (siw *ServerInterfaceWrapper) ListSales(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListSalesParams
+
+	// ------------- Optional query parameter "from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: "date"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: "date"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "locationId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "locationId", r.URL.Query(), &params.LocationId, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "locationId"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "locationId", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cashierId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cashierId", r.URL.Query(), &params.CashierId, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cashierId"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cashierId", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "customerId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "customerId", r.URL.Query(), &params.CustomerId, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "customerId"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "customerId", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "kind" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "kind", r.URL.Query(), &params.Kind, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "kind"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "kind", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", r.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "status"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "status", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListSales(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateSale operation middleware
+func (siw *ServerInterfaceWrapper) CreateSale(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CreateSaleParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = &IdempotencyKey
+
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateSale(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetSale operation middleware
+func (siw *ServerInterfaceWrapper) GetSale(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetSale(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateSaleReturn operation middleware
+func (siw *ServerInterfaceWrapper) CreateSaleReturn(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CreateSaleReturnParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = &IdempotencyKey
+
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateSaleReturn(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// VoidSale operation middleware
+func (siw *ServerInterfaceWrapper) VoidSale(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.VoidSale(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3366,6 +4433,18 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/stock/adjustments", wrapper.CreateStockAdjustment)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/stock/transfers", wrapper.CreateStockTransfer)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/stock/low", wrapper.ListLowStock)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/customers", wrapper.ListCustomers)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/customers", wrapper.CreateCustomer)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/customers/{id}", wrapper.DeleteCustomer)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/customers/{id}", wrapper.GetCustomer)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/customers/{id}", wrapper.UpdateCustomer)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/sales", wrapper.ListSales)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/sales", wrapper.CreateSale)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/sales/{id}", wrapper.GetSale)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/sales/{id}/void", wrapper.VoidSale)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/sales/{id}/return", wrapper.CreateSaleReturn)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/reports/sales/summary", wrapper.GetSalesSummaryReport)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/reports/sales/by-product", wrapper.ListSalesByProduct)
 
 	return m
 }
@@ -4116,6 +5195,349 @@ func (response UpdateCategory404JSONResponse) VisitUpdateCategoryResponse(w http
 type UpdateCategory409JSONResponse struct{ ConflictJSONResponse }
 
 func (response UpdateCategory409JSONResponse) VisitUpdateCategoryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListCustomersRequestObject struct {
+	Params ListCustomersParams
+}
+
+type ListCustomersResponseObject interface {
+	VisitListCustomersResponse(w http.ResponseWriter) error
+}
+
+type ListCustomers200JSONResponse CustomerList
+
+func (response ListCustomers200JSONResponse) VisitListCustomersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListCustomers401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListCustomers401JSONResponse) VisitListCustomersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListCustomers403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListCustomers403JSONResponse) VisitListCustomersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateCustomerRequestObject struct {
+	Body *CreateCustomerJSONRequestBody
+}
+
+type CreateCustomerResponseObject interface {
+	VisitCreateCustomerResponse(w http.ResponseWriter) error
+}
+
+type CreateCustomer201JSONResponse Customer
+
+func (response CreateCustomer201JSONResponse) VisitCreateCustomerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateCustomer400JSONResponse struct{ ValidationFailedJSONResponse }
+
+func (response CreateCustomer400JSONResponse) VisitCreateCustomerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateCustomer401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CreateCustomer401JSONResponse) VisitCreateCustomerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateCustomer403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response CreateCustomer403JSONResponse) VisitCreateCustomerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateCustomer409JSONResponse Error
+
+func (response CreateCustomer409JSONResponse) VisitCreateCustomerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteCustomerRequestObject struct {
+	Id openapi_types.UUID `json:"id"`
+}
+
+type DeleteCustomerResponseObject interface {
+	VisitDeleteCustomerResponse(w http.ResponseWriter) error
+}
+
+type DeleteCustomer204Response struct {
+}
+
+func (response DeleteCustomer204Response) VisitDeleteCustomerResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteCustomer401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response DeleteCustomer401JSONResponse) VisitDeleteCustomerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteCustomer403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response DeleteCustomer403JSONResponse) VisitDeleteCustomerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteCustomer404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeleteCustomer404JSONResponse) VisitDeleteCustomerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetCustomerRequestObject struct {
+	Id openapi_types.UUID `json:"id"`
+}
+
+type GetCustomerResponseObject interface {
+	VisitGetCustomerResponse(w http.ResponseWriter) error
+}
+
+type GetCustomer200JSONResponse Customer
+
+func (response GetCustomer200JSONResponse) VisitGetCustomerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetCustomer401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response GetCustomer401JSONResponse) VisitGetCustomerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetCustomer403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetCustomer403JSONResponse) VisitGetCustomerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetCustomer404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetCustomer404JSONResponse) VisitGetCustomerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateCustomerRequestObject struct {
+	Id   openapi_types.UUID `json:"id"`
+	Body *UpdateCustomerJSONRequestBody
+}
+
+type UpdateCustomerResponseObject interface {
+	VisitUpdateCustomerResponse(w http.ResponseWriter) error
+}
+
+type UpdateCustomer200JSONResponse Customer
+
+func (response UpdateCustomer200JSONResponse) VisitUpdateCustomerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateCustomer400JSONResponse struct{ ValidationFailedJSONResponse }
+
+func (response UpdateCustomer400JSONResponse) VisitUpdateCustomerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateCustomer401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response UpdateCustomer401JSONResponse) VisitUpdateCustomerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateCustomer403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response UpdateCustomer403JSONResponse) VisitUpdateCustomerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateCustomer404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response UpdateCustomer404JSONResponse) VisitUpdateCustomerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateCustomer409JSONResponse Error
+
+func (response UpdateCustomer409JSONResponse) VisitUpdateCustomerResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -5679,6 +7101,486 @@ func (response GetReadyz503JSONResponse) VisitGetReadyzResponse(w http.ResponseW
 	return err
 }
 
+type ListSalesByProductRequestObject struct {
+	Params ListSalesByProductParams
+}
+
+type ListSalesByProductResponseObject interface {
+	VisitListSalesByProductResponse(w http.ResponseWriter) error
+}
+
+type ListSalesByProduct200JSONResponse SalesByProductList
+
+func (response ListSalesByProduct200JSONResponse) VisitListSalesByProductResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSalesByProduct400JSONResponse struct{ ValidationFailedJSONResponse }
+
+func (response ListSalesByProduct400JSONResponse) VisitListSalesByProductResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSalesByProduct401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListSalesByProduct401JSONResponse) VisitListSalesByProductResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSalesByProduct403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListSalesByProduct403JSONResponse) VisitListSalesByProductResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSalesSummaryReportRequestObject struct {
+	Params GetSalesSummaryReportParams
+}
+
+type GetSalesSummaryReportResponseObject interface {
+	VisitGetSalesSummaryReportResponse(w http.ResponseWriter) error
+}
+
+type GetSalesSummaryReport200JSONResponse SalesSummaryReport
+
+func (response GetSalesSummaryReport200JSONResponse) VisitGetSalesSummaryReportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSalesSummaryReport400JSONResponse struct{ ValidationFailedJSONResponse }
+
+func (response GetSalesSummaryReport400JSONResponse) VisitGetSalesSummaryReportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSalesSummaryReport401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response GetSalesSummaryReport401JSONResponse) VisitGetSalesSummaryReportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSalesRequestObject struct {
+	Params ListSalesParams
+}
+
+type ListSalesResponseObject interface {
+	VisitListSalesResponse(w http.ResponseWriter) error
+}
+
+type ListSales200JSONResponse SaleList
+
+func (response ListSales200JSONResponse) VisitListSalesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSales401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListSales401JSONResponse) VisitListSalesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSales403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListSales403JSONResponse) VisitListSalesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSaleRequestObject struct {
+	Params CreateSaleParams
+	Body   *CreateSaleJSONRequestBody
+}
+
+type CreateSaleResponseObject interface {
+	VisitCreateSaleResponse(w http.ResponseWriter) error
+}
+
+type CreateSale201JSONResponse Sale
+
+func (response CreateSale201JSONResponse) VisitCreateSaleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSale400JSONResponse struct{ ValidationFailedJSONResponse }
+
+func (response CreateSale400JSONResponse) VisitCreateSaleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSale401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CreateSale401JSONResponse) VisitCreateSaleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSale403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response CreateSale403JSONResponse) VisitCreateSaleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSale409JSONResponse Error
+
+func (response CreateSale409JSONResponse) VisitCreateSaleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSaleRequestObject struct {
+	Id openapi_types.UUID `json:"id"`
+}
+
+type GetSaleResponseObject interface {
+	VisitGetSaleResponse(w http.ResponseWriter) error
+}
+
+type GetSale200JSONResponse Sale
+
+func (response GetSale200JSONResponse) VisitGetSaleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSale401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response GetSale401JSONResponse) VisitGetSaleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSale403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetSale403JSONResponse) VisitGetSaleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSale404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetSale404JSONResponse) VisitGetSaleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSaleReturnRequestObject struct {
+	Id     openapi_types.UUID `json:"id"`
+	Params CreateSaleReturnParams
+	Body   *CreateSaleReturnJSONRequestBody
+}
+
+type CreateSaleReturnResponseObject interface {
+	VisitCreateSaleReturnResponse(w http.ResponseWriter) error
+}
+
+type CreateSaleReturn201JSONResponse Sale
+
+func (response CreateSaleReturn201JSONResponse) VisitCreateSaleReturnResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSaleReturn400JSONResponse struct{ ValidationFailedJSONResponse }
+
+func (response CreateSaleReturn400JSONResponse) VisitCreateSaleReturnResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSaleReturn401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CreateSaleReturn401JSONResponse) VisitCreateSaleReturnResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSaleReturn403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response CreateSaleReturn403JSONResponse) VisitCreateSaleReturnResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSaleReturn404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CreateSaleReturn404JSONResponse) VisitCreateSaleReturnResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSaleReturn409JSONResponse Error
+
+func (response CreateSaleReturn409JSONResponse) VisitCreateSaleReturnResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VoidSaleRequestObject struct {
+	Id   openapi_types.UUID `json:"id"`
+	Body *VoidSaleJSONRequestBody
+}
+
+type VoidSaleResponseObject interface {
+	VisitVoidSaleResponse(w http.ResponseWriter) error
+}
+
+type VoidSale200JSONResponse Sale
+
+func (response VoidSale200JSONResponse) VisitVoidSaleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VoidSale401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response VoidSale401JSONResponse) VisitVoidSaleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VoidSale403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response VoidSale403JSONResponse) VisitVoidSaleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VoidSale404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response VoidSale404JSONResponse) VisitVoidSaleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VoidSale409JSONResponse Error
+
+func (response VoidSale409JSONResponse) VisitVoidSaleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetShopRequestObject struct {
 }
 
@@ -6977,6 +8879,21 @@ type StrictServerInterface interface {
 	// UpdateCategory Update a category.
 	// (PATCH /categories/{id})
 	UpdateCategory(ctx context.Context, request UpdateCategoryRequestObject) (UpdateCategoryResponseObject, error)
+	// ListCustomers List the shop's customers.
+	// (GET /customers)
+	ListCustomers(ctx context.Context, request ListCustomersRequestObject) (ListCustomersResponseObject, error)
+	// CreateCustomer Create a customer.
+	// (POST /customers)
+	CreateCustomer(ctx context.Context, request CreateCustomerRequestObject) (CreateCustomerResponseObject, error)
+	// DeleteCustomer Soft-delete a customer.
+	// (DELETE /customers/{id})
+	DeleteCustomer(ctx context.Context, request DeleteCustomerRequestObject) (DeleteCustomerResponseObject, error)
+	// GetCustomer Get a customer.
+	// (GET /customers/{id})
+	GetCustomer(ctx context.Context, request GetCustomerRequestObject) (GetCustomerResponseObject, error)
+	// UpdateCustomer Update a customer.
+	// (PATCH /customers/{id})
+	UpdateCustomer(ctx context.Context, request UpdateCustomerRequestObject) (UpdateCustomerResponseObject, error)
 	// GetHealthz Liveness check.
 	// (GET /healthz)
 	GetHealthz(ctx context.Context, request GetHealthzRequestObject) (GetHealthzResponseObject, error)
@@ -7046,6 +8963,27 @@ type StrictServerInterface interface {
 	// GetReadyz Readiness check.
 	// (GET /readyz)
 	GetReadyz(ctx context.Context, request GetReadyzRequestObject) (GetReadyzResponseObject, error)
+	// ListSalesByProduct Sales by product for a period.
+	// (GET /reports/sales/by-product)
+	ListSalesByProduct(ctx context.Context, request ListSalesByProductRequestObject) (ListSalesByProductResponseObject, error)
+	// GetSalesSummaryReport Sales summary for a period.
+	// (GET /reports/sales/summary)
+	GetSalesSummaryReport(ctx context.Context, request GetSalesSummaryReportRequestObject) (GetSalesSummaryReportResponseObject, error)
+	// ListSales List the shop's sales.
+	// (GET /sales)
+	ListSales(ctx context.Context, request ListSalesRequestObject) (ListSalesResponseObject, error)
+	// CreateSale Complete a quick sale.
+	// (POST /sales)
+	CreateSale(ctx context.Context, request CreateSaleRequestObject) (CreateSaleResponseObject, error)
+	// GetSale Get a sale.
+	// (GET /sales/{id})
+	GetSale(ctx context.Context, request GetSaleRequestObject) (GetSaleResponseObject, error)
+	// CreateSaleReturn Return part or all of a completed sale.
+	// (POST /sales/{id}/return)
+	CreateSaleReturn(ctx context.Context, request CreateSaleReturnRequestObject) (CreateSaleReturnResponseObject, error)
+	// VoidSale Void a completed sale.
+	// (POST /sales/{id}/void)
+	VoidSale(ctx context.Context, request VoidSaleRequestObject) (VoidSaleResponseObject, error)
 	// GetShop The current shop's settings.
 	// (GET /shop)
 	GetShop(ctx context.Context, request GetShopRequestObject) (GetShopResponseObject, error)
@@ -7498,6 +9436,148 @@ func (sh *strictHandler) UpdateCategory(w http.ResponseWriter, r *http.Request, 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(UpdateCategoryResponseObject); ok {
 		if err := validResponse.VisitUpdateCategoryResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListCustomers operation middleware
+func (sh *strictHandler) ListCustomers(w http.ResponseWriter, r *http.Request, params ListCustomersParams) {
+	var request ListCustomersRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListCustomers(ctx, request.(ListCustomersRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListCustomers")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListCustomersResponseObject); ok {
+		if err := validResponse.VisitListCustomersResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateCustomer operation middleware
+func (sh *strictHandler) CreateCustomer(w http.ResponseWriter, r *http.Request) {
+	var request CreateCustomerRequestObject
+
+	var body CreateCustomerJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateCustomer(ctx, request.(CreateCustomerRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateCustomer")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateCustomerResponseObject); ok {
+		if err := validResponse.VisitCreateCustomerResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteCustomer operation middleware
+func (sh *strictHandler) DeleteCustomer(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	var request DeleteCustomerRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteCustomer(ctx, request.(DeleteCustomerRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteCustomer")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteCustomerResponseObject); ok {
+		if err := validResponse.VisitDeleteCustomerResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetCustomer operation middleware
+func (sh *strictHandler) GetCustomer(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	var request GetCustomerRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetCustomer(ctx, request.(GetCustomerRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetCustomer")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetCustomerResponseObject); ok {
+		if err := validResponse.VisitGetCustomerResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateCustomer operation middleware
+func (sh *strictHandler) UpdateCustomer(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	var request UpdateCustomerRequestObject
+
+	request.Id = id
+
+	var body UpdateCustomerJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateCustomer(ctx, request.(UpdateCustomerRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateCustomer")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateCustomerResponseObject); ok {
+		if err := validResponse.VisitUpdateCustomerResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -8164,6 +10244,213 @@ func (sh *strictHandler) GetReadyz(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetReadyzResponseObject); ok {
 		if err := validResponse.VisitGetReadyzResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListSalesByProduct operation middleware
+func (sh *strictHandler) ListSalesByProduct(w http.ResponseWriter, r *http.Request, params ListSalesByProductParams) {
+	var request ListSalesByProductRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListSalesByProduct(ctx, request.(ListSalesByProductRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListSalesByProduct")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListSalesByProductResponseObject); ok {
+		if err := validResponse.VisitListSalesByProductResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetSalesSummaryReport operation middleware
+func (sh *strictHandler) GetSalesSummaryReport(w http.ResponseWriter, r *http.Request, params GetSalesSummaryReportParams) {
+	var request GetSalesSummaryReportRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetSalesSummaryReport(ctx, request.(GetSalesSummaryReportRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetSalesSummaryReport")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetSalesSummaryReportResponseObject); ok {
+		if err := validResponse.VisitGetSalesSummaryReportResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListSales operation middleware
+func (sh *strictHandler) ListSales(w http.ResponseWriter, r *http.Request, params ListSalesParams) {
+	var request ListSalesRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListSales(ctx, request.(ListSalesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListSales")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListSalesResponseObject); ok {
+		if err := validResponse.VisitListSalesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateSale operation middleware
+func (sh *strictHandler) CreateSale(w http.ResponseWriter, r *http.Request, params CreateSaleParams) {
+	var request CreateSaleRequestObject
+
+	request.Params = params
+
+	var body CreateSaleJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateSale(ctx, request.(CreateSaleRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateSale")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateSaleResponseObject); ok {
+		if err := validResponse.VisitCreateSaleResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetSale operation middleware
+func (sh *strictHandler) GetSale(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	var request GetSaleRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetSale(ctx, request.(GetSaleRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetSale")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetSaleResponseObject); ok {
+		if err := validResponse.VisitGetSaleResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateSaleReturn operation middleware
+func (sh *strictHandler) CreateSaleReturn(w http.ResponseWriter, r *http.Request, id openapi_types.UUID, params CreateSaleReturnParams) {
+	var request CreateSaleReturnRequestObject
+
+	request.Id = id
+	request.Params = params
+
+	var body CreateSaleReturnJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateSaleReturn(ctx, request.(CreateSaleReturnRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateSaleReturn")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateSaleReturnResponseObject); ok {
+		if err := validResponse.VisitCreateSaleReturnResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// VoidSale operation middleware
+func (sh *strictHandler) VoidSale(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	var request VoidSaleRequestObject
+
+	request.Id = id
+
+	var body VoidSaleJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		if !errors.Is(err, io.EOF) {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+	} else {
+		request.Body = &body
+	}
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.VoidSale(ctx, request.(VoidSaleRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "VoidSale")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(VoidSaleResponseObject); ok {
+		if err := validResponse.VisitVoidSaleResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
