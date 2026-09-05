@@ -102,6 +102,8 @@ const (
 	RETURNEXCEEDSSOLD        ErrorCode = "RETURN_EXCEEDS_SOLD"
 	SALEALREADYVOIDED        ErrorCode = "SALE_ALREADY_VOIDED"
 	SALEHASRETURNS           ErrorCode = "SALE_HAS_RETURNS"
+	SALENOTRETURNABLE        ErrorCode = "SALE_NOT_RETURNABLE"
+	SALENOTVOIDABLE          ErrorCode = "SALE_NOT_VOIDABLE"
 	SALEVOIDWINDOWCLOSED     ErrorCode = "SALE_VOID_WINDOW_CLOSED"
 	SAMELOCATION             ErrorCode = "SAME_LOCATION"
 	STOCKINSUFFICIENT        ErrorCode = "STOCK_INSUFFICIENT"
@@ -137,6 +139,10 @@ func (e ErrorCode) Valid() bool {
 	case SALEALREADYVOIDED:
 		return true
 	case SALEHASRETURNS:
+		return true
+	case SALENOTRETURNABLE:
+		return true
+	case SALENOTVOIDABLE:
 		return true
 	case SALEVOIDWINDOWCLOSED:
 		return true
@@ -1017,7 +1023,7 @@ type SaleItem struct {
 	// UnitCost Present only when the caller has the `cost.read` permission; absent (not null) otherwise (ADR-010, D-63).
 	UnitCost *Decimal `json:"unitCost,omitempty"`
 
-	// UnitPrice The price actually charged for this line. On a return, the effective refunded unit price (D-61).
+	// UnitPrice The price actually charged for this line. On a return, the effective refunded unit price (D-61) — `qty * unitPrice` may differ from `lineTotal` by a rounding cent; `lineTotal` is authoritative.
 	UnitPrice    Decimal            `json:"unitPrice"`
 	VariantId    openapi_types.UUID `json:"variantId"`
 	VariantLabel string             `json:"variantLabel"`

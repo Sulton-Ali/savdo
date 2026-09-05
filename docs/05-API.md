@@ -34,7 +34,8 @@ Base path `/v1`. JSON only. Server: Go, `api/cmd/api`, port 8080 behind Caddy.
   HTTP status by class: `400 VALIDATION_FAILED` (with `details.fields`), `401
   UNAUTHENTICATED`, `403 FORBIDDEN`, `404 NOT_FOUND`, `409` for state conflicts
   (`STOCK_INSUFFICIENT`, `SALE_ALREADY_VOIDED`, `PURCHASE_ALREADY_RECEIVED`,
-  `SALE_VOID_WINDOW_CLOSED`, `SALE_HAS_RETURNS`, `SALE_NOT_VOIDABLE`, `RETURN_EXCEEDS_SOLD`,
+  `SALE_VOID_WINDOW_CLOSED`, `SALE_HAS_RETURNS`, `SALE_NOT_VOIDABLE`,
+  `SALE_NOT_RETURNABLE`, `RETURN_EXCEEDS_SOLD`,
   `DISCOUNT_EXCEEDS_SUBTOTAL`, `DUPLICATE_SKU`, …), `429 RATE_LIMITED`, `500
   INTERNAL`. The full enum lives in the spec under `components.schemas.ErrorCode`;
   adding a code means adding it there.

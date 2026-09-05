@@ -2055,7 +2055,8 @@ paths:
             `409 SALE_ALREADY_VOIDED` when the sale is already voided;
             `409 SALE_VOID_WINDOW_CLOSED` once its calendar day has
             passed in the shop timezone (D-59); `409 SALE_HAS_RETURNS`
-            when a return already references this sale (D-62).
+            when a return already references this sale (D-62); `409
+            SALE_NOT_VOIDABLE` when the sale is itself a return (D-66).
           content:
             application/json:
               schema:
@@ -2112,8 +2113,11 @@ paths:
             `409 RETURN_EXCEEDS_SOLD details.saleItemId` when a line's
             returned quantity would exceed sold minus already returned;
             `409 SALE_ALREADY_VOIDED` when the original sale is voided;
-            `409 IDEMPOTENCY_KEY_REUSED` when the same key was already
-            used for a different request.
+            `409 SALE_NOT_RETURNABLE` when the target sale is a return
+            (D-66); `409 IDEMPOTENCY_KEY_REUSED` when the same key was
+            already used for a different request; `409 CONFLICT
+            details.reason: "deadlock"` when a concurrent write could not
+            be serialized — safe to retry.
           content:
             application/json:
               schema:
@@ -2290,6 +2294,8 @@ components:
         - SALE_ALREADY_VOIDED
         - SALE_VOID_WINDOW_CLOSED
         - SALE_HAS_RETURNS
+        - SALE_NOT_VOIDABLE
+        - SALE_NOT_RETURNABLE
         - RETURN_EXCEEDS_SOLD
 
     Error:
@@ -4085,7 +4091,9 @@ components:
           $ref: "#/components/schemas/Decimal"
           description: >
             The price actually charged for this line. On a return, the
-            effective refunded unit price (D-61).
+            effective refunded unit price (D-61) — `qty * unitPrice` may
+            differ from `lineTotal` by a rounding cent; `lineTotal` is
+            authoritative.
         lineTotal:
           $ref: "#/components/schemas/Decimal"
         returnedQty:
