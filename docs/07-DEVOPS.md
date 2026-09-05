@@ -40,6 +40,105 @@ Phase 3 (D-49): `make seed` then creates three suppliers and opening stock throu
 
 `cd api && go run ./cmd/savdo stock rebuild --shop-slug savdo-demo` recomputes `stock_levels` from `stock_movements` for one shop inside a single transaction under a shop-scoped advisory lock (ADR-006). The flag is required. Stop the API (or make sure nothing writes stock) while it runs: a concurrent movement blocks on the rebuild or makes it abort with a unique violation; levels are never silently overwritten. Prints movement and level counts.
 
+## Android build and install (Phase 5)
+
+D-72: the release APK is built locally with Expo prebuild + Gradle, no EAS cloud, no Expo
+account. Signed with the Gradle/Android default **debug keystore** for now — this is not
+a store-distributable artifact, only a local install for testing on the owner's phone or
+an emulator.
+
+### Prerequisites (dev machine only, not in `make verify`)
+
+- Android SDK at `$ANDROID_HOME` (e.g. `~/Android/Sdk`) with: command-line tools,
+  `platform-tools`, `platforms;android-36`, `build-tools;36.0.0`, `ndk;27.1.12297006`,
+  `cmake;3.22.1`, `emulator`, a system image if you want an emulator
+  (`system-images;android-36;google_apis;x86_64`). These match React Native 0.86.3's pins
+  (compileSdk 36, buildTools 36.0.0, NDK 27.1.12297006, minSdk 24, AGP 8.12).
+- JDK 21 (Temurin). `JAVA_HOME` must point at it.
+- Environment (add to your shell profile):
+  ```bash
+  export ANDROID_HOME="$HOME/Android/Sdk"
+  export ANDROID_SDK_ROOT="$ANDROID_HOME"
+  export PATH="$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator"
+  export JAVA_HOME="$HOME/.sdkman/candidates/java/current"   # or wherever your JDK 21 lives
+  ```
+- No Android Studio needed. The Gradle wrapper downloads Gradle itself on first run
+  (needs network once).
+
+### Build commands
+
+```bash
+pnpm --filter mobile android:release       # expo prebuild --platform android (regenerates mobile/android/, gitignored)
+                                            # then ./gradlew assembleRelease inside it
+```
+
+This is a `prebuild` + `gradlew assembleRelease` pair rather than `expo run:android
+--variant release`, because `run:android` requires a connected device or emulator to pick
+a target; `assembleRelease` alone produces the APK without one. If a device is already
+connected/booted, `pnpm --filter mobile android:run-release` (`expo run:android --variant
+release`) also works and additionally installs and launches it.
+
+The APK lands at `mobile/android/app/build/outputs/apk/release/app-release.apk`. Neither
+`mobile/android/` (regenerated every prebuild, gitignored) nor the APK is committed.
+
+**Known issue (found 2026-09-05, not fixed in this task — needs an owner decision):** the
+Gradle-invoked JS bundling step (`:app:createBundleReleaseJsAndAssets`, which runs the
+Expo CLI's internal `export:embed` command) reproducibly fails in this pnpm workspace with
+`Cannot find module '@babel/plugin-transform-react-jsx'`, while the equivalent
+`pnpm --filter mobile export:android` (`expo export --platform android`, our `make verify`
+and CI check) reliably succeeds using the exact same babel config. Root cause: `nativewind/babel`
+(via `react-native-css-interop@0.2.6`'s `babel.js`) declares `"@babel/plugin-transform-react-jsx"`
+as a plugin **by string name** without listing it as `react-native-css-interop`'s own
+dependency; under pnpm's strict, non-hoisted `node_modules`, Babel's string-based plugin
+resolution can only find it once it's hoisted into a package that resolves in that lookup
+chain, and the CLI's `export` and `export:embed` commands hit this resolution in a way that
+happens to differ in this workspace layout. Confirmed fix (validated locally, then reverted
+— it is a new dependency and needs approval per the hard rule): add
+`@babel/plugin-transform-react-jsx` (exact version already resolved transitively at build
+time, currently `7.29.7` — check `pnpm why @babel/plugin-transform-react-jsx` for the
+current one) as a `mobile` devDependency, which makes pnpm symlink it directly into
+`mobile/node_modules/@babel/`. No new supply-chain surface — the package is already locked
+and used transitively via `babel-preset-expo`. Until this is approved and added, a local
+release build may need a retry or two, or fails outright on some machines; `export:android`
+(the `make verify`/CI gate) is unaffected.
+
+### Install on a phone over USB (owner's workflow)
+
+```bash
+adb devices                 # phone must show up as "device", not "unauthorized"
+adb install -r mobile/android/app/build/outputs/apk/release/app-release.apk
+```
+
+On Arch Linux, USB device access needs the udev rules and group membership (owner runs
+this once): `sudo pacman -S android-udev && sudo usermod -aG adbusers $USER`, then
+re-plug the phone and accept the "Allow USB debugging" prompt on it.
+
+### Reaching the dev API from the phone
+
+The app's login screen has an editable server URL (D-79), prefilled from
+`EXPO_PUBLIC_API_URL` at build time and remembered on the device; plain `http://` is only
+accepted for loopback/private hosts, cleartext is enabled for this in the APK (D-81/D-82).
+
+- **Cable-first (recommended):** with the phone plugged in and the API running on the dev
+  machine (`make api`, `:8080`), run `adb reverse tcp:8080 tcp:8080` so the phone's
+  `127.0.0.1:8080` reaches the dev machine's API. Set the server URL on the login screen to
+  `http://127.0.0.1:8080/v1`.
+- **Wi-Fi:** the API listens on all interfaces, so `http://<dev-machine-LAN-IP>:8080/v1`
+  also works as long as the phone and dev machine are on the same network.
+- Either way, product images need `MEDIA_DIR` to resolve from the same API instance the
+  phone talks to — see § Shared local services above if you're running multiple worktrees.
+
+### Emulator alternative
+
+```bash
+emulator -avd savdo36 -memory 1536
+```
+
+then install the same APK with `adb install -r ...`. On the emulator, the server URL is
+`http://10.0.2.2:8080/v1` (the emulator's alias for the host's `localhost`). **Only one
+emulator instance at a time** on the dev machine — it's heavy (CPU/RAM) and multiple
+agents/tasks share the same machine; coordinate before booting one.
+
 ## Environment variables
 
 The API loads all of these via `config.Load()`. `savdo migrate` reads only
@@ -177,7 +276,7 @@ trailer).
 
 ## CI (GitHub Actions)
 
-- `ci.yml`: on PR and push to `main` — `make dev-infra && make verify`, then `pnpm -r build` and the Expo Android export, on `ubuntu-latest` (Docker preinstalled). Playwright e2e is added in Phase 6.
+- `ci.yml`: on PR and push to `main` — `make dev-infra && make verify`, then `pnpm -r build` and `pnpm --filter mobile export:android` (the Expo Android JS export only — no Gradle, no Android SDK; the Gradle release APK build is local-only per D-72), on `ubuntu-latest` (Docker preinstalled). Playwright e2e is added in Phase 6.
 - `deploy.yml` (Phase 8): on push to `main` — build images, `ssh` to the VPS, `docker
   compose pull && up -d` with migrations run by a one-shot container before `api` starts.
   A push to `main` after Phase 8 is a production deploy and an **owner decision**.

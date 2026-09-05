@@ -92,6 +92,7 @@ pattern; revisit if bundle size becomes a landing performance issue.
 | react-hook-form | 7.87.0 | Login form validation (D-76, no zod); verified 2026-09-05 |
 | openapi-fetch | 0.17.0 | Direct dependency (was transitive via `@savdo/api-client`): `lib/api.ts` imports `mergeHeaders`/`HeadersOptions` directly for D-79's per-request base URL; same pin as `packages/api-client` workspace-wide |
 | Android build | local | `expo prebuild` + Gradle release build on the dev machine, no EAS cloud (D-72); Android SDK + JDK prerequisites in `07-DEVOPS.md`; `expo-secure-store` for the session token |
+| expo-build-properties | 57.0.17 | Official config plugin, config-only (D-82): sets `android.usesCleartextTraffic` so the D-81 local-`http://` case works in the release build; verified 2026-09-05 |
 | Tests | Vitest (workspace) | Pure, RN-free modules under `mobile/src/lib` and `mobile/src/features/**` (reducers, validators, period/pricing/form helpers; D-85 amended); no jest-expo, no e2e (D-73/D-74) |
 
 ## Infrastructure
