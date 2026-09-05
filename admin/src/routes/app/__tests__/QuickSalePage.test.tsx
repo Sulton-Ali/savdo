@@ -321,56 +321,71 @@ describe("QuickSalePage", () => {
     expect(screen.getByText("Total: 15,000")).toBeTruthy();
   });
 
-  it("posts a SaleCreate with variantId/qty strings and no price fields, keeps the Idempotency-Key stable across a retry, and issues a new one after success", async () => {
-    mockCommonEndpoints();
-    renderPage();
+  // This test runs two full add-to-cart-and-submit cycles (each with its
+  // own 300ms search debounce and dropdown interactions) plus three
+  // `POST /sales` round trips, so it is the heaviest test in this file —
+  // under the same CPU contention that already pushed the suite's default
+  // per-test timeout from 5s to 15s (`vite.config.ts`), its own cumulative
+  // wall-clock time occasionally passed 15s and failed with "Test timed
+  // out" even though every individual step still resolved (observed via a
+  // 20x loaded repro loop, T10). Nothing here was actually hung — the fix
+  // is headroom, not a different assertion.
+  const HEAVY_TEST_TIMEOUT_MS = 30_000;
 
-    fireEvent.mouseDown(await screen.findByLabelText("Location"));
-    fireEvent.click(await screen.findByText("Main store"));
+  it(
+    "posts a SaleCreate with variantId/qty strings and no price fields, keeps the Idempotency-Key stable across a retry, and issues a new one after success",
+    async () => {
+      mockCommonEndpoints();
+      renderPage();
 
-    await addShirtToCart("2");
+      fireEvent.mouseDown(await screen.findByLabelText("Location"));
+      fireEvent.click(await screen.findByText("Main store"));
 
-    mockedApi.POST.mockResolvedValueOnce(apiError("INTERNAL", {}, 500));
-    mockedApi.POST.mockResolvedValueOnce(apiResult(completedSale(), 201));
+      await addShirtToCart("2");
 
-    fireEvent.click(screen.getByRole("button", { name: "Complete sale" }));
+      mockedApi.POST.mockResolvedValueOnce(apiError("INTERNAL", {}, 500));
+      mockedApi.POST.mockResolvedValueOnce(apiResult(completedSale(), 201));
 
-    await waitFor(() => expect(mockedApi.POST).toHaveBeenCalledTimes(1));
-    expect(mockedApi.POST.mock.calls[0]?.[0]).toBe("/sales");
-    expect(postCallOf(0)).toMatchObject({
-      body: {
-        locationId: "loc1",
-        items: [{ variantId: "var1", qty: "2" }],
-        payment: { method: "cash" },
-      },
-    });
-    const firstCallBody = postCallOf(0).body;
-    expect(firstCallBody.discount).toBeUndefined();
-    expect(firstCallBody.customerId).toBeUndefined();
-    expect(firstCallBody.items).toEqual([{ variantId: "var1", qty: "2" }]);
-    const firstKey = idempotencyKeyOf(0);
-    expect(firstKey).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: "Complete sale" }));
 
-    // Retry the same cart — same key.
-    fireEvent.click(screen.getByRole("button", { name: "Complete sale" }));
-    await waitFor(() => expect(mockedApi.POST).toHaveBeenCalledTimes(2));
-    expect(idempotencyKeyOf(1)).toBe(firstKey);
+      await waitFor(() => expect(mockedApi.POST).toHaveBeenCalledTimes(1));
+      expect(mockedApi.POST.mock.calls[0]?.[0]).toBe("/sales");
+      expect(postCallOf(0)).toMatchObject({
+        body: {
+          locationId: "loc1",
+          items: [{ variantId: "var1", qty: "2" }],
+          payment: { method: "cash" },
+        },
+      });
+      const firstCallBody = postCallOf(0).body;
+      expect(firstCallBody.discount).toBeUndefined();
+      expect(firstCallBody.customerId).toBeUndefined();
+      expect(firstCallBody.items).toEqual([{ variantId: "var1", qty: "2" }]);
+      const firstKey = idempotencyKeyOf(0);
+      expect(firstKey).toBeTruthy();
 
-    // Now the sale completed — start a new sale and submit again. The
-    // location is remembered, not reset by a successful sale, so there is
-    // no need to re-pick it.
-    await screen.findByText("Sale completed");
-    fireEvent.click(screen.getByRole("button", { name: "New sale" }));
+      // Retry the same cart — same key.
+      fireEvent.click(screen.getByRole("button", { name: "Complete sale" }));
+      await waitFor(() => expect(mockedApi.POST).toHaveBeenCalledTimes(2));
+      expect(idempotencyKeyOf(1)).toBe(firstKey);
 
-    await addShirtToCart("1");
+      // Now the sale completed — start a new sale and submit again. The
+      // location is remembered, not reset by a successful sale, so there is
+      // no need to re-pick it.
+      await screen.findByText("Sale completed");
+      fireEvent.click(screen.getByRole("button", { name: "New sale" }));
 
-    mockedApi.POST.mockResolvedValueOnce(apiResult({ ...completedSale(), number: 43 }, 201));
-    fireEvent.click(screen.getByRole("button", { name: "Complete sale" }));
+      await addShirtToCart("1");
 
-    await waitFor(() => expect(mockedApi.POST).toHaveBeenCalledTimes(3));
-    const thirdKey = idempotencyKeyOf(2);
-    expect(thirdKey).not.toBe(firstKey);
-  });
+      mockedApi.POST.mockResolvedValueOnce(apiResult({ ...completedSale(), number: 43 }, 201));
+      fireEvent.click(screen.getByRole("button", { name: "Complete sale" }));
+
+      await waitFor(() => expect(mockedApi.POST).toHaveBeenCalledTimes(3));
+      const thirdKey = idempotencyKeyOf(2);
+      expect(thirdKey).not.toBe(firstKey);
+    },
+    HEAVY_TEST_TIMEOUT_MS,
+  );
 
   it("sends discount and customerId only when set", async () => {
     mockCommonEndpoints();
