@@ -72,7 +72,7 @@ fi
 fetch_hits=""
 for dir in admin/src web/src mobile/src; do
   if [ -d "$dir" ]; then
-    hits="$(grep -rnE 'fetch\(' "$dir" 2>/dev/null | grep -v 'packages/api-client' || true)"
+    hits="$(grep -rnE '(^|[^A-Za-z0-9_])fetch\(' "$dir" 2>/dev/null | grep -v 'packages/api-client' || true)"
     if [ -n "$hits" ]; then
       fetch_hits="$fetch_hits
 $hits"
