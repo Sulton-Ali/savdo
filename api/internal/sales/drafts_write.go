@@ -2,7 +2,7 @@ package sales
 
 // This file: POST /sales/drafts, PATCH /sales/drafts/{id},
 // DELETE /sales/drafts/{id} and POST /sales/drafts/{id}/complete
-// (docs/00-DECISIONS.md D-87..D-89; docs/04-DATA-MODEL.md § 4;
+// (docs/00-DECISIONS.md D-87..D-89, D-96; docs/04-DATA-MODEL.md § 4;
 // ADR-006/007/010/013/014). Every method here is a plain
 // (result, error) method taking the caller's own transaction (qtx) —
 // sales.Handler has no pool of its own (service.go's own doc comment),
@@ -19,10 +19,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/oapi-codegen/nullable"
 	"github.com/shopspring/decimal"
 
 	"github.com/Sulton-Ali/savdo/api/gen"
@@ -37,7 +39,11 @@ import (
 // discountAmount check does (409 DISCOUNT_EXCEEDS_SUBTOTAL, D-57), and
 // returns the discount_type/discount_value pair CreateSaleDraft's own
 // INSERT stores. A nil discount returns (nil, zero-value, nil) — no
-// discount at all.
+// discount at all. Unlike SaleDraftPatch's discountType/discountValue
+// (resolveDraftDiscountPatch below), SaleDraftCreate.discount is always
+// an atomic `{type, value}` object or absent entirely (contracts/
+// openapi.yaml's SaleDiscount schema), so there is no partial-pair case
+// to validate here.
 func resolveNewDiscount(discount *gen.SaleDiscount, subtotal decimal.Decimal) (*db.DiscountType, pgtype.Numeric, error) {
 	if discount == nil {
 		return nil, pgtype.Numeric{}, nil
@@ -128,7 +134,7 @@ func (h *Handler) CreateSaleDraftTx(ctx context.Context, qtx *db.Queries, body *
 
 	for i, l := range lines {
 		if _, err := qtx.InsertSaleDraftItem(ctx, db.InsertSaleDraftItemParams{
-			ID: newID(), ShopID: authCtx.ShopID, DraftID: draft.ID, VariantID: l.variantID,
+			ID: newID(), ShopID: authCtx.ShopID, SaleDraftID: draft.ID, VariantID: l.variantID,
 			Qty: money.ToNumeric(l.qty), Position: int32(i),
 		}); err != nil {
 			return gen.SaleDraft{}, fmt.Errorf("sales: insert sale draft item: %w", err)
@@ -139,7 +145,86 @@ func (h *Handler) CreateSaleDraftTx(ctx context.Context, qtx *db.Queries, body *
 	if err != nil {
 		return gen.SaleDraft{}, fmt.Errorf("sales: list attribute definitions: %w", err)
 	}
-	return h.buildSaleDraftResponse(ctx, qtx, authCtx.ShopID, draft, now, loc, locale, defs)
+	return buildSaleDraftResponse(ctx, qtx, authCtx.ShopID, draft, now, loc, locale, defs)
+}
+
+// draftDiscountPatch is resolveDraftDiscountPatch's own result: the
+// fully-merged discount_type/discount_value pair a PATCH should leave
+// stored, already validated against the D-52 "one concept" invariant
+// (sale_drafts' own CHECK: both null or both set) — so the caller passes
+// it to UpdateSaleDraft's ClearDiscount/DiscountType/DiscountValue
+// params directly, never relying on that query's own COALESCE-with-
+// current fallback to resolve an inconsistent pair (review MAJOR: that
+// fallback alone let a lone discountType or discountValue reach the
+// UPDATE and surface as an opaque 500 SQLSTATE 23514 instead of a 400).
+// touched is false when the request named neither discountType nor
+// discountValue at all — the caller must then leave the discount
+// entirely alone, including skipping the post-write
+// DISCOUNT_EXCEEDS_SUBTOTAL re-check (review MINOR: a note-only PATCH
+// must succeed even when the already-stored discount has since gone
+// stale against the current subtotal).
+type draftDiscountPatch struct {
+	touched bool
+	clear   bool
+	typ     *db.DiscountType
+	value   pgtype.Numeric
+}
+
+// resolveDraftDiscountPatch merges SaleDraftPatch's discountType/
+// discountValue against current's already-stored pair: an unspecified
+// field keeps current's own value, an explicit `null` clears that half,
+// a real value sets it — then requires the resulting pair to be either
+// both null (clear) or both set (a valid discount), the same invariant
+// sale_drafts' CHECK constraint enforces, but checked here, before any
+// UPDATE runs, so a lone discountType or discountValue — with or without
+// the other explicitly nulled, e.g. `{"discountType":null,
+// "discountValue":"100.00"}` — is a 400 VALIDATION_FAILED naming
+// whichever half is missing, never a raw constraint-violation 500
+// (review MAJOR).
+func resolveDraftDiscountPatch(typeField, valueField nullable.Nullable[string], current db.SaleDraft) (draftDiscountPatch, error) {
+	typeSet := optionalString(typeField)
+	valueSet := optionalString(valueField)
+	if typeSet == nil && valueSet == nil {
+		return draftDiscountPatch{touched: false}, nil
+	}
+
+	finalType := current.DiscountType
+	if typeSet != nil {
+		if *typeSet == nil {
+			finalType = nil
+		} else {
+			t := db.DiscountType(**typeSet)
+			if t != db.DiscountTypePercent && t != db.DiscountTypeFixed {
+				return draftDiscountPatch{}, apierr.Validation(map[string]string{"discountType": "invalid"})
+			}
+			finalType = &t
+		}
+	}
+
+	finalValue := current.DiscountValue
+	finalValueSet := current.DiscountValue.Valid
+	if valueSet != nil {
+		if *valueSet == nil {
+			finalValue = pgtype.Numeric{}
+			finalValueSet = false
+		} else {
+			v, apiErr := money.ParseAmount(**valueSet)
+			if apiErr != nil {
+				return draftDiscountPatch{}, apierr.Validation(map[string]string{"discountValue": "invalid"})
+			}
+			finalValue = money.ToNumeric(v)
+			finalValueSet = true
+		}
+	}
+
+	if (finalType == nil) != !finalValueSet {
+		if finalType == nil {
+			return draftDiscountPatch{}, apierr.Validation(map[string]string{"discountType": "required"})
+		}
+		return draftDiscountPatch{}, apierr.Validation(map[string]string{"discountValue": "required"})
+	}
+
+	return draftDiscountPatch{touched: true, clear: finalType == nil, typ: finalType, value: finalValue}, nil
 }
 
 // UpdateSaleDraftTx edits a draft (PATCH /sales/drafts/{id}, D-87).
@@ -150,18 +235,16 @@ func (h *Handler) CreateSaleDraftTx(ctx context.Context, qtx *db.Queries, body *
 // (delete + insert, the same pattern stock.UpdatePurchase's own item
 // replace uses). `customerId`/`discountReason`/`note` are D-35 nullable
 // (optionalUUID/optionalString, drafts.go); `discountType`/
-// `discountValue` clear together as a pair on an explicit `null` on
-// either one (UpdateSaleDraftParams' own ClearDiscount flag) — the same
-// rule ProductPatch's promo fields already use, docs/05-API.md's promo
-// bullet. Whatever the UPDATE actually leaves stored (via its own
-// COALESCE-with-current logic, sale_drafts.sql's own doc comment) is
-// re-validated against the (possibly just-replaced) items' subtotal the
-// same way CreateSaleDraftTx validates a brand new one (409
-// DISCOUNT_EXCEEDS_SUBTOTAL, D-57) — checked after the write so the
-// discount actually being validated is the merged one, not a
-// hand-replicated guess at COALESCE's own result; a violation still rolls
-// the whole transaction back, since httpx/sales.go only commits when this
-// method returns no error.
+// `discountValue` are merged and validated as one pair by
+// resolveDraftDiscountPatch before the UPDATE ever runs (review MAJOR).
+// The resulting discount (only when `items` or the discount itself was
+// touched — review MINOR, a PATCH touching neither leaves a stale
+// discount alone rather than re-validating it) is checked against the
+// (possibly just-replaced) items' subtotal the same way
+// CreateSaleDraftTx validates a brand new one (409
+// DISCOUNT_EXCEEDS_SUBTOTAL, D-57); a violation still rolls the whole
+// transaction back, since httpx/sales.go only commits when this method
+// returns no error.
 func (h *Handler) UpdateSaleDraftTx(ctx context.Context, qtx *db.Queries, id uuid.UUID, body *gen.SaleDraftPatch) (gen.SaleDraft, error) {
 	authCtx, ok := auth.FromContext(ctx)
 	if !ok {
@@ -226,26 +309,34 @@ func (h *Handler) UpdateSaleDraftTx(ctx context.Context, qtx *db.Queries, id uui
 		}
 	}
 
-	// subtotal to validate the resulting discount against: the
-	// newly-submitted items when items is being replaced, else the
-	// currently-stored ones repriced at this instant (priceDraftItems) —
-	// same D-67 rule either way.
+	discountPatch, err := resolveDraftDiscountPatch(body.DiscountType, body.DiscountValue, current)
+	if err != nil {
+		return gen.SaleDraft{}, err
+	}
+
+	// subtotal to validate the resulting discount against — only
+	// computed when there is something to validate (replaceItems or the
+	// discount itself was touched, review MINOR): the newly-submitted
+	// items when items is being replaced, else the currently-stored ones
+	// repriced at this instant (priceDraftItemsBatch), same D-67 rule
+	// either way. A PATCH touching neither skips this entirely — no
+	// pricing lookups, no discount re-check — so it can never fail over
+	// an already-stale discount it did not itself introduce.
+	needsDiscountCheck := replaceItems || discountPatch.touched
 	subtotal := decimal.Zero
-	if replaceItems {
-		for _, l := range newItems {
-			subtotal = subtotal.Add(l.lineTotal)
-		}
-	} else {
-		existingRows, err := qtx.ListSaleDraftItems(ctx, db.ListSaleDraftItemsParams{ShopID: authCtx.ShopID, DraftID: id})
-		if err != nil {
-			return gen.SaleDraft{}, fmt.Errorf("sales: list sale draft items: %w", err)
-		}
-		priced, err := priceDraftItems(ctx, qtx, authCtx.ShopID, existingRows, defs, locale, now, loc)
-		if err != nil {
-			return gen.SaleDraft{}, err
-		}
-		for _, l := range priced {
-			subtotal = subtotal.Add(l.lineTotal)
+	if needsDiscountCheck {
+		if replaceItems {
+			for _, l := range newItems {
+				subtotal = subtotal.Add(l.lineTotal)
+			}
+		} else {
+			byDraft, err := priceDraftItemsBatch(ctx, qtx, authCtx.ShopID, []uuid.UUID{id}, locale, now, loc, defs)
+			if err != nil {
+				return gen.SaleDraft{}, err
+			}
+			for _, l := range byDraft[id] {
+				subtotal = subtotal.Add(l.lineTotal)
+			}
 		}
 	}
 
@@ -254,26 +345,10 @@ func (h *Handler) UpdateSaleDraftTx(ctx context.Context, qtx *db.Queries, id uui
 		params.ClearCustomer = *customerField == nil
 		params.CustomerID = *customerField
 	}
-
-	discountTypeField := optionalString(body.DiscountType)
-	discountValueField := optionalString(body.DiscountValue)
-	clearDiscount := (discountTypeField != nil && *discountTypeField == nil) || (discountValueField != nil && *discountValueField == nil)
-	params.ClearDiscount = clearDiscount
-	if !clearDiscount {
-		if discountTypeField != nil && *discountTypeField != nil {
-			t := db.DiscountType(**discountTypeField)
-			if t != db.DiscountTypePercent && t != db.DiscountTypeFixed {
-				return gen.SaleDraft{}, apierr.Validation(map[string]string{"discountType": "invalid"})
-			}
-			params.DiscountType = &t
-		}
-		if discountValueField != nil && *discountValueField != nil {
-			v, apiErr := money.ParseAmount(**discountValueField)
-			if apiErr != nil {
-				return gen.SaleDraft{}, apiErr
-			}
-			params.DiscountValue = money.ToNumeric(v)
-		}
+	if discountPatch.touched {
+		params.ClearDiscount = discountPatch.clear
+		params.DiscountType = discountPatch.typ
+		params.DiscountValue = discountPatch.value
 	}
 
 	discountReasonField := optionalString(body.DiscountReason)
@@ -293,12 +368,12 @@ func (h *Handler) UpdateSaleDraftTx(ctx context.Context, qtx *db.Queries, id uui
 	}
 
 	if replaceItems {
-		if _, err := qtx.DeleteSaleDraftItems(ctx, db.DeleteSaleDraftItemsParams{ShopID: authCtx.ShopID, DraftID: id}); err != nil {
+		if _, err := qtx.DeleteSaleDraftItems(ctx, db.DeleteSaleDraftItemsParams{ShopID: authCtx.ShopID, SaleDraftID: id}); err != nil {
 			return gen.SaleDraft{}, fmt.Errorf("sales: delete sale draft items: %w", err)
 		}
 		for i, l := range newItems {
 			if _, err := qtx.InsertSaleDraftItem(ctx, db.InsertSaleDraftItemParams{
-				ID: newID(), ShopID: authCtx.ShopID, DraftID: id, VariantID: l.variantID,
+				ID: newID(), ShopID: authCtx.ShopID, SaleDraftID: id, VariantID: l.variantID,
 				Qty: money.ToNumeric(l.qty), Position: int32(i),
 			}); err != nil {
 				return gen.SaleDraft{}, fmt.Errorf("sales: insert sale draft item: %w", err)
@@ -306,7 +381,7 @@ func (h *Handler) UpdateSaleDraftTx(ctx context.Context, qtx *db.Queries, id uui
 		}
 	}
 
-	if updated.DiscountType != nil {
+	if needsDiscountCheck && updated.DiscountType != nil {
 		disc, err := draftDiscountFromRow(updated.DiscountType, updated.DiscountValue)
 		if err != nil {
 			return gen.SaleDraft{}, err
@@ -320,7 +395,7 @@ func (h *Handler) UpdateSaleDraftTx(ctx context.Context, qtx *db.Queries, id uui
 		}
 	}
 
-	return h.buildSaleDraftResponse(ctx, qtx, authCtx.ShopID, updated, now, loc, locale, defs)
+	return buildSaleDraftResponse(ctx, qtx, authCtx.ShopID, updated, now, loc, locale, defs)
 }
 
 // DeleteSaleDraftTx deletes a draft (DELETE /sales/drafts/{id}, D-89):
@@ -355,26 +430,52 @@ func (h *Handler) DeleteSaleDraftTx(ctx context.Context, qtx *db.Queries, id uui
 	return nil
 }
 
+// errDraftLineUnavailable builds a 422 VALIDATION_FAILED naming every
+// unavailable line by its index in the request-equivalent items array
+// (`items[<i>].variantId: invalid`) — the same `details.fields`
+// convention `apierr.Validation`'s 400 uses, docs/05-API.md § Conventions
+// (O-12 vocabulary), but at 422: the request itself is well-formed, it
+// is the draft's current state (a line's variant or product having gone
+// inactive or soft-deleted since it was added) that cannot be processed
+// (docs/05-API.md § Conventions' 422 bullet, review CRITICAL/D-88 — "the
+// client shows which line and lets the user edit the draft").
+func errDraftLineUnavailable(fields map[string]string) *apierr.Error {
+	return &apierr.Error{Status: http.StatusUnprocessableEntity, Code: gen.VALIDATIONFAILED, Details: map[string]any{"fields": fields}}
+}
+
 // CompleteSaleDraftTx completes draftID (POST
-// /sales/drafts/{id}/complete, D-87): locks the draft
+// /sales/drafts/{id}/complete, D-87, D-96): locks the draft
 // (GetSaleDraftForUpdate) against a concurrent second completion or
-// edit, builds an equivalent SaleCreate from its stored
-// location/customer/discount/note/lines and the request's
-// paymentMethod, and hands it to CreateSaleTx (create.go) completely
-// unchanged — the same server-side price/stock/discount recomputation a
-// real `POST /sales` performs (D-56/D-67), including its own 409
-// STOCK_INSUFFICIENT/DISCOUNT_EXCEEDS_SUBTOTAL checks (D-88's "the
-// client shows which line and lets the user edit" is exactly
-// CreateSaleTx's own existing error shape, reused verbatim rather than
-// reimplemented) — then deletes the draft (cascading its items) in the
-// same transaction, so a completion and its draft's disappearance are
-// atomic: a failed CreateSaleTx call returns before the delete ever
-// runs, and any error from either step rolls the whole transaction back
-// (httpx/sales.go only commits — and only stores the Idempotency-Key
-// row — once this method returns no error), so the draft is left
-// intact and no sale exists on any failure path. Requires sales.create,
-// the same as CreateSaleTx — any staff who may create a sale may
-// complete any draft, not only its own creator (D-87's "shared" drafts).
+// edit — a second, concurrent CompleteSaleDraftTx call for the same id
+// blocks on that lock until the first commits (deleting the draft) or
+// rolls back, so at most one of two racing completions ever succeeds;
+// the loser's own GetSaleDraftForUpdate then simply finds no row and
+// answers 404 "draft", the same as completing an already-completed one
+// — never a double sale, never a double movement. Every line is priced
+// and availability-checked in one batch (priceDraftItemsBatch,
+// drafts.go); an unavailable line (its variant or product has gone
+// inactive or was soft-deleted since the draft was created or last
+// read) fails the whole completion with 422 VALIDATION_FAILED naming it
+// (errDraftLineUnavailable, review CRITICAL) before CreateSaleTx (create.go)
+// ever runs — CreateSaleTx's own resolveSaleItems would otherwise 404 it
+// generically, losing the "which line" detail D-88 promises. Once every
+// line is available, this builds an equivalent SaleCreate from the
+// draft's stored location/customer/discount/note/lines and the request's
+// paymentMethod and hands it to CreateSaleTx completely unchanged — the
+// same server-side price/stock/discount recomputation a real
+// `POST /sales` performs (D-56/D-67), including its own 409
+// STOCK_INSUFFICIENT/DISCOUNT_EXCEEDS_SUBTOTAL checks — then deletes the
+// draft (cascading its items) in the same transaction, so a completion
+// and its draft's disappearance are atomic: a failed CreateSaleTx call
+// returns before the delete ever runs, and any error from either step
+// rolls the whole transaction back (httpx/sales.go only commits — and
+// only stores the Idempotency-Key row — once this method returns no
+// error), so the draft is left intact and no sale exists on any failure
+// path. Requires sales.create, the same as CreateSaleTx — D-96: any
+// staff who may create a sale may complete any draft, regardless of its
+// own creator (the narrower creator-or-manager+ rule, canManageDraft,
+// governs PATCH/DELETE only, D-89); the sale is booked under the
+// completing cashier (CreateSaleTx's own CashierID: authCtx.UserID).
 func (h *Handler) CompleteSaleDraftTx(ctx context.Context, qtx *db.Queries, draftID uuid.UUID, body *gen.SaleDraftComplete) (gen.Sale, error) {
 	authCtx, ok := auth.FromContext(ctx)
 	if !ok {
@@ -395,20 +496,36 @@ func (h *Handler) CompleteSaleDraftTx(ctx context.Context, qtx *db.Queries, draf
 		return gen.Sale{}, fmt.Errorf("sales: get sale draft for update: %w", err)
 	}
 
-	rows, err := qtx.ListSaleDraftItems(ctx, db.ListSaleDraftItemsParams{ShopID: authCtx.ShopID, DraftID: draftID})
+	locale, loc, err := shopClock(ctx, qtx, authCtx.ShopID)
 	if err != nil {
-		return gen.Sale{}, fmt.Errorf("sales: list sale draft items: %w", err)
+		return gen.Sale{}, err
 	}
-	if len(rows) == 0 {
+	defs, err := qtx.ListAttributeDefinitions(ctx, db.ListAttributeDefinitionsParams{ShopID: authCtx.ShopID, Locale: locale})
+	if err != nil {
+		return gen.Sale{}, fmt.Errorf("sales: list attribute definitions: %w", err)
+	}
+	byDraft, err := priceDraftItemsBatch(ctx, qtx, authCtx.ShopID, []uuid.UUID{draftID}, locale, h.svc.now(), loc, defs)
+	if err != nil {
+		return gen.Sale{}, err
+	}
+	priced := byDraft[draftID]
+	if len(priced) == 0 {
 		return gen.Sale{}, apierr.Validation(map[string]string{"items": "required"})
 	}
-	items := make([]gen.SaleItemCreate, len(rows))
-	for i, r := range rows {
-		qty, err := money.FromNumeric(r.Qty)
-		if err != nil {
-			return gen.Sale{}, fmt.Errorf("sales: draft item qty: %w", err)
+
+	fields := map[string]string{}
+	for i, it := range priced {
+		if !it.available {
+			fields[fmt.Sprintf("items[%d].variantId", i)] = "invalid"
 		}
-		items[i] = gen.SaleItemCreate{VariantId: r.VariantID, Qty: qtyString(qty)}
+	}
+	if len(fields) > 0 {
+		return gen.Sale{}, errDraftLineUnavailable(fields)
+	}
+
+	items := make([]gen.SaleItemCreate, len(priced))
+	for i, it := range priced {
+		items[i] = gen.SaleItemCreate{VariantId: it.variantID, Qty: qtyString(it.qty)}
 	}
 
 	discount, err := draftDiscountFromRow(draft.DiscountType, draft.DiscountValue)

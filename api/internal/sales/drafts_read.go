@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Sulton-Ali/savdo/api/gen"
@@ -49,7 +50,7 @@ func (h *Handler) GetSaleDraft(ctx context.Context, req gen.GetSaleDraftRequestO
 	if err != nil {
 		return nil, fmt.Errorf("sales: list attribute definitions: %w", err)
 	}
-	resp, err := h.buildSaleDraftResponse(ctx, h.svc.q, authCtx.ShopID, draft, h.svc.now(), loc, locale, defs)
+	resp, err := buildSaleDraftResponse(ctx, h.svc.q, authCtx.ShopID, draft, h.svc.now(), loc, locale, defs)
 	if err != nil {
 		return nil, err
 	}
@@ -77,6 +78,13 @@ func paginateSaleDrafts(rows []db.SaleDraft, limit int32) ([]db.SaleDraft, *stri
 // internal/pagination helpers (decodeSalesCursor/salesCursorPtr, list.go,
 // specialized to `completed_at` there but generic enough to reuse for
 // `created_at` here — both are a plain (time.Time, uuid.UUID) keyset).
+// maxLimit/defaultLimit (list.go) are unchanged — this only fixes how
+// many *queries* one page costs, not the page size itself: every
+// draft's items are priced in one batched call
+// (priceDraftItemsBatch/ListSaleDraftItemsForPricing, drafts.go) across
+// the whole page, not one GetVariantForCashier/GetProductForCashier pair
+// per line per draft (review MAJOR: that was an N+1 — up to
+// `2 * maxLimit * (lines per draft)` extra round trips on a full page).
 func (h *Handler) ListSaleDrafts(ctx context.Context, req gen.ListSaleDraftsRequestObject) (gen.ListSaleDraftsResponseObject, error) {
 	authCtx, ok := auth.FromContext(ctx)
 	if !ok {
@@ -111,10 +119,19 @@ func (h *Handler) ListSaleDrafts(ctx context.Context, req gen.ListSaleDraftsRequ
 		return nil, fmt.Errorf("sales: list attribute definitions: %w", err)
 	}
 
+	draftIDs := make([]uuid.UUID, len(pageRows))
+	for i, r := range pageRows {
+		draftIDs[i] = r.ID
+	}
 	now := h.svc.now()
+	byDraft, err := priceDraftItemsBatch(ctx, h.svc.q, authCtx.ShopID, draftIDs, locale, now, loc, defs)
+	if err != nil {
+		return nil, err
+	}
+
 	items := make([]gen.SaleDraft, len(pageRows))
 	for i, r := range pageRows {
-		g, err := h.buildSaleDraftResponse(ctx, h.svc.q, authCtx.ShopID, r, now, loc, locale, defs)
+		g, err := assembleSaleDraft(r, byDraft[r.ID])
 		if err != nil {
 			return nil, err
 		}
