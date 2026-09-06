@@ -16,7 +16,9 @@ package sales_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -25,6 +27,7 @@ import (
 	"github.com/oapi-codegen/nullable"
 
 	"github.com/Sulton-Ali/savdo/api/gen"
+	"github.com/Sulton-Ali/savdo/api/internal/apierr"
 	"github.com/Sulton-Ali/savdo/api/internal/db"
 	"github.com/Sulton-Ali/savdo/api/internal/sales"
 )
@@ -143,8 +146,11 @@ func TestCreateSaleDraft_savesLinesWithNoStockMovement(t *testing.T) {
 	if len(draft.Items) != 1 || draft.Items[0].UnitPrice != "100.00" || draft.Items[0].LineTotal != "300.00" || draft.Items[0].Qty != "3.000" {
 		t.Fatalf("Items = %+v, want one line qty=3.000 unitPrice=100.00 lineTotal=300.00", draft.Items)
 	}
-	if draft.CreatedBy == nil || *draft.CreatedBy != cashier.ID {
-		t.Fatalf("CreatedBy = %v, want %s", draft.CreatedBy, cashier.ID)
+	if !draft.CreatedBy.IsSpecified() || draft.CreatedBy.IsNull() || draft.CreatedBy.MustGet() != cashier.ID {
+		t.Fatalf("CreatedBy = %+v, want %s", draft.CreatedBy, cashier.ID)
+	}
+	if len(draft.Items) != 1 || !draft.Items[0].Available {
+		t.Fatalf("Items[0].Available = %+v, want true", draft.Items)
 	}
 
 	if n := countMovements(ctx, t, pool, shop.ID, variant.ID, loc.ID, ""); n != 0 {
@@ -343,8 +349,8 @@ func TestUpdateSaleDraft_replacesItemsAndOwnershipRules(t *testing.T) {
 	if err != nil {
 		t.Fatalf("updateDraft (manager): %v", err)
 	}
-	if updatedByManager.Note == nil || *updatedByManager.Note != note {
-		t.Fatalf("Note = %v, want %q", updatedByManager.Note, note)
+	if !updatedByManager.Note.IsSpecified() || updatedByManager.Note.IsNull() || updatedByManager.Note.MustGet() != note {
+		t.Fatalf("Note = %+v, want %q", updatedByManager.Note, note)
 	}
 
 	// A discount that would exceed the (now 40.00) subtotal is rejected.
@@ -544,5 +550,397 @@ func TestGetSaleDraft_responseHasNoCostFields(t *testing.T) {
 	if strings.Contains(string(raw), "unitCost") || strings.Contains(string(raw), "costPrice") ||
 		strings.Contains(string(raw), "65.00") || strings.Contains(string(raw), "40.00") {
 		t.Fatalf("draft response leaks a cost value, even for an owner (hard rule 5): %s", raw)
+	}
+}
+
+// TestSaleDraft_unavailableLineRendersZeroAndBlocksCompletion is the
+// review CRITICAL fix's own test: a variant soft-deleted after its line
+// was added to a draft must not 500 or 404 a read — GET, List and a
+// PATCH that leaves it alone all render the line with available=false,
+// priced at zero and excluded from the subtotal, so the draft stays
+// editable; only completion actually rejects it, 422 naming the line
+// (D-88).
+func TestSaleDraft_unavailableLineRendersZeroAndBlocksCompletion(t *testing.T) {
+	pool, q := newTestQueries(t)
+	ctx := context.Background()
+	h := sales.NewHandler(sales.NewService(q))
+
+	shop := seedShop(ctx, t, q, "draft-unavailable")
+	cashier := seedUser(ctx, t, q, shop.ID, "cashier1", db.UserRoleCashier)
+	unit := seedUnit(ctx, t, q, shop.ID, "pcs")
+	healthyProduct := seedProduct(ctx, t, q, shop.ID, unit.ID, "draft-unavailable-healthy", "10.00", productOpts{})
+	healthyVariant := seedVariant(ctx, t, q, shop.ID, healthyProduct.ID)
+	poisonedProduct := seedProduct(ctx, t, q, shop.ID, unit.ID, "draft-unavailable-poisoned", "50.00", productOpts{})
+	poisonedVariant := seedVariant(ctx, t, q, shop.ID, poisonedProduct.ID)
+	loc := seedLocation(ctx, t, q, shop.ID, "Main")
+	cashierCtx := ctxAs(shop.ID, cashier)
+
+	draft, err := createDraft(cashierCtx, t, h, pool, q, &gen.SaleDraftCreate{
+		LocationId: loc.ID,
+		Items: []gen.SaleItemCreate{
+			{VariantId: healthyVariant.ID, Qty: "1.000"},
+			{VariantId: poisonedVariant.ID, Qty: "2.000"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("createDraft: %v", err)
+	}
+	if draft.Subtotal != "110.00" {
+		t.Fatalf("Subtotal = %q, want 110.00 (10 + 2*50) before the poisoned variant is soft-deleted", draft.Subtotal)
+	}
+
+	// Soft-delete the second variant after the draft was created — the
+	// real-world case this line's `available` flag renders.
+	if _, err := pool.Exec(ctx, `UPDATE product_variants SET deleted_at = now() WHERE id = $1`, poisonedVariant.ID); err != nil {
+		t.Fatalf("soft-delete variant: %v", err)
+	}
+
+	// GET: the poisoned line renders available=false, priced at zero,
+	// excluded from the subtotal; the healthy line is unaffected.
+	resp, err := h.GetSaleDraft(cashierCtx, gen.GetSaleDraftRequestObject{Id: draft.Id})
+	if err != nil {
+		t.Fatalf("GetSaleDraft: %v", err)
+	}
+	got, ok := resp.(gen.GetSaleDraft200JSONResponse)
+	if !ok {
+		t.Fatalf("GetSaleDraft response type = %T", resp)
+	}
+	if got.Subtotal != "10.00" {
+		t.Fatalf("Subtotal = %q, want 10.00 (poisoned line excluded)", got.Subtotal)
+	}
+	var healthyItem, poisonedItem *gen.SaleDraftItem
+	for i := range got.Items {
+		switch got.Items[i].VariantId {
+		case healthyVariant.ID:
+			healthyItem = &got.Items[i]
+		case poisonedVariant.ID:
+			poisonedItem = &got.Items[i]
+		}
+	}
+	if healthyItem == nil || !healthyItem.Available || healthyItem.UnitPrice != "10.00" {
+		t.Fatalf("healthy item = %+v, want available=true unitPrice=10.00", healthyItem)
+	}
+	if poisonedItem == nil || poisonedItem.Available || poisonedItem.UnitPrice != "0.00" || poisonedItem.LineTotal != "0.00" {
+		t.Fatalf("poisoned item = %+v, want available=false unitPrice=0.00 lineTotal=0.00", poisonedItem)
+	}
+
+	// List renders the same draft the same way.
+	listResp, err := h.ListSaleDrafts(cashierCtx, gen.ListSaleDraftsRequestObject{})
+	if err != nil {
+		t.Fatalf("ListSaleDrafts: %v", err)
+	}
+	list, ok := listResp.(gen.ListSaleDrafts200JSONResponse)
+	if !ok || len(list.Items) != 1 || list.Items[0].Subtotal != "10.00" {
+		t.Fatalf("ListSaleDrafts = %+v, want one draft with subtotal 10.00", list)
+	}
+
+	// A PATCH touching an unrelated field (note) still succeeds and
+	// still renders the poisoned line as unavailable.
+	patched, err := updateDraft(cashierCtx, t, h, pool, q, draft.Id, &gen.SaleDraftPatch{Note: nullable.NewNullableWithValue("still editable")})
+	if err != nil {
+		t.Fatalf("updateDraft (note only): %v", err)
+	}
+	if patched.Subtotal != "10.00" {
+		t.Fatalf("Subtotal after patch = %q, want 10.00", patched.Subtotal)
+	}
+
+	// Completion fails outright, naming the poisoned line, and leaves
+	// the draft, stock and sales untouched.
+	stockIn(ctx, t, pool, q, shop.ID, healthyVariant.ID, loc.ID, "5.000")
+	_, err = completeDraft(cashierCtx, t, h, pool, q, draft.Id, &gen.SaleDraftComplete{PaymentMethod: gen.Cash})
+	if err == nil {
+		t.Fatal("want 422 VALIDATION_FAILED for the unavailable line, got no error")
+	}
+	var apiErr *apierr.Error
+	if !errors.As(err, &apiErr) || apiErr.Status != 422 || apiErr.Code != gen.VALIDATIONFAILED {
+		t.Fatalf("error = %v, want 422 VALIDATION_FAILED", err)
+	}
+	fields, ok := apiErr.Details["fields"].(map[string]string)
+	if !ok || len(fields) != 1 {
+		t.Fatalf("Details.fields = %+v, want exactly one field naming the poisoned line", apiErr.Details)
+	}
+
+	if n := countSales(ctx, t, pool, shop.ID); n != 0 {
+		t.Fatalf("sales rows = %d, want 0", n)
+	}
+	var draftCount int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM sale_drafts WHERE shop_id = $1`, shop.ID).Scan(&draftCount); err != nil {
+		t.Fatalf("count sale_drafts: %v", err)
+	}
+	if draftCount != 1 {
+		t.Fatalf("sale_drafts rows = %d, want 1 (a failed completion must not delete it)", draftCount)
+	}
+}
+
+// TestListSaleDrafts_mixedHealthyAndPoisonedDraftsBothRender proves the
+// batched pricing (priceDraftItemsBatch, review MAJOR N+1 fix) renders
+// every draft on a page correctly even when one of them has an
+// unavailable line — a poisoned draft must never take the whole page
+// down, nor silently disappear from it.
+func TestListSaleDrafts_mixedHealthyAndPoisonedDraftsBothRender(t *testing.T) {
+	pool, q := newTestQueries(t)
+	ctx := context.Background()
+	h := sales.NewHandler(sales.NewService(q))
+
+	shop := seedShop(ctx, t, q, "draft-list-mixed")
+	cashier := seedUser(ctx, t, q, shop.ID, "cashier1", db.UserRoleCashier)
+	unit := seedUnit(ctx, t, q, shop.ID, "pcs")
+	healthyProduct := seedProduct(ctx, t, q, shop.ID, unit.ID, "draft-list-mixed-healthy", "10.00", productOpts{})
+	healthyVariant := seedVariant(ctx, t, q, shop.ID, healthyProduct.ID)
+	poisonedProduct := seedProduct(ctx, t, q, shop.ID, unit.ID, "draft-list-mixed-poisoned", "20.00", productOpts{})
+	poisonedVariant := seedVariant(ctx, t, q, shop.ID, poisonedProduct.ID)
+	loc := seedLocation(ctx, t, q, shop.ID, "Main")
+	cashierCtx := ctxAs(shop.ID, cashier)
+
+	healthyDraft, err := createDraft(cashierCtx, t, h, pool, q, draftBody(loc.ID, healthyVariant.ID, "1.000"))
+	if err != nil {
+		t.Fatalf("createDraft (healthy): %v", err)
+	}
+	poisonedDraft, err := createDraft(cashierCtx, t, h, pool, q, draftBody(loc.ID, poisonedVariant.ID, "1.000"))
+	if err != nil {
+		t.Fatalf("createDraft (poisoned): %v", err)
+	}
+	// Deactivated, not soft-deleted this time — the other half of
+	// rowAvailable's check (product_available, not variant_available).
+	if _, err := pool.Exec(ctx, `UPDATE products SET is_active = false WHERE id = $1`, poisonedProduct.ID); err != nil {
+		t.Fatalf("deactivate product: %v", err)
+	}
+
+	resp, err := h.ListSaleDrafts(cashierCtx, gen.ListSaleDraftsRequestObject{})
+	if err != nil {
+		t.Fatalf("ListSaleDrafts: %v", err)
+	}
+	list, ok := resp.(gen.ListSaleDrafts200JSONResponse)
+	if !ok || len(list.Items) != 2 {
+		t.Fatalf("ListSaleDrafts = %+v, want exactly 2 drafts", list)
+	}
+
+	byID := map[uuid.UUID]gen.SaleDraft{}
+	for _, dr := range list.Items {
+		byID[dr.Id] = dr
+	}
+	healthy, ok := byID[healthyDraft.Id]
+	if !ok || len(healthy.Items) != 1 || !healthy.Items[0].Available || healthy.Subtotal != "10.00" {
+		t.Fatalf("healthy draft = %+v, want available=true subtotal=10.00", healthy)
+	}
+	poisoned, ok := byID[poisonedDraft.Id]
+	if !ok || len(poisoned.Items) != 1 || poisoned.Items[0].Available || poisoned.Subtotal != "0.00" {
+		t.Fatalf("poisoned draft = %+v, want available=false subtotal=0.00", poisoned)
+	}
+}
+
+// TestUpdateSaleDraft_partialDiscountPairIsRejected is review MAJOR's own
+// test: naming only one of discountType/discountValue — with or without
+// an explicit `null` on the other — must 400 VALIDATION_FAILED before
+// any UPDATE runs, never surface the sale_drafts CHECK constraint as an
+// opaque 500.
+func TestUpdateSaleDraft_partialDiscountPairIsRejected(t *testing.T) {
+	pool, q := newTestQueries(t)
+	ctx := context.Background()
+	h := sales.NewHandler(sales.NewService(q))
+
+	shop := seedShop(ctx, t, q, "draft-partial-discount")
+	cashier := seedUser(ctx, t, q, shop.ID, "cashier1", db.UserRoleCashier)
+	unit := seedUnit(ctx, t, q, shop.ID, "pcs")
+	product := seedProduct(ctx, t, q, shop.ID, unit.ID, "draft-partial-discount-product", "100.00", productOpts{})
+	variant := seedVariant(ctx, t, q, shop.ID, product.ID)
+	loc := seedLocation(ctx, t, q, shop.ID, "Main")
+	cashierCtx := ctxAs(shop.ID, cashier)
+
+	draft, err := createDraft(cashierCtx, t, h, pool, q, draftBody(loc.ID, variant.ID, "1.000"))
+	if err != nil {
+		t.Fatalf("createDraft: %v", err)
+	}
+	// The draft has no stored discount at all.
+
+	assertPartialDiscount400 := func(label string, patch *gen.SaleDraftPatch) {
+		t.Helper()
+		_, err := updateDraft(cashierCtx, t, h, pool, q, draft.Id, patch)
+		var apiErr *apierr.Error
+		if !errors.As(err, &apiErr) || apiErr.Status != 400 || apiErr.Code != gen.VALIDATIONFAILED {
+			t.Fatalf("%s: error = %v, want 400 VALIDATION_FAILED", label, err)
+		}
+	}
+
+	assertPartialDiscount400("discountType only", &gen.SaleDraftPatch{
+		DiscountType: nullable.NewNullableWithValue("fixed"),
+	})
+	assertPartialDiscount400("discountValue only", &gen.SaleDraftPatch{
+		DiscountValue: nullable.NewNullableWithValue("10.00"),
+	})
+	// Explicit null on discountType while giving a real discountValue —
+	// a contradictory pair, also 400 (not silently "clear both").
+	assertPartialDiscount400("null type + real value", &gen.SaleDraftPatch{
+		DiscountType: nullable.NewNullNullable[string](), DiscountValue: nullable.NewNullableWithValue("100.00"),
+	})
+
+	// None of the rejected attempts touched the draft.
+	resp, err := h.GetSaleDraft(cashierCtx, gen.GetSaleDraftRequestObject{Id: draft.Id})
+	if err != nil {
+		t.Fatalf("GetSaleDraft: %v", err)
+	}
+	got := resp.(gen.GetSaleDraft200JSONResponse)
+	if !got.Discount.IsNull() {
+		t.Fatalf("Discount = %+v, want still null", got.Discount)
+	}
+}
+
+// TestUpdateSaleDraft_noteOnlyPatchIgnoresStaleDiscount is review MINOR's
+// own test: a PATCH touching neither `items` nor the discount must
+// succeed even when the already-stored discount has since gone stale
+// against the current subtotal (a price drop after the draft was
+// created) — only a PATCH that touches items or the discount itself
+// re-validates and rejects that state.
+func TestUpdateSaleDraft_noteOnlyPatchIgnoresStaleDiscount(t *testing.T) {
+	pool, q := newTestQueries(t)
+	ctx := context.Background()
+	h := sales.NewHandler(sales.NewService(q))
+
+	shop := seedShop(ctx, t, q, "draft-stale-discount")
+	cashier := seedUser(ctx, t, q, shop.ID, "cashier1", db.UserRoleCashier)
+	unit := seedUnit(ctx, t, q, shop.ID, "pcs")
+	product := seedProduct(ctx, t, q, shop.ID, unit.ID, "draft-stale-discount-product", "100.00", productOpts{})
+	variant := seedVariant(ctx, t, q, shop.ID, product.ID)
+	loc := seedLocation(ctx, t, q, shop.ID, "Main")
+	cashierCtx := ctxAs(shop.ID, cashier)
+
+	draft, err := createDraft(cashierCtx, t, h, pool, q, &gen.SaleDraftCreate{
+		LocationId: loc.ID,
+		Items:      []gen.SaleItemCreate{{VariantId: variant.ID, Qty: "1.000"}},
+		Discount:   &gen.SaleDiscount{Type: gen.Fixed, Value: "90.00"},
+	})
+	if err != nil {
+		t.Fatalf("createDraft: %v", err)
+	}
+	// 90.00 discount on a 100.00 subtotal — fine at creation.
+
+	// The price drops after the draft was created, so the stored
+	// discount would now exceed the new (30.00) subtotal.
+	if _, err := pool.Exec(ctx, `UPDATE products SET base_price = '30.00' WHERE id = $1`, product.ID); err != nil {
+		t.Fatalf("update product: %v", err)
+	}
+
+	updated, err := updateDraft(cashierCtx, t, h, pool, q, draft.Id, &gen.SaleDraftPatch{Note: nullable.NewNullableWithValue("gift wrap")})
+	if err != nil {
+		t.Fatalf("updateDraft (note only, stale discount): %v", err)
+	}
+	if !updated.Note.IsSpecified() || updated.Note.IsNull() || updated.Note.MustGet() != "gift wrap" {
+		t.Fatalf("Note = %+v, want gift wrap", updated.Note)
+	}
+	// The response still reflects reality: the discount is capped at
+	// the new (smaller) subtotal, not rejected.
+	if updated.Subtotal != "30.00" || updated.DiscountAmount != "30.00" || updated.EstimatedTotal != "0.00" {
+		t.Fatalf("Subtotal/DiscountAmount/EstimatedTotal = %s/%s/%s, want 30.00/30.00/0.00",
+			updated.Subtotal, updated.DiscountAmount, updated.EstimatedTotal)
+	}
+}
+
+// TestCompleteSaleDraftTx_anyCashierMayCompleteAnyDraft is D-96's own
+// test: completing a draft is not restricted to its own creator — any
+// staff who may create a sale may complete any draft, and the resulting
+// sale is booked under the completing cashier, not the draft's creator.
+func TestCompleteSaleDraftTx_anyCashierMayCompleteAnyDraft(t *testing.T) {
+	pool, q := newTestQueries(t)
+	ctx := context.Background()
+	h := sales.NewHandler(sales.NewService(q))
+
+	shop := seedShop(ctx, t, q, "draft-cross-cashier-complete")
+	creator := seedUser(ctx, t, q, shop.ID, "cashier1", db.UserRoleCashier)
+	completer := seedUser(ctx, t, q, shop.ID, "cashier2", db.UserRoleCashier)
+	unit := seedUnit(ctx, t, q, shop.ID, "pcs")
+	product := seedProduct(ctx, t, q, shop.ID, unit.ID, "draft-cross-cashier-product", "10.00", productOpts{})
+	variant := seedVariant(ctx, t, q, shop.ID, product.ID)
+	loc := seedLocation(ctx, t, q, shop.ID, "Main")
+	creatorCtx := ctxAs(shop.ID, creator)
+	completerCtx := ctxAs(shop.ID, completer)
+	stockIn(ctx, t, pool, q, shop.ID, variant.ID, loc.ID, "5.000")
+
+	draft, err := createDraft(creatorCtx, t, h, pool, q, draftBody(loc.ID, variant.ID, "1.000"))
+	if err != nil {
+		t.Fatalf("createDraft: %v", err)
+	}
+
+	sale, err := completeDraft(completerCtx, t, h, pool, q, draft.Id, &gen.SaleDraftComplete{PaymentMethod: gen.Cash})
+	if err != nil {
+		t.Fatalf("completeDraft (different cashier, D-96): %v", err)
+	}
+	if sale.CashierId != completer.ID {
+		t.Fatalf("CashierId = %s, want %s (the sale is booked under the completing cashier, D-96)", sale.CashierId, completer.ID)
+	}
+}
+
+// TestCompleteSaleDraftTx_concurrentCompletesYieldOneSaleOneMovementLoser404
+// is Opus' own probe turned into a real test: two transactions racing to
+// complete the same draft both call GetSaleDraftForUpdate, which
+// Postgres row-locks — the loser blocks until the winner's commit
+// deletes the draft, then simply finds no row (404 "draft"), never a
+// second sale or a second sale_out movement.
+func TestCompleteSaleDraftTx_concurrentCompletesYieldOneSaleOneMovementLoser404(t *testing.T) {
+	pool, q := newTestQueries(t)
+	ctx := context.Background()
+	h := sales.NewHandler(sales.NewService(q))
+
+	shop := seedShop(ctx, t, q, "draft-concurrent-complete")
+	cashier := seedUser(ctx, t, q, shop.ID, "cashier1", db.UserRoleCashier)
+	unit := seedUnit(ctx, t, q, shop.ID, "pcs")
+	product := seedProduct(ctx, t, q, shop.ID, unit.ID, "draft-concurrent-product", "10.00", productOpts{})
+	variant := seedVariant(ctx, t, q, shop.ID, product.ID)
+	loc := seedLocation(ctx, t, q, shop.ID, "Main")
+	cashierCtx := ctxAs(shop.ID, cashier)
+	stockIn(ctx, t, pool, q, shop.ID, variant.ID, loc.ID, "5.000")
+
+	draft, err := createDraft(cashierCtx, t, h, pool, q, draftBody(loc.ID, variant.ID, "1.000"))
+	if err != nil {
+		t.Fatalf("createDraft: %v", err)
+	}
+
+	run := func() error {
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		qtx := q.WithTx(tx)
+		if _, err := h.CompleteSaleDraftTx(cashierCtx, qtx, draft.Id, &gen.SaleDraftComplete{PaymentMethod: gen.Cash}); err != nil {
+			_ = tx.Rollback(ctx)
+			return err
+		}
+		return tx.Commit(ctx)
+	}
+
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	for range 2 {
+		go func() {
+			defer wg.Done()
+			errs <- run()
+		}()
+	}
+	wg.Wait()
+	close(errs)
+
+	var successes, failures int
+	var failErr error
+	for err := range errs {
+		if err == nil {
+			successes++
+		} else {
+			failures++
+			failErr = err
+		}
+	}
+	if successes != 1 || failures != 1 {
+		t.Fatalf("want exactly one success and one failure, got %d successes, %d failures (last failure: %v)", successes, failures, failErr)
+	}
+	var apiErr *apierr.Error
+	if !errors.As(failErr, &apiErr) || apiErr.Status != 404 {
+		t.Fatalf("loser error = %v, want 404 NOT_FOUND", failErr)
+	}
+
+	if n := countSales(ctx, t, pool, shop.ID); n != 1 {
+		t.Fatalf("sales rows = %d, want exactly 1", n)
+	}
+	if n := countMovements(ctx, t, pool, shop.ID, variant.ID, loc.ID, db.StockMovementKindSaleOut); n != 1 {
+		t.Fatalf("sale_out movements = %d, want exactly 1", n)
 	}
 }

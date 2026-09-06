@@ -59,7 +59,7 @@ func newDraft(ctx context.Context, t *testing.T, q *db.Queries, f saleDraftsFixt
 	items := make([]db.SaleDraftItem, 0, len(qtys))
 	for i, qty := range qtys {
 		item, err := q.InsertSaleDraftItem(ctx, db.InsertSaleDraftItemParams{
-			ID: uuid.New(), ShopID: f.shopID, DraftID: draft.ID, VariantID: f.variantID,
+			ID: uuid.New(), ShopID: f.shopID, SaleDraftID: draft.ID, VariantID: f.variantID,
 			Qty: numeric(t, qty), Position: int32(i),
 		})
 		if err != nil {
@@ -93,7 +93,7 @@ func TestSaleDrafts_insertDraftAndItems(t *testing.T) {
 	}
 
 	item, err := f.q.InsertSaleDraftItem(ctx, db.InsertSaleDraftItemParams{
-		ID: uuid.New(), ShopID: f.shopID, DraftID: draft.ID, VariantID: f.variantID,
+		ID: uuid.New(), ShopID: f.shopID, SaleDraftID: draft.ID, VariantID: f.variantID,
 		Qty: numeric(t, "2.000"), Position: 0,
 	})
 	if err != nil {
@@ -153,7 +153,7 @@ func TestGetSaleDraft_withItemsOrderedByPosition(t *testing.T) {
 		t.Errorf("want customer_id %s, got %v", f.customerID, got.CustomerID)
 	}
 
-	listed, err := f.q.ListSaleDraftItems(ctx, db.ListSaleDraftItemsParams{ShopID: f.shopID, DraftID: draft.ID})
+	listed, err := f.q.ListSaleDraftItems(ctx, db.ListSaleDraftItemsParams{ShopID: f.shopID, SaleDraftID: draft.ID})
 	if err != nil {
 		t.Fatalf("ListSaleDraftItems: %v", err)
 	}
@@ -267,7 +267,7 @@ func TestUpdateSaleDraft_headerPatchAndReplaceItems(t *testing.T) {
 		t.Fatalf("CreateSaleDraft: %v", err)
 	}
 	_, err = f.q.InsertSaleDraftItem(ctx, db.InsertSaleDraftItemParams{
-		ID: uuid.New(), ShopID: f.shopID, DraftID: draft.ID, VariantID: f.variantID, Qty: numeric(t, "1.000"), Position: 0,
+		ID: uuid.New(), ShopID: f.shopID, SaleDraftID: draft.ID, VariantID: f.variantID, Qty: numeric(t, "1.000"), Position: 0,
 	})
 	if err != nil {
 		t.Fatalf("InsertSaleDraftItem: %v", err)
@@ -301,7 +301,7 @@ func TestUpdateSaleDraft_headerPatchAndReplaceItems(t *testing.T) {
 	}
 
 	// Replace the whole item set: delete then insert new lines.
-	affected, err := f.q.DeleteSaleDraftItems(ctx, db.DeleteSaleDraftItemsParams{ShopID: f.shopID, DraftID: draft.ID})
+	affected, err := f.q.DeleteSaleDraftItems(ctx, db.DeleteSaleDraftItemsParams{ShopID: f.shopID, SaleDraftID: draft.ID})
 	if err != nil {
 		t.Fatalf("DeleteSaleDraftItems: %v", err)
 	}
@@ -309,13 +309,13 @@ func TestUpdateSaleDraft_headerPatchAndReplaceItems(t *testing.T) {
 		t.Fatalf("want 1 item deleted, got %d", affected)
 	}
 	newItem, err := f.q.InsertSaleDraftItem(ctx, db.InsertSaleDraftItemParams{
-		ID: uuid.New(), ShopID: f.shopID, DraftID: draft.ID, VariantID: f.variantID, Qty: numeric(t, "5.000"), Position: 0,
+		ID: uuid.New(), ShopID: f.shopID, SaleDraftID: draft.ID, VariantID: f.variantID, Qty: numeric(t, "5.000"), Position: 0,
 	})
 	if err != nil {
 		t.Fatalf("InsertSaleDraftItem (replacement): %v", err)
 	}
 
-	items, err := f.q.ListSaleDraftItems(ctx, db.ListSaleDraftItemsParams{ShopID: f.shopID, DraftID: draft.ID})
+	items, err := f.q.ListSaleDraftItems(ctx, db.ListSaleDraftItemsParams{ShopID: f.shopID, SaleDraftID: draft.ID})
 	if err != nil {
 		t.Fatalf("ListSaleDraftItems: %v", err)
 	}
@@ -345,7 +345,7 @@ func TestDeleteSaleDraft_cascadesItems(t *testing.T) {
 		t.Fatalf("want pgx.ErrNoRows fetching a deleted draft, got: %v", err)
 	}
 
-	remaining, err := f.q.ListSaleDraftItems(ctx, db.ListSaleDraftItemsParams{ShopID: f.shopID, DraftID: draft.ID})
+	remaining, err := f.q.ListSaleDraftItems(ctx, db.ListSaleDraftItemsParams{ShopID: f.shopID, SaleDraftID: draft.ID})
 	if err != nil {
 		t.Fatalf("ListSaleDraftItems (after cascade delete): %v", err)
 	}
@@ -396,20 +396,20 @@ func TestSaleDrafts_foreignKeys(t *testing.T) {
 	}
 
 	if _, err := f.q.InsertSaleDraftItem(ctx, db.InsertSaleDraftItemParams{
-		ID: uuid.New(), ShopID: f.shopID, DraftID: bogus, VariantID: f.variantID, Qty: numeric(t, "1.000"), Position: 0,
+		ID: uuid.New(), ShopID: f.shopID, SaleDraftID: bogus, VariantID: f.variantID, Qty: numeric(t, "1.000"), Position: 0,
 	}); !isForeignKeyViolation(err) {
 		t.Errorf("want a foreign key violation for a nonexistent draft_id, got: %v", err)
 	}
 
 	if _, err := f.q.InsertSaleDraftItem(ctx, db.InsertSaleDraftItemParams{
-		ID: uuid.New(), ShopID: f.shopID, DraftID: draft.ID, VariantID: bogus, Qty: numeric(t, "1.000"), Position: 0,
+		ID: uuid.New(), ShopID: f.shopID, SaleDraftID: draft.ID, VariantID: bogus, Qty: numeric(t, "1.000"), Position: 0,
 	}); !isForeignKeyViolation(err) {
 		t.Errorf("want a foreign key violation for a nonexistent variant_id, got: %v", err)
 	}
 
 	// A well-formed item, for contrast: all the same FKs, real ids, succeeds.
 	if _, err := f.q.InsertSaleDraftItem(ctx, db.InsertSaleDraftItemParams{
-		ID: uuid.New(), ShopID: f.shopID, DraftID: draft.ID, VariantID: f.variantID, Qty: numeric(t, "1.000"), Position: 0,
+		ID: uuid.New(), ShopID: f.shopID, SaleDraftID: draft.ID, VariantID: f.variantID, Qty: numeric(t, "1.000"), Position: 0,
 	}); err != nil {
 		t.Errorf("want a well-formed item to succeed, got: %v", err)
 	}
@@ -427,7 +427,7 @@ func TestSaleDraftItems_qtyMustBePositive(t *testing.T) {
 
 	newItem := func(qty string) error {
 		_, err := f.q.InsertSaleDraftItem(ctx, db.InsertSaleDraftItemParams{
-			ID: uuid.New(), ShopID: f.shopID, DraftID: draft.ID, VariantID: f.variantID, Qty: numeric(t, qty), Position: 0,
+			ID: uuid.New(), ShopID: f.shopID, SaleDraftID: draft.ID, VariantID: f.variantID, Qty: numeric(t, qty), Position: 0,
 		})
 		return err
 	}

@@ -688,3 +688,47 @@ func TestCompleteSaleDraft_noKeyEachCallCompletesItsOwnDraft(t *testing.T) {
 		t.Fatalf("sales rows = %d, want 2", salesCount)
 	}
 }
+
+// TestCompleteSaleDraft_sameKeyDifferentDraftIdReturns409SecondDraftUntouched
+// mirrors TestCompleteSaleDraft_sameKeyDifferentBodyReturns409, naming the
+// draft id itself (part of RequestHash's path input, completeSaleDraftPath)
+// rather than the body as the thing that differs: completing two distinct
+// drafts under the same Idempotency-Key must reject the second outright,
+// leaving it completely untouched — not replay draftA's stored sale for
+// draftB, and not run draftB's own completion either.
+func TestCompleteSaleDraft_sameKeyDifferentDraftIdReturns409SecondDraftUntouched(t *testing.T) {
+	f := newSaleFixture(t)
+	draftA := mustCreateSaleDraft(t, f, "1.000")
+	draftB := mustCreateSaleDraft(t, f, "1.000")
+	key := "complete-draft-key-two-drafts"
+
+	if _, err := f.srv.CompleteSaleDraft(f.cashierCtx, completeSaleDraftReq(draftA.Id, gen.Cash, &key)); err != nil {
+		t.Fatalf("first complete (draftA): %v", err)
+	}
+
+	_, err := f.srv.CompleteSaleDraft(f.cashierCtx, completeSaleDraftReq(draftB.Id, gen.Cash, &key))
+	if err == nil {
+		t.Fatal("want 409 IDEMPOTENCY_KEY_REUSED for the same key against a different draft id, got no error")
+	}
+	var apiErr *apierr.Error
+	if !errors.As(err, &apiErr) || apiErr.Status != 409 || apiErr.Code != gen.IDEMPOTENCYKEYREUSED {
+		t.Fatalf("error = %v, want 409 IDEMPOTENCY_KEY_REUSED", err)
+	}
+
+	// draftB must still exist, untouched — the reused key must never
+	// have run CompleteSaleDraftTx against it.
+	var draftBCount int
+	if err := f.pool.QueryRow(context.Background(), `SELECT count(*) FROM sale_drafts WHERE id = $1`, draftB.Id).Scan(&draftBCount); err != nil {
+		t.Fatalf("count draftB: %v", err)
+	}
+	if draftBCount != 1 {
+		t.Fatalf("sale_drafts rows for draftB = %d, want 1 (untouched)", draftBCount)
+	}
+	var salesCount int
+	if err := f.pool.QueryRow(context.Background(), `SELECT count(*) FROM sales WHERE shop_id = $1`, f.shopID).Scan(&salesCount); err != nil {
+		t.Fatalf("count sales: %v", err)
+	}
+	if salesCount != 1 {
+		t.Fatalf("sales rows = %d, want 1 (only draftA's completion)", salesCount)
+	}
+}
