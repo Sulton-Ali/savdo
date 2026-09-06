@@ -118,7 +118,7 @@ margin reports; **never returned to cashier or public**), `line_total`.
 
 **sale_draft_items** — `sale_draft_id`, `variant_id`, `qty numeric(12,3)`. Prices never stored; reads compute current unit prices server-side by D-67 rule; completion recomputes via existing sale path (D-87).
 
-**Rules (D-87, D-88):** drafts do not move stock and have no availability impact while they exist (D-88). Completion fails with `STOCK_INSUFFICIENT` if a line cannot be fulfilled; the client shows which line and lets the user edit.
+**Rules (D-87, D-88, D-96):** drafts do not move stock and have no availability impact while they exist (D-88). Completion fails with `STOCK_INSUFFICIENT` if a line cannot be fulfilled; the client shows which line and lets the user edit. Any staff who may create a sale may complete any draft, regardless of creator — the sale is booked under the completing cashier (D-96); edit/delete stay restricted to the draft's own creator or manager+ (D-89). A read (`GET`) caps a stored discount at the recomputed subtotal instead of failing when prices or items changed since it was set; `POST`/`PATCH` that touch `items` or the discount reject the same state with `409 DISCOUNT_EXCEEDS_SUBTOTAL`; a `PATCH` that touches neither leaves a stale discount alone. A draft line whose variant or product is inactive or soft-deleted renders with `available=false`, unit price and line total `0.00`, excluded from the subtotal, so the draft can still be edited; completing such a draft fails with `422 VALIDATION_FAILED` naming the line.
 
 **discounts** — promotions beyond per-product promo price: `name`, `kind`
 (`percent|fixed`), `value`, `applies_to` (`sale|category|product`), `target_id`,
