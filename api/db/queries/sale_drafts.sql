@@ -25,14 +25,22 @@ VALUES (sqlc.arg('id'), sqlc.arg('shop_id'), sqlc.arg('sale_draft_id'), sqlc.arg
 RETURNING *;
 
 -- name: GetSaleDraft :one
--- LEFT JOIN, not JOIN: created_by is nullable (D-89's "no creator on
--- record" case) and a user row could in principle be gone later — either
--- case still returns the draft, with created_by_name simply NULL, same
--- reasoning as ListMovementsWithCreatedByName (stock.sql). Resolving the
--- name here avoids a second lookup by the admin/mobile client.
-SELECT sd.*, u.full_name AS created_by_name
+-- LEFT JOIN, not JOIN: created_by/customer_id are both nullable (D-89's
+-- "no creator on record" case; a draft with no customer attached) and
+-- either referenced row could in principle be gone later — every case
+-- still returns the draft, with created_by_name/customer_name simply
+-- NULL, same reasoning as ListMovementsWithCreatedByName (stock.sql).
+-- Resolving both names here avoids a second lookup by the admin/mobile
+-- client. customers has no composite (id, shop_id) FK from sale_drafts
+-- (customer_id REFERENCES customers(id) alone, 0017_sale_drafts.sql), so
+-- c.shop_id = sd.shop_id is this join's own guard against ever resolving
+-- another shop's customer's name (hard rule 1) — Sale.customerName's own
+-- join (sales.sql) predates this guard and is unscoped; not touched here,
+-- out of this task's scope.
+SELECT sd.*, u.full_name AS created_by_name, c.full_name AS customer_name
 FROM sale_drafts sd
 LEFT JOIN users u ON u.id = sd.created_by AND u.shop_id = sd.shop_id
+LEFT JOIN customers c ON c.id = sd.customer_id AND c.shop_id = sd.shop_id
 WHERE sd.shop_id = $1 AND sd.id = $2;
 
 -- name: GetSaleDraftForUpdate :one
@@ -47,14 +55,17 @@ FOR UPDATE;
 -- name: ListSaleDrafts :many
 -- Keyset pagination on (created_at, id), newest first, same convention as
 -- ListSalesForStaff/ListPurchases. created_by is an optional exact-match
--- filter (GET /sales/drafts?createdBy=..., § 05-API.md). LEFT JOIN users
--- for created_by_name, same one-query-per-page shape
--- ListMovementsWithCreatedByName (stock.sql) and ListSalesForStaff's own
--- cashier_name join already use — a page's worth of names in this same
--- query, never a lookup per row (no N+1).
-SELECT sd.*, u.full_name AS created_by_name
+-- filter (GET /sales/drafts?createdBy=..., § 05-API.md). LEFT JOIN users/
+-- customers for created_by_name/customer_name, same one-query-per-page
+-- shape ListMovementsWithCreatedByName (stock.sql) and ListSalesForStaff's
+-- own cashier_name/customer_name joins already use — a page's worth of
+-- names in this same query, never a lookup per row (no N+1). The
+-- customers join is shop-scoped (c.shop_id = sd.shop_id) for the same
+-- reason GetSaleDraft's own join above is (hard rule 1).
+SELECT sd.*, u.full_name AS created_by_name, c.full_name AS customer_name
 FROM sale_drafts sd
 LEFT JOIN users u ON u.id = sd.created_by AND u.shop_id = sd.shop_id
+LEFT JOIN customers c ON c.id = sd.customer_id AND c.shop_id = sd.shop_id
 WHERE sd.shop_id = sqlc.arg('shop_id')
     AND (sqlc.narg('created_by')::uuid IS NULL OR sd.created_by = sqlc.narg('created_by'))
     AND (

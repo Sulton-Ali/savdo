@@ -59,6 +59,7 @@ function draftFixture(overrides: Partial<SaleDraft> = {}): SaleDraft {
     id: "d1",
     locationId: "l1",
     customerId: null,
+    customerName: null,
     discount: null,
     discountReason: null,
     note: "Ready for pickup",
@@ -138,18 +139,6 @@ function mockGet(draft: SaleDraft) {
         }),
       );
     }
-    if (path === "/customers/{id}") {
-      return Promise.resolve(
-        apiResult({
-          id: "c1",
-          fullName: "Jane Doe",
-          phone: null,
-          telegramUsername: null,
-          note: null,
-          tags: [],
-        }),
-      );
-    }
     throw new Error(`unexpected GET ${path}`);
   }) as never);
 }
@@ -223,6 +212,14 @@ describe("SaleDraftDetailPage", () => {
     // Customer and discount are also "—" on this fixture (neither set) —
     // created by is the third.
     expect(screen.getAllByText("—")).toHaveLength(3);
+  });
+
+  it("shows the server-resolved customerName for the draft's attached customer", async () => {
+    renderPage(draftFixture({ customerId: "c1", customerName: "Jane Doe" }), "someone-else", [
+      "sales.void",
+    ]);
+
+    expect(await screen.findByText("Jane Doe")).toBeTruthy();
   });
 
   it("appends the discount reason to the discount field", async () => {

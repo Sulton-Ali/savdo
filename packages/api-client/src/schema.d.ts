@@ -2010,6 +2010,8 @@ export interface components {
             locationId: string;
             /** Format: uuid */
             customerId: string | null;
+            /** @description The attached customer's display name, resolved server-side (mirrors `Sale.customerName` and this same schema's own `createdByName`); `null` when `customerId` is `null` or the customer no longer exists. */
+            customerName: string | null;
             /** @description `null` when the draft has no manual discount. The OpenAPI 3.1 `anyOf`-with-`null` idiom is used here (rather than the `SaleDiscount` `$ref` alone) so this always-present, possibly-null field matches `Sale`'s own nullable-field convention (`customerId`, `voidedBy`, …) instead of the plain-optional shape `SaleCreate.discount`/ `SaleDraftCreate.discount` use. docs/04-DATA-MODEL.md § 4 / D-52. `value` is a percentage (0..100) when `type: percent`, or a fixed sum (>= 0) when `type: fixed`. docs/05-API.md § Conventions. */
             discount: components["schemas"]["SaleDiscount"] | null;
             discountReason: string | null;

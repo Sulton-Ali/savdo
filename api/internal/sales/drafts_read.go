@@ -51,7 +51,7 @@ func (h *Handler) GetSaleDraft(ctx context.Context, req gen.GetSaleDraftRequestO
 	if err != nil {
 		return nil, fmt.Errorf("sales: list attribute definitions: %w", err)
 	}
-	resp, err := buildSaleDraftResponse(ctx, h.svc.q, authCtx.ShopID, draft, row.CreatedByName, h.svc.now(), loc, locale, defs)
+	resp, err := buildSaleDraftResponse(ctx, h.svc.q, authCtx.ShopID, draft, row.CreatedByName, row.CustomerName, h.svc.now(), loc, locale, defs)
 	if err != nil {
 		return nil, err
 	}
@@ -156,7 +156,7 @@ func (h *Handler) ListSaleDrafts(ctx context.Context, req gen.ListSaleDraftsRequ
 
 	items := make([]gen.SaleDraft, len(pageRows))
 	for i, r := range pageRows {
-		g, err := assembleSaleDraft(saleDraftFromListRow(r), byDraft[r.ID], r.CreatedByName)
+		g, err := assembleSaleDraft(saleDraftFromListRow(r), byDraft[r.ID], r.CreatedByName, r.CustomerName)
 		if err != nil {
 			return nil, err
 		}

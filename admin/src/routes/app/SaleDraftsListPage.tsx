@@ -1,4 +1,3 @@
-import { useQueries } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Button, Card, Checkbox, Space, Table } from "antd";
 import type { ColumnsType } from "antd/es/table";
@@ -8,7 +7,6 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { useAuth } from "../../auth/AuthContext";
-import { fetchCustomer } from "../../customers/api";
 import { formatMoneyDisplay } from "../../lib/money";
 import { useCursorList } from "../../lib/useCursorList";
 import { fetchSaleDraftsPage, type SaleDraft } from "../../sales/draftsApi";
@@ -36,7 +34,8 @@ function formatDraftAge(unit: DraftAgeUnit, value: number, t: TFunction): string
  * `createdByName`, resolved server-side (mirrors `StockMovement.createdByName`),
  * is shown for another staff member's draft; the caller's own draft shows
  * "You" instead of their own name, and a `null` name (creator deleted or
- * never recorded) shows a dash.
+ * never recorded) shows a dash. `customerName` is resolved server-side the
+ * same way (T18) — no per-row `GET /customers/{id}` lookup here.
  */
 export function SaleDraftsListPage() {
   const { t } = useTranslation();
@@ -54,33 +53,6 @@ export function SaleDraftsListPage() {
     (cursor) => fetchSaleDraftsPage(filters, cursor),
   );
   const drafts = data?.pages.flatMap((page) => page.items) ?? [];
-
-  // Same N+1-by-id pattern `StockLevelsPage` uses for its product lookups —
-  // a small, client-cached page of drafts, one `GET /customers/{id}` per
-  // distinct customer (`cashier+`, so every role here can resolve it).
-  const customerIds = useMemo(
-    () =>
-      Array.from(
-        new Set(drafts.map((draft) => draft.customerId).filter((id): id is string => id != null)),
-      ),
-    [drafts],
-  );
-  const customerQueries = useQueries({
-    queries: customerIds.map((id) => ({
-      queryKey: ["customer", id],
-      queryFn: () => fetchCustomer(id),
-    })),
-  });
-  const customerNameById = useMemo(() => {
-    const map = new Map<string, string>();
-    customerIds.forEach((id, index) => {
-      const name = customerQueries[index]?.data?.fullName;
-      if (name) {
-        map.set(id, name);
-      }
-    });
-    return map;
-  }, [customerIds, customerQueries]);
 
   function renderCreatedBy(draft: SaleDraft): string {
     if (draft.createdBy === me.user.id) {
@@ -113,8 +85,7 @@ export function SaleDraftsListPage() {
     {
       title: t("sales.drafts.columns.customer"),
       key: "customer",
-      render: (_, draft) =>
-        draft.customerId ? (customerNameById.get(draft.customerId) ?? "…") : "—",
+      render: (_, draft) => draft.customerName ?? "—",
     },
     {
       title: t("sales.drafts.columns.lines"),

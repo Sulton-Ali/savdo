@@ -1109,3 +1109,188 @@ func TestSaleDraft_createdByNameNullForNilCreatedBy(t *testing.T) {
 		t.Fatalf("list CreatedByName = %+v, want an explicit null", list.Items[0].CreatedByName)
 	}
 }
+
+// TestSaleDraft_customerNameResolvedOnCreateGetListAndUpdate covers T18:
+// the attached customer's display name is resolved server-side and
+// appears on every response that carries a SaleDraft — CreateSaleDraftTx's
+// own resolveCustomerName lookup, GetSaleDraft's and ListSaleDrafts' own
+// shop-scoped LEFT JOIN (drafts_read.go), and UpdateSaleDraftTx's own
+// resolveCustomerName lookup after the patch — mirrors T17's own
+// createdByName test exactly, specialized to customerId/customerName.
+func TestSaleDraft_customerNameResolvedOnCreateGetListAndUpdate(t *testing.T) {
+	pool, q := newTestQueries(t)
+	ctx := context.Background()
+	h := sales.NewHandler(sales.NewService(q))
+
+	shop := seedShop(ctx, t, q, "draft-customer-name")
+	cashier := seedUser(ctx, t, q, shop.ID, "cashier1", db.UserRoleCashier)
+	unit := seedUnit(ctx, t, q, shop.ID, "pcs")
+	product := seedProduct(ctx, t, q, shop.ID, unit.ID, "draft-customer-name-product", "50.00", productOpts{})
+	variant := seedVariant(ctx, t, q, shop.ID, product.ID)
+	loc := seedLocation(ctx, t, q, shop.ID, "Main")
+	customer := seedCustomer(ctx, t, q, shop.ID, "Jane Customer")
+	cashierCtx := ctxAs(shop.ID, cashier)
+
+	body := draftBody(loc.ID, variant.ID, "1.000")
+	body.CustomerId = &customer.ID
+	created, err := createDraft(cashierCtx, t, h, pool, q, body)
+	if err != nil {
+		t.Fatalf("createDraft: %v", err)
+	}
+	if !created.CustomerName.IsSpecified() || created.CustomerName.IsNull() || created.CustomerName.MustGet() != customer.FullName {
+		t.Fatalf("create CustomerName = %+v, want %q", created.CustomerName, customer.FullName)
+	}
+
+	getResp, err := h.GetSaleDraft(cashierCtx, gen.GetSaleDraftRequestObject{Id: created.Id})
+	if err != nil {
+		t.Fatalf("GetSaleDraft: %v", err)
+	}
+	got, ok := getResp.(gen.GetSaleDraft200JSONResponse)
+	if !ok {
+		t.Fatalf("GetSaleDraft response type = %T", getResp)
+	}
+	if !got.CustomerName.IsSpecified() || got.CustomerName.IsNull() || got.CustomerName.MustGet() != customer.FullName {
+		t.Fatalf("get CustomerName = %+v, want %q", got.CustomerName, customer.FullName)
+	}
+
+	listResp, err := h.ListSaleDrafts(cashierCtx, gen.ListSaleDraftsRequestObject{})
+	if err != nil {
+		t.Fatalf("ListSaleDrafts: %v", err)
+	}
+	list, ok := listResp.(gen.ListSaleDrafts200JSONResponse)
+	if !ok || len(list.Items) != 1 {
+		t.Fatalf("ListSaleDrafts = %+v, want exactly one item", listResp)
+	}
+	if !list.Items[0].CustomerName.IsSpecified() || list.Items[0].CustomerName.IsNull() || list.Items[0].CustomerName.MustGet() != customer.FullName {
+		t.Fatalf("list CustomerName = %+v, want %q", list.Items[0].CustomerName, customer.FullName)
+	}
+
+	// UpdateSaleDraftTx's own response resolves the same (unchanged)
+	// customer's name (resolveCustomerName off the updated row's
+	// customer_id, drafts_write.go) for a patch that touches neither
+	// customerId nor items.
+	note := "still Jane's draft"
+	updated, err := updateDraft(cashierCtx, t, h, pool, q, created.Id, &gen.SaleDraftPatch{Note: nullable.NewNullableWithValue(note)})
+	if err != nil {
+		t.Fatalf("updateDraft: %v", err)
+	}
+	if !updated.CustomerName.IsSpecified() || updated.CustomerName.IsNull() || updated.CustomerName.MustGet() != customer.FullName {
+		t.Fatalf("update CustomerName = %+v, want %q", updated.CustomerName, customer.FullName)
+	}
+}
+
+// TestSaleDraft_customerNameNullWhenNoCustomer covers T18's null case: a
+// draft with no customer attached (customerId never set) renders
+// customerName as an explicit null on create, get and list rather than an
+// empty string or an error.
+func TestSaleDraft_customerNameNullWhenNoCustomer(t *testing.T) {
+	pool, q := newTestQueries(t)
+	ctx := context.Background()
+	h := sales.NewHandler(sales.NewService(q))
+
+	shop := seedShop(ctx, t, q, "draft-customer-name-null")
+	cashier := seedUser(ctx, t, q, shop.ID, "cashier1", db.UserRoleCashier)
+	unit := seedUnit(ctx, t, q, shop.ID, "pcs")
+	product := seedProduct(ctx, t, q, shop.ID, unit.ID, "draft-customer-name-null-product", "50.00", productOpts{})
+	variant := seedVariant(ctx, t, q, shop.ID, product.ID)
+	loc := seedLocation(ctx, t, q, shop.ID, "Main")
+	cashierCtx := ctxAs(shop.ID, cashier)
+
+	created, err := createDraft(cashierCtx, t, h, pool, q, draftBody(loc.ID, variant.ID, "1.000"))
+	if err != nil {
+		t.Fatalf("createDraft: %v", err)
+	}
+	if !created.CustomerName.IsSpecified() || !created.CustomerName.IsNull() {
+		t.Fatalf("create CustomerName = %+v, want an explicit null", created.CustomerName)
+	}
+	if !created.CustomerId.IsSpecified() || !created.CustomerId.IsNull() {
+		t.Fatalf("create CustomerId = %+v, want an explicit null", created.CustomerId)
+	}
+
+	getResp, err := h.GetSaleDraft(cashierCtx, gen.GetSaleDraftRequestObject{Id: created.Id})
+	if err != nil {
+		t.Fatalf("GetSaleDraft: %v", err)
+	}
+	got, ok := getResp.(gen.GetSaleDraft200JSONResponse)
+	if !ok {
+		t.Fatalf("GetSaleDraft response type = %T", getResp)
+	}
+	if !got.CustomerName.IsSpecified() || !got.CustomerName.IsNull() {
+		t.Fatalf("get CustomerName = %+v, want an explicit null", got.CustomerName)
+	}
+
+	listResp, err := h.ListSaleDrafts(cashierCtx, gen.ListSaleDraftsRequestObject{})
+	if err != nil {
+		t.Fatalf("ListSaleDrafts: %v", err)
+	}
+	list, ok := listResp.(gen.ListSaleDrafts200JSONResponse)
+	if !ok || len(list.Items) != 1 {
+		t.Fatalf("ListSaleDrafts = %+v, want exactly one item", listResp)
+	}
+	if !list.Items[0].CustomerName.IsSpecified() || !list.Items[0].CustomerName.IsNull() {
+		t.Fatalf("list CustomerName = %+v, want an explicit null", list.Items[0].CustomerName)
+	}
+}
+
+// TestSaleDraft_customerNameNeverResolvesAnotherShopsCustomer covers
+// T18's hard-rule-1 case: a draft whose stored customer_id happens to
+// point at a different shop's customer (only reachable by inserting the
+// draft directly — CreateSaleDraftTx's own GetCustomer(shopId, id) 404s
+// any customerId outside the caller's shop before a draft can ever be
+// written that way, the same guard CreateSaleTx/UpdateSaleDraftTx apply)
+// renders customerName as null rather than leaking the other shop's
+// customer's name — GetSaleDraft/ListSaleDrafts' own LEFT JOIN is scoped
+// on c.shop_id = sd.shop_id (sale_drafts.sql), so the join simply finds
+// no row for a cross-shop id, same as a deleted/nonexistent one.
+func TestSaleDraft_customerNameNeverResolvesAnotherShopsCustomer(t *testing.T) {
+	ctx := context.Background()
+	_, q := newTestQueries(t)
+	h := sales.NewHandler(sales.NewService(q))
+
+	shopA := seedShop(ctx, t, q, "draft-customer-name-shop-a")
+	shopB := seedShop(ctx, t, q, "draft-customer-name-shop-b")
+	cashierA := seedUser(ctx, t, q, shopA.ID, "cashier1", db.UserRoleCashier)
+	unit := seedUnit(ctx, t, q, shopA.ID, "pcs")
+	product := seedProduct(ctx, t, q, shopA.ID, unit.ID, "draft-customer-name-cross-shop-product", "50.00", productOpts{})
+	variant := seedVariant(ctx, t, q, shopA.ID, product.ID)
+	locA := seedLocation(ctx, t, q, shopA.ID, "Main")
+	customerB := seedCustomer(ctx, t, q, shopB.ID, "Other Shop's Customer")
+	cashierACtx := ctxAs(shopA.ID, cashierA)
+
+	draft, err := q.CreateSaleDraft(ctx, db.CreateSaleDraftParams{
+		ID: uuid.New(), ShopID: shopA.ID, LocationID: locA.ID, CustomerID: &customerB.ID, CreatedBy: &cashierA.ID,
+	})
+	if err != nil {
+		t.Fatalf("CreateSaleDraft: %v", err)
+	}
+	if _, err := q.InsertSaleDraftItem(ctx, db.InsertSaleDraftItemParams{
+		ID: uuid.New(), ShopID: shopA.ID, SaleDraftID: draft.ID, VariantID: variant.ID,
+		Qty: money.ToNumeric(decimal.NewFromInt(1)), Position: 0,
+	}); err != nil {
+		t.Fatalf("InsertSaleDraftItem: %v", err)
+	}
+
+	getResp, err := h.GetSaleDraft(cashierACtx, gen.GetSaleDraftRequestObject{Id: draft.ID})
+	if err != nil {
+		t.Fatalf("GetSaleDraft: %v", err)
+	}
+	got, ok := getResp.(gen.GetSaleDraft200JSONResponse)
+	if !ok {
+		t.Fatalf("GetSaleDraft response type = %T", getResp)
+	}
+	if !got.CustomerName.IsSpecified() || !got.CustomerName.IsNull() {
+		t.Fatalf("get CustomerName = %+v, want an explicit null (never the other shop's customer's name)", got.CustomerName)
+	}
+
+	listResp, err := h.ListSaleDrafts(cashierACtx, gen.ListSaleDraftsRequestObject{})
+	if err != nil {
+		t.Fatalf("ListSaleDrafts: %v", err)
+	}
+	list, ok := listResp.(gen.ListSaleDrafts200JSONResponse)
+	if !ok || len(list.Items) != 1 {
+		t.Fatalf("ListSaleDrafts = %+v, want exactly one item", listResp)
+	}
+	if !list.Items[0].CustomerName.IsSpecified() || !list.Items[0].CustomerName.IsNull() {
+		t.Fatalf("list CustomerName = %+v, want an explicit null (never the other shop's customer's name)", list.Items[0].CustomerName)
+	}
+}

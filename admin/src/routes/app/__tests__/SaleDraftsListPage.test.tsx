@@ -58,6 +58,7 @@ function draft(overrides: Partial<SaleDraft> = {}): SaleDraft {
     id: "d1",
     locationId: "l1",
     customerId: null,
+    customerName: null,
     discount: null,
     discountReason: null,
     note: "Gift wrap",
@@ -92,18 +93,6 @@ function mockEndpoints(draftItems: SaleDraft[] = [draft()]) {
   mockedApi.GET.mockImplementation(((path: string) => {
     if (path === "/sales/drafts") {
       return Promise.resolve(apiResult({ items: draftItems, nextCursor: null }));
-    }
-    if (path === "/customers/{id}") {
-      return Promise.resolve(
-        apiResult({
-          id: "c1",
-          fullName: "Jane Doe",
-          phone: null,
-          telegramUsername: null,
-          note: null,
-          tags: [],
-        }),
-      );
     }
     return Promise.resolve(apiResult({ items: [], nextCursor: null }));
   }) as never);
@@ -159,6 +148,13 @@ describe("SaleDraftsListPage", () => {
     renderPage("u1");
 
     expect(await screen.findByText("Cashier One")).toBeTruthy();
+  });
+
+  it("shows the server-resolved customerName for a draft's attached customer", async () => {
+    mockEndpoints([draft({ customerId: "c1", customerName: "Jane Doe" })]);
+    renderPage("u1");
+
+    expect(await screen.findByText("Jane Doe")).toBeTruthy();
   });
 
   it("shows a dash when createdByName is null (creator has none on record)", async () => {

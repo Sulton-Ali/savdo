@@ -1019,6 +1019,9 @@ type SaleDraft struct {
 	CreatedByName nullable.Nullable[string]             `json:"createdByName"`
 	CustomerId    nullable.Nullable[openapi_types.UUID] `json:"customerId"`
 
+	// CustomerName The attached customer's display name, resolved server-side (mirrors `Sale.customerName` and this same schema's own `createdByName`); `null` when `customerId` is `null` or the customer no longer exists.
+	CustomerName nullable.Nullable[string] `json:"customerName"`
+
 	// Discount `null` when the draft has no manual discount. The OpenAPI 3.1 `anyOf`-with-`null` idiom is used here (rather than the `SaleDiscount` `$ref` alone) so this always-present, possibly-null field matches `Sale`'s own nullable-field convention (`customerId`, `voidedBy`, …) instead of the plain-optional shape `SaleCreate.discount`/ `SaleDraftCreate.discount` use. docs/04-DATA-MODEL.md § 4 / D-52. `value` is a percentage (0..100) when `type: percent`, or a fixed sum (>= 0) when `type: fixed`. docs/05-API.md § Conventions.
 	Discount nullable.Nullable[SaleDiscount] `json:"discount"`
 
