@@ -17,6 +17,8 @@ import { purchasesRoute } from "./routes/app/purchasesRoute";
 import { quickSaleRoute } from "./routes/app/quickSaleRoute";
 import { reportsRoute } from "./routes/app/reportsRoute";
 import { saleDetailRoute } from "./routes/app/saleDetailRoute";
+import { saleDraftDetailRoute } from "./routes/app/saleDraftDetailRoute";
+import { saleDraftsListRoute } from "./routes/app/saleDraftsListRoute";
 import { salesListRoute } from "./routes/app/salesListRoute";
 import { settingsRoute } from "./routes/app/settingsRoute";
 import { staffRoute } from "./routes/app/staffRoute";
@@ -52,6 +54,13 @@ const routeTree = rootRoute.addChildren([
     // Phase 4 T6c: sales list/detail (cashier+ read; void/return manager+).
     salesListRoute,
     saleDetailRoute,
+    // Phase 5 T15: draft sales list/detail (cashier+ read/pay; edit/delete
+    // creator or manager+, D-87..D-89, D-96). Registered before
+    // `saleDetailRoute`'s dynamic `/sales/$id` is irrelevant to matching
+    // (static beats dynamic either way), but keeping it next to that route
+    // and `salesListRoute` groups every `/sales/*` route together.
+    saleDraftsListRoute,
+    saleDraftDetailRoute,
     reportsRoute,
     settingsRoute,
     stockLevelsRoute,

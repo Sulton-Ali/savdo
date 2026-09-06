@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   BarChart3,
   Boxes,
+  ClipboardList,
   Contact,
   FolderTree,
   History,
@@ -73,6 +74,14 @@ function AppShell() {
       key: "/sales",
       icon: <Receipt size={16} />,
       label: <Link to="/sales">{t("nav.sales")}</Link>,
+      permission: null,
+    },
+    // Phase 5 T15: draft sales — shared across staff, visible to every role
+    // (D-87, "Create sale" row of `docs/04-DATA-MODEL.md` § 7).
+    {
+      key: "/sales/drafts",
+      icon: <ClipboardList size={16} />,
+      label: <Link to="/sales/drafts">{t("nav.salesDrafts")}</Link>,
       permission: null,
     },
     {

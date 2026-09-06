@@ -49,6 +49,7 @@
     "stockMovements": "Stock movements",
     "stockLow": "Low stock",
     "quickSale": "Quick sale",
+    "salesDrafts": "Drafts",
     "reports": "Reports"
   },
   "auth": {
@@ -677,6 +678,84 @@
         "sold": "Sold",
         "returned": "Returned",
         "qty": "Return qty"
+      }
+    },
+    "drafts": {
+      "listTitle": "Drafts",
+      "empty": "No drafts yet.",
+      "filters": {
+        "mine": "My drafts only"
+      },
+      "columns": {
+        "createdAt": "Created",
+        "createdBy": "Created by",
+        "customer": "Customer",
+        "lines": "Lines",
+        "estimatedTotal": "Estimated total",
+        "note": "Note"
+      },
+      "createdByMe": "You",
+      "age": {
+        "justNow": "Just now",
+        "minutes_one": "{{count}} minute ago",
+        "minutes_few": "{{count}} minutes ago",
+        "minutes_many": "{{count}} minutes ago",
+        "minutes_other": "{{count}} minutes ago",
+        "hours_one": "{{count}} hour ago",
+        "hours_few": "{{count}} hours ago",
+        "hours_many": "{{count}} hours ago",
+        "hours_other": "{{count}} hours ago",
+        "days_one": "{{count}} day ago",
+        "days_few": "{{count}} days ago",
+        "days_many": "{{count}} days ago",
+        "days_other": "{{count}} days ago"
+      },
+      "detail": {
+        "title": "Draft",
+        "notFound": "This draft is no longer available.",
+        "items": "Items",
+        "unavailable": "Unavailable",
+        "fields": {
+          "location": "Location",
+          "customer": "Customer",
+          "createdBy": "Created by",
+          "note": "Note",
+          "discount": "Discount"
+        },
+        "columns": {
+          "product": "Product",
+          "variant": "Variant",
+          "qty": "Qty",
+          "unitPrice": "Unit price",
+          "lineTotal": "Line total"
+        },
+        "totals": {
+          "subtotal": "Subtotal",
+          "discount": "Discount",
+          "total": "Estimated total"
+        }
+      },
+      "pay": {
+        "action": "Pay",
+        "title": "Complete draft",
+        "submit": "Complete sale",
+        "success": "Sale completed"
+      },
+      "delete": {
+        "action": "Delete",
+        "confirm": "Delete this draft? This cannot be undone.",
+        "success": "Draft deleted"
+      },
+      "edit": {
+        "action": "Edit",
+        "title": "Edit draft",
+        "itemsNotice": "Line items cannot be edited here — delete and recreate the draft to change what's in it.",
+        "submit": "Save changes",
+        "success": "Draft updated"
+      },
+      "errors": {
+        "lineUnavailable": "Line no longer available: {{line}}",
+        "notFound": "This draft was already completed or deleted."
       }
     },
     "errors": {

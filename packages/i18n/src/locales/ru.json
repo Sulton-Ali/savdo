@@ -49,6 +49,7 @@
     "stockMovements": "Движения товара",
     "stockLow": "Низкий остаток",
     "quickSale": "Быстрая продажа",
+    "salesDrafts": "Черновики",
     "reports": "Отчёты"
   },
   "auth": {
@@ -677,6 +678,84 @@
         "sold": "Продано",
         "returned": "Возвращено",
         "qty": "Кол-во к возврату"
+      }
+    },
+    "drafts": {
+      "listTitle": "Черновики",
+      "empty": "Пока нет черновиков.",
+      "filters": {
+        "mine": "Только мои черновики"
+      },
+      "columns": {
+        "createdAt": "Создан",
+        "createdBy": "Создал",
+        "customer": "Клиент",
+        "lines": "Позиций",
+        "estimatedTotal": "Ориентировочная сумма",
+        "note": "Заметка"
+      },
+      "createdByMe": "Вы",
+      "age": {
+        "justNow": "Только что",
+        "minutes_one": "{{count}} минуту назад",
+        "minutes_few": "{{count}} минуты назад",
+        "minutes_many": "{{count}} минут назад",
+        "minutes_other": "{{count}} минуты назад",
+        "hours_one": "{{count}} час назад",
+        "hours_few": "{{count}} часа назад",
+        "hours_many": "{{count}} часов назад",
+        "hours_other": "{{count}} часа назад",
+        "days_one": "{{count}} день назад",
+        "days_few": "{{count}} дня назад",
+        "days_many": "{{count}} дней назад",
+        "days_other": "{{count}} дня назад"
+      },
+      "detail": {
+        "title": "Черновик",
+        "notFound": "Этот черновик больше недоступен.",
+        "items": "Позиции",
+        "unavailable": "Недоступно",
+        "fields": {
+          "location": "Точка продаж",
+          "customer": "Клиент",
+          "createdBy": "Создал",
+          "note": "Заметка",
+          "discount": "Скидка"
+        },
+        "columns": {
+          "product": "Товар",
+          "variant": "Вариант",
+          "qty": "Кол-во",
+          "unitPrice": "Цена за единицу",
+          "lineTotal": "Сумма позиции"
+        },
+        "totals": {
+          "subtotal": "Промежуточный итог",
+          "discount": "Скидка",
+          "total": "Ориентировочный итог"
+        }
+      },
+      "pay": {
+        "action": "Оплатить",
+        "title": "Завершить черновик",
+        "submit": "Завершить продажу",
+        "success": "Продажа завершена"
+      },
+      "delete": {
+        "action": "Удалить",
+        "confirm": "Удалить этот черновик? Это действие нельзя отменить.",
+        "success": "Черновик удалён"
+      },
+      "edit": {
+        "action": "Изменить",
+        "title": "Изменить черновик",
+        "itemsNotice": "Позиции нельзя редактировать здесь — удалите черновик и создайте новый, чтобы изменить его содержимое.",
+        "submit": "Сохранить изменения",
+        "success": "Черновик обновлён"
+      },
+      "errors": {
+        "lineUnavailable": "Позиция больше недоступна: {{line}}",
+        "notFound": "Этот черновик уже завершён или удалён."
       }
     },
     "errors": {
