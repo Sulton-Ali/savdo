@@ -154,10 +154,13 @@ export function SaleDraftDetailPage({ draftId }: { draftId: string }) {
     },
   ];
 
+  // Reason appended the same way `SaleDetailPage`'s totals.discount row
+  // does for a completed sale — a draft has no equivalent "totals" line for
+  // its manual discount to live on, so this header field carries it instead.
   const discountText = draft.discount
     ? `${t(`sales.discountType.${draft.discount.type}`)} ${draft.discount.value}${
         draft.discount.type === "percent" ? "%" : ""
-      }`
+      }${draft.discountReason ? ` — ${draft.discountReason}` : ""}`
     : "—";
 
   return (

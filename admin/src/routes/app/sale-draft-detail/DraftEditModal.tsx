@@ -27,6 +27,7 @@ interface EditFormValues {
   customer?: CustomerOption;
   discountType?: DiscountType;
   discountValue?: number;
+  discountReason?: string;
   note?: string;
 }
 
@@ -35,10 +36,15 @@ interface EditFormValues {
  * the button that opens this modal is already gated by
  * `canManageDraft`). Line items are out of scope for this page (the task
  * this shipped under does not build line editing); the modal only ever
- * sends `note`/`discountType`/`discountValue`/`customerId` — never `items`.
- * Clearing the discount (removing its type) sends an explicit `discountType:
- * null`, which clears the whole type/value pair per D-35's pairing rule for
- * `SaleDraftPatch`.
+ * sends `note`/`discountType`/`discountValue`/`discountReason`/`customerId`
+ * — never `items`. Clearing the discount (removing its type) sends explicit
+ * `discountType: null` AND `discountValue: null` (belt and suspenders on
+ * top of D-35's pairing rule, which would clear the pair from either null
+ * alone) plus `discountReason: null` — a reason with no discount is
+ * meaningless, the same rule `QuickSalePage` enforces when submitting a
+ * new sale. `discountValue` is required whenever `discountType` is set
+ * (`dependencies`-driven validator below) rather than silently dropping an
+ * incomplete discount.
  */
 export function DraftEditModal({
   draft,
@@ -89,6 +95,7 @@ export function DraftEditModal({
           : undefined,
       discountType: draft.discount?.type,
       discountValue: draft.discount ? Number(draft.discount.value) : undefined,
+      discountReason: draft.discountReason ?? undefined,
       note: draft.note ?? undefined,
     });
     setDiscountType(draft.discount?.type);
@@ -123,10 +130,23 @@ export function DraftEditModal({
           patch.discountType = values.discountType as DiscountType;
           patch.discountValue = normValue;
         }
+        // Only sent alongside an actual discount — a reason with no
+        // discount is meaningless and must never reach the server
+        // (same rule `QuickSalePage` enforces for `POST /sales`).
+        const normReason = values.discountReason?.trim() || null;
+        if (normReason !== (draft.discountReason ?? null)) {
+          patch.discountReason = normReason;
+        }
       } else if (draft.discount != null) {
         // Clearing either half of the type/value pair clears the whole
-        // discount (D-35) — sending `discountType: null` is enough.
+        // discount (D-35's pairing rule already does this from a single
+        // `null`), but both are sent explicitly here rather than relying
+        // on that — plus the now-meaningless reason.
         patch.discountType = null;
+        patch.discountValue = null;
+        if (draft.discountReason != null) {
+          patch.discountReason = null;
+        }
       }
 
       const normNote = values.note?.trim() || null;
@@ -174,7 +194,10 @@ export function DraftEditModal({
           if ("discountType" in changed) {
             setDiscountType(changed.discountType);
             if (!changed.discountType) {
+              // A reason or a value with no discount type is meaningless —
+              // clear both along with the type (phase-5/t15 review MINOR 2).
               form.setFieldValue("discountValue", undefined);
+              form.setFieldValue("discountReason", undefined);
             }
           }
         }}
@@ -202,7 +225,19 @@ export function DraftEditModal({
             }))}
           />
         </Form.Item>
-        <Form.Item name="discountValue" label={t("sales.fields.discountValue")}>
+        <Form.Item
+          name="discountValue"
+          label={t("sales.fields.discountValue")}
+          dependencies={["discountType"]}
+          rules={[
+            {
+              validator: (_, value) =>
+                form.getFieldValue("discountType") != null && value == null
+                  ? Promise.reject(new Error(t("errors.field.required")))
+                  : Promise.resolve(),
+            },
+          ]}
+        >
           <InputNumber
             aria-label={t("sales.fields.discountValue")}
             min={0}
@@ -210,6 +245,9 @@ export function DraftEditModal({
             disabled={!discountType}
             style={{ width: "100%" }}
           />
+        </Form.Item>
+        <Form.Item name="discountReason" label={t("sales.fields.discountReason")}>
+          <Input disabled={!discountType} />
         </Form.Item>
         <Form.Item name="note" label={t("sales.fields.note")}>
           <Input.TextArea rows={2} />
