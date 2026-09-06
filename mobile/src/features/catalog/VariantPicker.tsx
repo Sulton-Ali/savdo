@@ -14,10 +14,6 @@ import { useDebouncedValue } from "./hooks";
 import { resolveEffectivePrice } from "./pricing";
 import { formatQty } from "./qty";
 
-/** Matches every other free-text search in this app (`docs/05-API.md` §
- * Conventions: ILIKE/trigram search over a handful of characters is
- * noisy). */
-const MIN_QUERY_LENGTH = 2;
 const SEARCH_DEBOUNCE_MS = 300;
 
 function variantLabel(variant: Variant): string {
@@ -72,14 +68,18 @@ export function VariantPicker({ locationId, onPick, excludeVariantIds }: Variant
   const [rawQuery, setRawQuery] = useState("");
   const debouncedQuery = useDebouncedValue(rawQuery, SEARCH_DEBOUNCE_MS);
   const trimmedQuery = debouncedQuery.trim();
-  const searched = trimmedQuery.length >= MIN_QUERY_LENGTH;
 
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
 
+  // D-92: queries with an empty `q` as soon as this mounts, so the newest
+  // products show immediately (`listProducts` already treats `q: ""` as
+  // "no filter" — `{ q: q || undefined }`, same as `products/index.tsx`
+  // and `customers/index.tsx`'s own search screens); typing narrows the
+  // results via the debounced query above. No minimum query length either
+  // (dropped, was 2 chars) — D-92 explicitly asks for this.
   const productsQuery = useQuery({
     queryKey: catalogKeys.products({ q: trimmedQuery }),
     queryFn: () => listProducts({ q: trimmedQuery, cursor: null }),
-    enabled: searched,
   });
   const products = productsQuery.data?.items ?? [];
 
@@ -172,7 +172,7 @@ export function VariantPicker({ locationId, onPick, excludeVariantIds }: Variant
         data={products}
         keyExtractor={(product) => product.id}
         ListEmptyComponent={
-          searched && !productsQuery.isFetching ? (
+          !productsQuery.isFetching ? (
             <Text variant="muted" className="p-4 text-center">
               {t("mobile.catalog.picker.empty")}
             </Text>
