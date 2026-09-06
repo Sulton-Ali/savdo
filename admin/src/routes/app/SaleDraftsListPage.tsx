@@ -1,4 +1,4 @@
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useQueries } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Button, Card, Checkbox, Space, Table } from "antd";
 import type { ColumnsType } from "antd/es/table";
@@ -13,7 +13,6 @@ import { formatMoneyDisplay } from "../../lib/money";
 import { useCursorList } from "../../lib/useCursorList";
 import { fetchSaleDraftsPage, type SaleDraft } from "../../sales/draftsApi";
 import { type DraftAgeUnit, draftAge } from "../../sales/draftsHelpers";
-import { fetchStaffPage } from "../../staff/api";
 
 /** Formats a `SaleDraft.createdAt` age bucket as the drafts list's
  * secondary "5 minutes ago" text next to the formatted timestamp — the
@@ -34,17 +33,15 @@ function formatDraftAge(unit: DraftAgeUnit, value: number, t: TFunction): string
  * `SaleDraftDetailPage`. The "my drafts only" checkbox narrows the list via
  * `createdBy=<me>`, the same query param `GET /sales/drafts` documents.
  *
- * `createdBy` on the wire is only a staff id — unlike `Sale.cashierName` or
- * `StockMovement.createdByName`, `SaleDraft` has no server-resolved display
- * name (open contract gap, flagged in this task's report). This page shows
- * "You" for the caller's own drafts, resolves other creators' names via
- * `GET /staff` for the owner (the one role that endpoint allows), and falls
- * back to a dash for a manager or cashier looking at someone else's draft.
+ * `createdByName`, resolved server-side (mirrors `StockMovement.createdByName`),
+ * is shown for another staff member's draft; the caller's own draft shows
+ * "You" instead of their own name, and a `null` name (creator deleted or
+ * never recorded) shows a dash.
  */
 export function SaleDraftsListPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { me, isOwner } = useAuth();
+  const { me } = useAuth();
 
   const [mineOnly, setMineOnly] = useState(false);
   const filters = useMemo(
@@ -57,22 +54,6 @@ export function SaleDraftsListPage() {
     (cursor) => fetchSaleDraftsPage(filters, cursor),
   );
   const drafts = data?.pages.flatMap((page) => page.items) ?? [];
-
-  // Owner-only: the one role `GET /staff` allows (`docs/05-API.md`), used
-  // here purely to resolve another staff member's `createdBy` id to a
-  // display name — see the page doc comment above.
-  const { data: staffPage } = useQuery({
-    queryKey: ["staff-options"],
-    queryFn: () => fetchStaffPage(null),
-    enabled: isOwner,
-  });
-  const staffNameById = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const staffMember of staffPage?.items ?? []) {
-      map.set(staffMember.id, staffMember.fullName);
-    }
-    return map;
-  }, [staffPage]);
 
   // Same N+1-by-id pattern `StockLevelsPage` uses for its product lookups —
   // a small, client-cached page of drafts, one `GET /customers/{id}` per
@@ -105,10 +86,7 @@ export function SaleDraftsListPage() {
     if (draft.createdBy === me.user.id) {
       return t("sales.drafts.createdByMe");
     }
-    if (draft.createdBy && staffNameById.has(draft.createdBy)) {
-      return staffNameById.get(draft.createdBy) as string;
-    }
-    return "—";
+    return draft.createdByName ?? "—";
   }
 
   const columns: ColumnsType<SaleDraft> = [

@@ -128,6 +128,11 @@ export function SaleDraftDetailPage({ draftId }: { draftId: string }) {
   }
 
   const canManage = canManageDraft(draft.createdBy, me.user.id, can("sales.void"));
+  // "You" for the caller's own draft, otherwise the server-resolved name
+  // (`createdByName`, mirrors `StockMovement.createdByName`) or a dash when
+  // the creator has none on record.
+  const createdByText =
+    draft.createdBy === me.user.id ? t("sales.drafts.createdByMe") : (draft.createdByName ?? "—");
 
   const itemColumns: ColumnsType<SaleDraftItem> = [
     {
@@ -194,6 +199,9 @@ export function SaleDraftDetailPage({ draftId }: { draftId: string }) {
           </Descriptions.Item>
           <Descriptions.Item label={t("sales.drafts.detail.fields.customer")}>
             {draft.customerId ? (customer?.fullName ?? "…") : "—"}
+          </Descriptions.Item>
+          <Descriptions.Item label={t("sales.drafts.detail.fields.createdBy")}>
+            {createdByText}
           </Descriptions.Item>
           <Descriptions.Item label={t("sales.drafts.detail.fields.note")}>
             {draft.note ?? "—"}

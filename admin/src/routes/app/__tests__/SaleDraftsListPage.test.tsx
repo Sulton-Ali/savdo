@@ -77,6 +77,7 @@ function draft(overrides: Partial<SaleDraft> = {}): SaleDraft {
     discountAmount: "0.00",
     estimatedTotal: "50000.00",
     createdBy: "u1",
+    createdByName: "Test User",
     createdAt: "2026-09-06T11:55:00Z",
     updatedAt: "2026-09-06T11:55:00Z",
     ...overrides,
@@ -91,26 +92,6 @@ function mockEndpoints(draftItems: SaleDraft[] = [draft()]) {
   mockedApi.GET.mockImplementation(((path: string) => {
     if (path === "/sales/drafts") {
       return Promise.resolve(apiResult({ items: draftItems, nextCursor: null }));
-    }
-    if (path === "/staff") {
-      return Promise.resolve(
-        apiResult({
-          items: [
-            {
-              id: "u1",
-              username: "cashier1",
-              fullName: "Cashier One",
-              phone: null,
-              role: "cashier",
-              locale: "en",
-              isActive: true,
-              lastLoginAt: null,
-              createdAt: "2026-01-01T00:00:00Z",
-            },
-          ],
-          nextCursor: null,
-        }),
-      );
     }
     if (path === "/customers/{id}") {
       return Promise.resolve(
@@ -166,11 +147,28 @@ describe("SaleDraftsListPage", () => {
     expect(screen.getByText("1")).toBeTruthy();
   });
 
-  it("shows 'You' for the caller's own draft", async () => {
-    mockEndpoints([draft({ createdBy: "u1" })]);
+  it("shows 'You' for the caller's own draft even though createdByName is set", async () => {
+    mockEndpoints([draft({ createdBy: "u1", createdByName: "Test User" })]);
     renderPage("u1");
 
     expect(await screen.findByText("You")).toBeTruthy();
+  });
+
+  it("shows the server-resolved createdByName for another staff member's draft", async () => {
+    mockEndpoints([draft({ createdBy: "other-user", createdByName: "Cashier One" })]);
+    renderPage("u1");
+
+    expect(await screen.findByText("Cashier One")).toBeTruthy();
+  });
+
+  it("shows a dash when createdByName is null (creator has none on record)", async () => {
+    mockEndpoints([draft({ createdBy: null, createdByName: null })]);
+    renderPage("u1");
+
+    await screen.findByText("Gift wrap");
+    // Customer is also "—" on this fixture (no customerId) — both columns
+    // show the dash, so exactly two.
+    expect(screen.getAllByText("—")).toHaveLength(2);
   });
 
   it("navigates to the draft detail page on row click", async () => {

@@ -718,6 +718,7 @@
         "fields": {
           "location": "Filial",
           "customer": "Mijoz",
+          "createdBy": "Kim yaratgan",
           "note": "Izoh",
           "discount": "Chegirma"
         },

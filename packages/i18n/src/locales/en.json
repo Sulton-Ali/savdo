@@ -718,6 +718,7 @@
         "fields": {
           "location": "Location",
           "customer": "Customer",
+          "createdBy": "Created by",
           "note": "Note",
           "discount": "Discount"
         },

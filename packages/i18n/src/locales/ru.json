@@ -718,6 +718,7 @@
         "fields": {
           "location": "Точка продаж",
           "customer": "Клиент",
+          "createdBy": "Создал",
           "note": "Заметка",
           "discount": "Скидка"
         },

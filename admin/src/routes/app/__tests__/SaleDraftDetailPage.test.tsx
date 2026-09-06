@@ -78,6 +78,7 @@ function draftFixture(overrides: Partial<SaleDraft> = {}): SaleDraft {
     discountAmount: "0.00",
     estimatedTotal: "100000.00",
     createdBy: "creator1",
+    createdByName: "Creator One",
     createdAt: "2026-09-06T10:00:00Z",
     updatedAt: "2026-09-06T10:00:00Z",
     ...overrides,
@@ -197,6 +198,31 @@ describe("SaleDraftDetailPage", () => {
     // separators (`lib/money.ts`) — the line total, subtotal and estimated
     // total are all "100000.00" on this single-line fixture.
     expect(screen.getAllByText("100,000").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("shows the server-resolved createdByName for another staff member's draft", async () => {
+    renderPage(
+      draftFixture({ createdBy: "creator1", createdByName: "Creator One" }),
+      "someone-else",
+      ["sales.void"],
+    );
+
+    expect(await screen.findByText("Creator One")).toBeTruthy();
+  });
+
+  it("shows 'You' for the caller's own draft even though createdByName is set", async () => {
+    renderPage(draftFixture({ createdBy: "u1", createdByName: "Test User" }), "u1", []);
+
+    expect(await screen.findByText("You")).toBeTruthy();
+  });
+
+  it("shows a dash when createdByName is null", async () => {
+    renderPage(draftFixture({ createdBy: null, createdByName: null }), "u1", []);
+
+    await screen.findByText("Shirt");
+    // Customer and discount are also "—" on this fixture (neither set) —
+    // created by is the third.
+    expect(screen.getAllByText("—")).toHaveLength(3);
   });
 
   it("appends the discount reason to the discount field", async () => {

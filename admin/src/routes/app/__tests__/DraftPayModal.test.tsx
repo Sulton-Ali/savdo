@@ -48,6 +48,7 @@ function draftFixture(overrides: Partial<SaleDraft> = {}): SaleDraft {
     discountAmount: "0.00",
     estimatedTotal: "50000.00",
     createdBy: "u1",
+    createdByName: "Test User",
     createdAt: "2026-09-06T10:00:00Z",
     updatedAt: "2026-09-06T10:00:00Z",
     ...overrides,
