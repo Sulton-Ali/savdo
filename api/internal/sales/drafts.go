@@ -107,6 +107,29 @@ func resolveCreatedByName(ctx context.Context, q *db.Queries, shopID uuid.UUID, 
 	return &user.FullName, nil
 }
 
+// resolveCustomerName resolves customerID's display name for a
+// single-draft write response (CreateSaleDraftTx/UpdateSaleDraftTx),
+// mirroring resolveCreatedByName exactly: `RETURNING *` on an
+// INSERT/UPDATE has no join partner, unlike GetSaleDraft/ListSaleDrafts
+// below, which resolve the same field off their own shop-scoped LEFT
+// JOIN instead. nil for a nil customerID (no customer attached to the
+// draft) or a customer that no longer exists (GetCustomer's own
+// deleted_at IS NULL filter — soft-deleted since the draft was written)
+// is not an error.
+func resolveCustomerName(ctx context.Context, q *db.Queries, shopID uuid.UUID, customerID *uuid.UUID) (*string, error) {
+	if customerID == nil {
+		return nil, nil
+	}
+	customer, err := q.GetCustomer(ctx, db.GetCustomerParams{ShopID: shopID, ID: *customerID})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("sales: get customer (draft): %w", err)
+	}
+	return &customer.FullName, nil
+}
+
 // draftDisplayItem is one draft line priced, labelled and availability-
 // checked for the wire — priceDraftItemsBatch's own return shape,
 // converted to gen.SaleDraftItem by buildSaleDraftResponse below.
@@ -258,7 +281,7 @@ func draftDiscountFromRow(discountType *db.DiscountType, discountValue pgtype.Nu
 // DISCOUNT_EXCEEDS_SUBTOTAL, D-57), but a plain read never fails over
 // it, and a PATCH touching neither leaves a stale discount alone
 // (review MINOR).
-func assembleSaleDraft(draft db.SaleDraft, priced []draftDisplayItem, createdByName *string) (gen.SaleDraft, error) {
+func assembleSaleDraft(draft db.SaleDraft, priced []draftDisplayItem, createdByName, customerName *string) (gen.SaleDraft, error) {
 	items := make([]gen.SaleDraftItem, len(priced))
 	subtotal := decimal.Zero
 	for i, it := range priced {
@@ -289,7 +312,8 @@ func assembleSaleDraft(draft db.SaleDraft, priced []draftDisplayItem, createdByN
 
 	return gen.SaleDraft{
 		Id: draft.ID, LocationId: draft.LocationID, CustomerId: nullableUUID(draft.CustomerID),
-		Discount: nullableSaleDiscount(discount), DiscountReason: nullableString(draft.DiscountReason), Note: nullableString(draft.Note),
+		CustomerName: nullableString(customerName),
+		Discount:     nullableSaleDiscount(discount), DiscountReason: nullableString(draft.DiscountReason), Note: nullableString(draft.Note),
 		Items: items, Subtotal: money.String(subtotal), DiscountAmount: money.String(discountAmount),
 		EstimatedTotal: money.String(estimatedTotal), CreatedBy: nullableUUID(draft.CreatedBy),
 		CreatedByName: nullableString(createdByName),
@@ -303,16 +327,17 @@ func assembleSaleDraft(draft db.SaleDraft, priced []draftDisplayItem, createdByN
 // CreateSaleDraftTx, UpdateSaleDraftTx) needs. q is the caller's own
 // *db.Queries — h.svc.q for a plain read (GetSaleDraft) or a qtx still
 // inside the caller's transaction (every write's own response).
-// createdByName is resolved by the caller (GetSaleDraft's own LEFT JOIN
-// row, or resolveCreatedByName for a write's plain `RETURNING *` row) —
-// this function never queries it itself, the same split toGenMovement
-// (stock/convert.go) draws for StockMovement.createdByName.
-func buildSaleDraftResponse(ctx context.Context, q *db.Queries, shopID uuid.UUID, draft db.SaleDraft, createdByName *string, now time.Time, loc *time.Location, locale string, defs []db.ListAttributeDefinitionsRow) (gen.SaleDraft, error) {
+// createdByName/customerName are resolved by the caller (GetSaleDraft's
+// own LEFT JOIN row, or resolveCreatedByName/resolveCustomerName for a
+// write's plain `RETURNING *` row) — this function never queries either
+// itself, the same split toGenMovement (stock/convert.go) draws for
+// StockMovement.createdByName.
+func buildSaleDraftResponse(ctx context.Context, q *db.Queries, shopID uuid.UUID, draft db.SaleDraft, createdByName, customerName *string, now time.Time, loc *time.Location, locale string, defs []db.ListAttributeDefinitionsRow) (gen.SaleDraft, error) {
 	byDraft, err := priceDraftItemsBatch(ctx, q, shopID, []uuid.UUID{draft.ID}, locale, now, loc, defs)
 	if err != nil {
 		return gen.SaleDraft{}, err
 	}
-	return assembleSaleDraft(draft, byDraft[draft.ID], createdByName)
+	return assembleSaleDraft(draft, byDraft[draft.ID], createdByName, customerName)
 }
 
 // nullableSaleDiscount converts a *gen.SaleDiscount (nil = SQL NULL) to
