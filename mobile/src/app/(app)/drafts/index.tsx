@@ -37,24 +37,32 @@ function DraftCustomerText({ customerId }: { customerId: string | null }) {
 }
 
 /**
- * `draft.createdBy` is only a staff id (`SaleDraft` has no
- * `createdByName`, unlike `StockMovement.createdByName`'s established
- * server-side-resolved-name pattern) and `GET /staff` is owner-only
- * (`docs/05-API.md`), so a cashier/manager cannot resolve another staff
- * member's name client-side at all — this only ever distinguishes "you"
- * from "someone else" rather than naming them; see this task's own report
- * for the contract gap.
+ * `draft.createdByName` is resolved server-side (mirrors
+ * `StockMovement.createdByName`, T17, merged into `main` after this task's
+ * branch was cut — rebased onto it rather than shipping the
+ * you/other-staff-only workaround an earlier version of this file used
+ * while the contract still lacked it). Shown as "You" for the caller's own
+ * draft rather than their own name, otherwise the resolved name, falling
+ * back to "Unknown" for a draft whose creator has since been removed
+ * (`createdByName: null`, `SaleDraft`'s own doc comment).
  */
-function DraftCreatedByText({ createdBy }: { createdBy: string | null }) {
+function DraftCreatedByText({
+  createdBy,
+  createdByName,
+}: {
+  createdBy: string | null;
+  createdByName: string | null;
+}) {
   const { t } = useTranslation();
   const { me } = useSession();
-  if (!createdBy) {
-    return <Text variant="muted">{t("mobile.drafts.createdBy.unknown")}</Text>;
-  }
-  if (createdBy === me?.user.id) {
+  if (createdBy && createdBy === me?.user.id) {
     return <Text variant="muted">{t("mobile.drafts.createdBy.you")}</Text>;
   }
-  return <Text variant="muted">{t("mobile.drafts.createdBy.other")}</Text>;
+  return (
+    <Text variant="muted" numberOfLines={1}>
+      {createdByName ?? t("mobile.drafts.createdBy.unknown")}
+    </Text>
+  );
 }
 
 function DraftRow({
@@ -83,7 +91,7 @@ function DraftRow({
           {t("mobile.drafts.list.lineCount", { count: draft.items.length })}
         </Text>
       </View>
-      <DraftCreatedByText createdBy={draft.createdBy} />
+      <DraftCreatedByText createdBy={draft.createdBy} createdByName={draft.createdByName} />
     </Pressable>
   );
 }
