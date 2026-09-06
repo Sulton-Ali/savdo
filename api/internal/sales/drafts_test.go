@@ -25,10 +25,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/oapi-codegen/nullable"
+	"github.com/shopspring/decimal"
 
 	"github.com/Sulton-Ali/savdo/api/gen"
 	"github.com/Sulton-Ali/savdo/api/internal/apierr"
 	"github.com/Sulton-Ali/savdo/api/internal/db"
+	"github.com/Sulton-Ali/savdo/api/internal/money"
 	"github.com/Sulton-Ali/savdo/api/internal/sales"
 )
 
@@ -981,5 +983,129 @@ func TestCompleteSaleDraftTx_concurrentCompletesYieldOneSaleOneMovementLoser404(
 	}
 	if n := countMovements(ctx, t, pool, shop.ID, variant.ID, loc.ID, db.StockMovementKindSaleOut); n != 1 {
 		t.Fatalf("sale_out movements = %d, want exactly 1", n)
+	}
+}
+
+// TestSaleDraft_createdByNameResolvedOnCreateGetAndList covers T17: the
+// creator's display name is resolved server-side and appears on every
+// response that carries a SaleDraft — CreateSaleDraftTx's own
+// resolveCreatedByName lookup, GetSaleDraft's and ListSaleDrafts' own LEFT
+// JOIN (drafts_read.go) — never left for the client to look up itself.
+func TestSaleDraft_createdByNameResolvedOnCreateGetAndList(t *testing.T) {
+	pool, q := newTestQueries(t)
+	ctx := context.Background()
+	h := sales.NewHandler(sales.NewService(q))
+
+	shop := seedShop(ctx, t, q, "draft-created-by-name")
+	cashier := seedUser(ctx, t, q, shop.ID, "cashier1", db.UserRoleCashier)
+	unit := seedUnit(ctx, t, q, shop.ID, "pcs")
+	product := seedProduct(ctx, t, q, shop.ID, unit.ID, "draft-created-by-name-product", "50.00", productOpts{})
+	variant := seedVariant(ctx, t, q, shop.ID, product.ID)
+	loc := seedLocation(ctx, t, q, shop.ID, "Main")
+	cashierCtx := ctxAs(shop.ID, cashier)
+	wantName := "Sales Test User cashier1"
+
+	created, err := createDraft(cashierCtx, t, h, pool, q, draftBody(loc.ID, variant.ID, "1.000"))
+	if err != nil {
+		t.Fatalf("createDraft: %v", err)
+	}
+	if !created.CreatedByName.IsSpecified() || created.CreatedByName.IsNull() || created.CreatedByName.MustGet() != wantName {
+		t.Fatalf("create CreatedByName = %+v, want %q", created.CreatedByName, wantName)
+	}
+
+	getResp, err := h.GetSaleDraft(cashierCtx, gen.GetSaleDraftRequestObject{Id: created.Id})
+	if err != nil {
+		t.Fatalf("GetSaleDraft: %v", err)
+	}
+	got, ok := getResp.(gen.GetSaleDraft200JSONResponse)
+	if !ok {
+		t.Fatalf("GetSaleDraft response type = %T", getResp)
+	}
+	if !got.CreatedByName.IsSpecified() || got.CreatedByName.IsNull() || got.CreatedByName.MustGet() != wantName {
+		t.Fatalf("get CreatedByName = %+v, want %q", got.CreatedByName, wantName)
+	}
+
+	listResp, err := h.ListSaleDrafts(cashierCtx, gen.ListSaleDraftsRequestObject{})
+	if err != nil {
+		t.Fatalf("ListSaleDrafts: %v", err)
+	}
+	list, ok := listResp.(gen.ListSaleDrafts200JSONResponse)
+	if !ok || len(list.Items) != 1 {
+		t.Fatalf("ListSaleDrafts = %+v, want exactly one item", listResp)
+	}
+	if !list.Items[0].CreatedByName.IsSpecified() || list.Items[0].CreatedByName.IsNull() || list.Items[0].CreatedByName.MustGet() != wantName {
+		t.Fatalf("list CreatedByName = %+v, want %q", list.Items[0].CreatedByName, wantName)
+	}
+
+	// UpdateSaleDraftTx's own response resolves the same (unchanged)
+	// creator's name (resolveCreatedByName off the updated row's
+	// created_by, drafts_write.go), not the acting caller's.
+	note := "still cashier1's draft"
+	updated, err := updateDraft(cashierCtx, t, h, pool, q, created.Id, &gen.SaleDraftPatch{Note: nullable.NewNullableWithValue(note)})
+	if err != nil {
+		t.Fatalf("updateDraft: %v", err)
+	}
+	if !updated.CreatedByName.IsSpecified() || updated.CreatedByName.IsNull() || updated.CreatedByName.MustGet() != wantName {
+		t.Fatalf("update CreatedByName = %+v, want %q", updated.CreatedByName, wantName)
+	}
+}
+
+// TestSaleDraft_createdByNameNullForNilCreatedBy covers T17's other half:
+// a draft with no creator on record (D-89's own defensive nullability —
+// CreateSaleDraftTx itself always sets created_by to the authenticated
+// caller, so this is inserted directly) renders createdByName as null on
+// both GetSaleDraft and ListSaleDrafts rather than an empty string or an
+// error.
+func TestSaleDraft_createdByNameNullForNilCreatedBy(t *testing.T) {
+	_, q := newTestQueries(t)
+	ctx := context.Background()
+	h := sales.NewHandler(sales.NewService(q))
+
+	shop := seedShop(ctx, t, q, "draft-created-by-name-null")
+	cashier := seedUser(ctx, t, q, shop.ID, "cashier1", db.UserRoleCashier)
+	unit := seedUnit(ctx, t, q, shop.ID, "pcs")
+	product := seedProduct(ctx, t, q, shop.ID, unit.ID, "draft-created-by-name-null-product", "50.00", productOpts{})
+	variant := seedVariant(ctx, t, q, shop.ID, product.ID)
+	loc := seedLocation(ctx, t, q, shop.ID, "Main")
+	cashierCtx := ctxAs(shop.ID, cashier)
+
+	draft, err := q.CreateSaleDraft(ctx, db.CreateSaleDraftParams{
+		ID: uuid.New(), ShopID: shop.ID, LocationID: loc.ID, CreatedBy: nil,
+	})
+	if err != nil {
+		t.Fatalf("CreateSaleDraft: %v", err)
+	}
+	if _, err := q.InsertSaleDraftItem(ctx, db.InsertSaleDraftItemParams{
+		ID: uuid.New(), ShopID: shop.ID, SaleDraftID: draft.ID, VariantID: variant.ID,
+		Qty: money.ToNumeric(decimal.NewFromInt(1)), Position: 0,
+	}); err != nil {
+		t.Fatalf("InsertSaleDraftItem: %v", err)
+	}
+
+	getResp, err := h.GetSaleDraft(cashierCtx, gen.GetSaleDraftRequestObject{Id: draft.ID})
+	if err != nil {
+		t.Fatalf("GetSaleDraft: %v", err)
+	}
+	got, ok := getResp.(gen.GetSaleDraft200JSONResponse)
+	if !ok {
+		t.Fatalf("GetSaleDraft response type = %T", getResp)
+	}
+	if !got.CreatedByName.IsSpecified() || !got.CreatedByName.IsNull() {
+		t.Fatalf("get CreatedByName = %+v, want an explicit null", got.CreatedByName)
+	}
+	if !got.CreatedBy.IsSpecified() || !got.CreatedBy.IsNull() {
+		t.Fatalf("get CreatedBy = %+v, want an explicit null", got.CreatedBy)
+	}
+
+	listResp, err := h.ListSaleDrafts(cashierCtx, gen.ListSaleDraftsRequestObject{})
+	if err != nil {
+		t.Fatalf("ListSaleDrafts: %v", err)
+	}
+	list, ok := listResp.(gen.ListSaleDrafts200JSONResponse)
+	if !ok || len(list.Items) != 1 {
+		t.Fatalf("ListSaleDrafts = %+v, want exactly one item", listResp)
+	}
+	if !list.Items[0].CreatedByName.IsSpecified() || !list.Items[0].CreatedByName.IsNull() {
+		t.Fatalf("list CreatedByName = %+v, want an explicit null", list.Items[0].CreatedByName)
 	}
 }

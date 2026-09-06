@@ -34,13 +34,14 @@ func (h *Handler) GetSaleDraft(ctx context.Context, req gen.GetSaleDraftRequestO
 		return nil, err
 	}
 
-	draft, err := h.svc.q.GetSaleDraft(ctx, db.GetSaleDraftParams{ShopID: authCtx.ShopID, ID: req.Id})
+	row, err := h.svc.q.GetSaleDraft(ctx, db.GetSaleDraftParams{ShopID: authCtx.ShopID, ID: req.Id})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, apierr.NotFound("draft")
 		}
 		return nil, fmt.Errorf("sales: get sale draft: %w", err)
 	}
+	draft := saleDraftFromGetRow(row)
 
 	locale, loc, err := shopClock(ctx, h.svc.q, authCtx.ShopID)
 	if err != nil {
@@ -50,18 +51,42 @@ func (h *Handler) GetSaleDraft(ctx context.Context, req gen.GetSaleDraftRequestO
 	if err != nil {
 		return nil, fmt.Errorf("sales: list attribute definitions: %w", err)
 	}
-	resp, err := buildSaleDraftResponse(ctx, h.svc.q, authCtx.ShopID, draft, h.svc.now(), loc, locale, defs)
+	resp, err := buildSaleDraftResponse(ctx, h.svc.q, authCtx.ShopID, draft, row.CreatedByName, h.svc.now(), loc, locale, defs)
 	if err != nil {
 		return nil, err
 	}
 	return gen.GetSaleDraft200JSONResponse(resp), nil
 }
 
+// saleDraftFromGetRow strips GetSaleDraft's own LEFT JOIN column
+// (created_by_name) down to the plain db.SaleDraft shape every other
+// draft query already returns, so buildSaleDraftResponse/assembleSaleDraft
+// take one struct type regardless of how their caller resolved the name —
+// mirrors ListStockMovements' own db.StockMovement{...} conversion off
+// ListMovementsWithCreatedByNameRow (stock/movements.go).
+func saleDraftFromGetRow(r db.GetSaleDraftRow) db.SaleDraft {
+	return db.SaleDraft{
+		ID: r.ID, ShopID: r.ShopID, LocationID: r.LocationID, CustomerID: r.CustomerID,
+		DiscountType: r.DiscountType, DiscountValue: r.DiscountValue, DiscountReason: r.DiscountReason,
+		Note: r.Note, CreatedBy: r.CreatedBy, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+	}
+}
+
+// saleDraftFromListRow is saleDraftFromGetRow for ListSaleDrafts' own
+// identically-shaped LEFT JOIN row.
+func saleDraftFromListRow(r db.ListSaleDraftsRow) db.SaleDraft {
+	return db.SaleDraft{
+		ID: r.ID, ShopID: r.ShopID, LocationID: r.LocationID, CustomerID: r.CustomerID,
+		DiscountType: r.DiscountType, DiscountValue: r.DiscountValue, DiscountReason: r.DiscountReason,
+		Note: r.Note, CreatedBy: r.CreatedBy, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+	}
+}
+
 // paginateSaleDrafts trims rows (fetched with limit+1) down to at most
 // limit items and reports the opaque cursor for the next page — mirrors
 // paginateSalesForStaff (list.go), specialized to db.SaleDraft's own
 // (created_at, id) keyset.
-func paginateSaleDrafts(rows []db.SaleDraft, limit int32) ([]db.SaleDraft, *string) {
+func paginateSaleDrafts(rows []db.ListSaleDraftsRow, limit int32) ([]db.ListSaleDraftsRow, *string) {
 	if len(rows) <= int(limit) {
 		return rows, nil
 	}
@@ -131,7 +156,7 @@ func (h *Handler) ListSaleDrafts(ctx context.Context, req gen.ListSaleDraftsRequ
 
 	items := make([]gen.SaleDraft, len(pageRows))
 	for i, r := range pageRows {
-		g, err := assembleSaleDraft(r, byDraft[r.ID])
+		g, err := assembleSaleDraft(saleDraftFromListRow(r), byDraft[r.ID], r.CreatedByName)
 		if err != nil {
 			return nil, err
 		}

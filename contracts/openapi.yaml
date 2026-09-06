@@ -4777,6 +4777,7 @@ components:
         - discountAmount
         - estimatedTotal
         - createdBy
+        - createdByName
         - createdAt
         - updatedAt
       properties:
@@ -4844,6 +4845,13 @@ components:
             no creator on record, editable/deletable only by `manager+`
             in that case (D-89). Any staff who may create a sale may
             complete the draft regardless of `createdBy` (D-96).
+        createdByName:
+          type: ["string", "null"]
+          description: >
+            The creating user's display name, resolved server-side
+            (mirrors `StockMovement.createdByName`, avoiding a second
+            lookup by `createdBy`); `null` when `createdBy` is `null` or
+            the user no longer exists.
         createdAt:
           type: string
           format: date-time

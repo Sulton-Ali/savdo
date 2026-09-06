@@ -144,7 +144,11 @@ func (h *Handler) CreateSaleDraftTx(ctx context.Context, qtx *db.Queries, body *
 	if err != nil {
 		return gen.SaleDraft{}, fmt.Errorf("sales: list attribute definitions: %w", err)
 	}
-	return buildSaleDraftResponse(ctx, qtx, authCtx.ShopID, draft, now, loc, locale, defs)
+	createdByName, err := resolveCreatedByName(ctx, qtx, authCtx.ShopID, draft.CreatedBy)
+	if err != nil {
+		return gen.SaleDraft{}, err
+	}
+	return buildSaleDraftResponse(ctx, qtx, authCtx.ShopID, draft, createdByName, now, loc, locale, defs)
 }
 
 // draftDiscountPatch is resolveDraftDiscountPatch's own result: the
@@ -403,7 +407,11 @@ func (h *Handler) UpdateSaleDraftTx(ctx context.Context, qtx *db.Queries, id uui
 		}
 	}
 
-	return buildSaleDraftResponse(ctx, qtx, authCtx.ShopID, updated, now, loc, locale, defs)
+	createdByName, err := resolveCreatedByName(ctx, qtx, authCtx.ShopID, updated.CreatedBy)
+	if err != nil {
+		return gen.SaleDraft{}, err
+	}
+	return buildSaleDraftResponse(ctx, qtx, authCtx.ShopID, updated, createdByName, now, loc, locale, defs)
 }
 
 // DeleteSaleDraftTx deletes a draft (DELETE /sales/drafts/{id}, D-89):
