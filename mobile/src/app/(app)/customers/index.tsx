@@ -3,6 +3,7 @@ import { Search, UserPlus } from "lucide-react-native";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ActivityIndicator, FlatList, Pressable, TextInput, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Button } from "@/components/ui/button";
 import { Text } from "@/components/ui/text";
@@ -33,10 +34,14 @@ function CustomerRow({ customer, onPress }: { customer: Customer; onPress: () =>
  * Customers list (T4 deliverable 3): search by name/phone, cursor-
  * paginated, plus an "Add customer" entry to `customers/new.tsx` — every
  * `cashier+` role may browse and create (`docs/04-DATA-MODEL.md` § 7).
+ * `insets.bottom` (D-95) pads the list — see `customers/[id].tsx`'s doc
+ * comment for why this stack needs it now that it's a drawer item (T12)
+ * rather than a bottom tab.
  */
 export default function CustomersScreen() {
   const { t } = useTranslation();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [rawQuery, setRawQuery] = useState("");
   const debouncedQuery = useDebouncedValue(rawQuery, SEARCH_DEBOUNCE_MS);
 
@@ -90,7 +95,7 @@ export default function CustomersScreen() {
       ) : (
         <FlatList
           className="flex-1 px-4"
-          contentContainerStyle={{ paddingVertical: 12, gap: 8 }}
+          contentContainerStyle={{ paddingTop: 12, paddingBottom: insets.bottom + 12, gap: 8 }}
           data={customers}
           keyExtractor={(customer) => customer.id}
           refreshing={isRefetching}

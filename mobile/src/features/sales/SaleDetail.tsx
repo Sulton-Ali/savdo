@@ -4,10 +4,11 @@ import { ActivityIndicator, Pressable, ScrollView, View } from "react-native";
 
 import { Text } from "@/components/ui/text";
 import { formatQty } from "@/features/catalog/qty";
-import type { SaleItem } from "@/features/sales/api";
 import { useSale } from "@/features/sales/hooks";
 import { formatMoney } from "@/lib/money";
 import { useSession } from "@/lib/session";
+
+import type { SaleItem } from "./api";
 
 function ItemRow({ item, currency }: { item: SaleItem; currency: string }) {
   const { t } = useTranslation();
@@ -37,6 +38,15 @@ function ItemRow({ item, currency }: { item: SaleItem; currency: string }) {
  * only for a caller with `cost.read` (manager+) and is never read here
  * regardless (ADR-010, hard rule 5, this task's own instruction 6). No
  * void/return action — those stay web-only for Phase 5 (task scope).
+ *
+ * Shared by two routes (T12 follow-up): `(tabs)/sale/[id].tsx` (`/sale/{id}`,
+ * the Quick sale tab's own stack — reached from the post-Pay confirmation,
+ * a customer's purchase history, or this same screen's own "view original"
+ * link for a return) and `(tabs)/sales/[id].tsx` (`/sales/{id}`, the Sales
+ * list tab's own stack, so its native back button and Android back return
+ * to the list rather than unwinding across tabs). Both route files are a
+ * one-line re-export of this component — no duplication, and each keeps
+ * its own `id` param from `useLocalSearchParams` here.
  */
 export default function SaleDetailScreen() {
   const { t } = useTranslation();

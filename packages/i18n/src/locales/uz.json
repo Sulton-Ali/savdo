@@ -502,6 +502,7 @@
     "presetLabel": "Davr",
     "presets": {
       "today": "Bugun",
+      "yesterday": "Kecha",
       "last7Days": "Oxirgi 7 kun",
       "thisMonth": "Shu oy"
     },
@@ -696,7 +697,10 @@
       "server": "Server manzili",
       "serverInsecure": "Oddiy http:// faqat mahalliy manzillar uchun (127.0.0.1, 10.x, 172.16–31.x, 192.168.x). Boshqa hollarda https:// dan foydalaning.",
       "outageEscape": "Serverni almashtirish yoki chiqish",
+      "menu": "Menyu",
       "tabs": {
+        "home": "Asosiy",
+        "quickSale": "Tezkor sotuv",
         "stock": "Qoldiq"
       }
     },
@@ -788,7 +792,16 @@
       },
       "list": {
         "title": "Bugungi sotuvlar",
-        "empty": "Bugun hali sotuvlar yo‘q."
+        "empty": "Bugun hali sotuvlar yo‘q.",
+        "link": "Sotuvlar ro‘yxati",
+        "emptyRange": "Bu davrda sotuvlar yo‘q.",
+        "fields": {
+          "from": "Dan",
+          "to": "Gacha"
+        },
+        "errors": {
+          "invalidRange": "Sanani YYYY-MM-DD formatida kiriting, boshlanish sanasi tugash sanasidan keyin bo‘lmasin."
+        }
       }
     },
     "customers": {

@@ -230,7 +230,7 @@ export default function HomeScreen() {
                     value: `${lowStockCount}${lowStockHasMore ? "+" : ""}`,
                   })}
                 </Text>
-                <Pressable accessibilityRole="button" onPress={() => router.push("/stock")}>
+                <Pressable accessibilityRole="button" onPress={() => router.push("/stock/low")}>
                   <Text className="text-primary">{t("reports.lowStock.link")}</Text>
                 </Pressable>
               </View>
