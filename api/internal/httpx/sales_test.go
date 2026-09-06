@@ -534,3 +534,157 @@ func TestVoidSale_cashierForbiddenWithNoSideEffect(t *testing.T) {
 		t.Fatalf("sale status = %q, want completed (unchanged)", status)
 	}
 }
+
+// createSaleDraftReq builds a one-line CreateSaleDraftRequestObject —
+// mirrors createSaleReq, minus payment/Idempotency-Key (POST
+// /sales/drafts carries none, D-87/D-89).
+func createSaleDraftReq(locationID, variantID uuid.UUID, qty string) gen.CreateSaleDraftRequestObject {
+	return gen.CreateSaleDraftRequestObject{
+		Body: &gen.SaleDraftCreate{
+			LocationId: locationID,
+			Items:      []gen.SaleItemCreate{{VariantId: variantID, Qty: qty}},
+		},
+	}
+}
+
+// mustCreateSaleDraft runs a plain CreateSaleDraft through the server and
+// unmarshals its response — a fixture step the completion idempotency
+// tests below need (an existing draft to complete), not itself the
+// behaviour under test. Mirrors mustCreateSale.
+func mustCreateSaleDraft(t *testing.T, f saleFixture, qty string) gen.SaleDraft {
+	t.Helper()
+	resp, err := f.srv.CreateSaleDraft(f.cashierCtx, createSaleDraftReq(f.locationID, f.variantID, qty))
+	if err != nil {
+		t.Fatalf("CreateSaleDraft (fixture): %v", err)
+	}
+	draft, ok := resp.(gen.CreateSaleDraft201JSONResponse)
+	if !ok {
+		t.Fatalf("CreateSaleDraft response type = %T", resp)
+	}
+	return gen.SaleDraft(draft)
+}
+
+func completeSaleDraftReq(id uuid.UUID, method gen.PaymentMethod, key *string) gen.CompleteSaleDraftRequestObject {
+	return gen.CompleteSaleDraftRequestObject{
+		Id:     id,
+		Params: gen.CompleteSaleDraftParams{IdempotencyKey: key},
+		Body:   &gen.SaleDraftComplete{PaymentMethod: method},
+	}
+}
+
+// TestCompleteSaleDraft_idempotentReplayReturnsIdenticalSaleNoSecondMovementDraftGone
+// mirrors TestCreateSale_idempotentReplayReturnsIdenticalBodyNoSecondMovement:
+// a replayed Idempotency-Key must return the first response unchanged,
+// must never write a second sale_out movement or a second sale, and must
+// not attempt to touch the draft a second time — it is already gone after
+// the first, successful completion, and the replay must still succeed
+// (Idempotent's own "return the stored response, never re-run fn" rule).
+func TestCompleteSaleDraft_idempotentReplayReturnsIdenticalSaleNoSecondMovementDraftGone(t *testing.T) {
+	f := newSaleFixture(t)
+	draft := mustCreateSaleDraft(t, f, "1.000")
+	key := "complete-draft-key-1"
+
+	resp1, err := f.srv.CompleteSaleDraft(f.cashierCtx, completeSaleDraftReq(draft.Id, gen.Cash, &key))
+	if err != nil {
+		t.Fatalf("first complete: %v", err)
+	}
+	resp2, err := f.srv.CompleteSaleDraft(f.cashierCtx, completeSaleDraftReq(draft.Id, gen.Cash, &key))
+	if err != nil {
+		t.Fatalf("replay complete: %v", err)
+	}
+
+	var s1, s2 gen.Sale
+	if err := json.Unmarshal(resp1.(rawJSONResponse).body, &s1); err != nil {
+		t.Fatalf("unmarshal resp1: %v", err)
+	}
+	if err := json.Unmarshal(resp2.(rawJSONResponse).body, &s2); err != nil {
+		t.Fatalf("unmarshal resp2: %v", err)
+	}
+	if s1.Id != s2.Id || s1.Number != s2.Number || s1.Total != s2.Total {
+		t.Fatalf("replay body differs: %+v != %+v", s1, s2)
+	}
+	if s1.Status != gen.SaleStatus(db.SaleStatusCompleted) {
+		t.Fatalf("Status = %q, want completed", s1.Status)
+	}
+
+	var movementCount int
+	if err := f.pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM stock_movements WHERE shop_id = $1 AND variant_id = $2 AND location_id = $3 AND kind = 'sale_out'`,
+		f.shopID, f.variantID, f.locationID).Scan(&movementCount); err != nil {
+		t.Fatalf("count movements: %v", err)
+	}
+	if movementCount != 1 {
+		t.Fatalf("sale_out movements = %d, want 1 (the replay must not have written a second one)", movementCount)
+	}
+
+	var salesCount int
+	if err := f.pool.QueryRow(context.Background(), `SELECT count(*) FROM sales WHERE shop_id = $1`, f.shopID).Scan(&salesCount); err != nil {
+		t.Fatalf("count sales: %v", err)
+	}
+	if salesCount != 1 {
+		t.Fatalf("sales rows = %d, want 1 (the replay must not have created a second sale)", salesCount)
+	}
+
+	var draftCount int
+	if err := f.pool.QueryRow(context.Background(), `SELECT count(*) FROM sale_drafts WHERE shop_id = $1`, f.shopID).Scan(&draftCount); err != nil {
+		t.Fatalf("count sale_drafts: %v", err)
+	}
+	if draftCount != 0 {
+		t.Fatalf("sale_drafts rows = %d, want 0 (completion deletes the draft; the replay must not error over its absence)", draftCount)
+	}
+}
+
+// TestCompleteSaleDraft_sameKeyDifferentBodyReturns409 mirrors
+// TestCreateSale_sameKeyDifferentBodyReturns409: the same draft id and
+// key with a different payment method is a different canonical request
+// and must be rejected outright, not replayed and not run again.
+func TestCompleteSaleDraft_sameKeyDifferentBodyReturns409(t *testing.T) {
+	f := newSaleFixture(t)
+	draft := mustCreateSaleDraft(t, f, "1.000")
+	key := "complete-draft-key-shared"
+
+	if _, err := f.srv.CompleteSaleDraft(f.cashierCtx, completeSaleDraftReq(draft.Id, gen.Cash, &key)); err != nil {
+		t.Fatalf("first complete: %v", err)
+	}
+
+	_, err := f.srv.CompleteSaleDraft(f.cashierCtx, completeSaleDraftReq(draft.Id, gen.Card, &key))
+	if err == nil {
+		t.Fatal("want 409 IDEMPOTENCY_KEY_REUSED for a different body reusing the key, got no error")
+	}
+	var apiErr *apierr.Error
+	if !errors.As(err, &apiErr) || apiErr.Status != 409 || apiErr.Code != gen.IDEMPOTENCYKEYREUSED {
+		t.Fatalf("error = %v, want 409 IDEMPOTENCY_KEY_REUSED", err)
+	}
+
+	var salesCount int
+	if err := f.pool.QueryRow(context.Background(), `SELECT count(*) FROM sales WHERE shop_id = $1`, f.shopID).Scan(&salesCount); err != nil {
+		t.Fatalf("count sales: %v", err)
+	}
+	if salesCount != 1 {
+		t.Fatalf("sales rows = %d, want 1 (the reused key must never have run a second write)", salesCount)
+	}
+}
+
+// TestCompleteSaleDraft_noKeyEachCallCompletesItsOwnDraft mirrors
+// TestCreateSale_noKeyEachCallWritesItsOwnSale: with no Idempotency-Key,
+// completing two separate drafts is two separate writes.
+func TestCompleteSaleDraft_noKeyEachCallCompletesItsOwnDraft(t *testing.T) {
+	f := newSaleFixture(t)
+	draftA := mustCreateSaleDraft(t, f, "1.000")
+	draftB := mustCreateSaleDraft(t, f, "1.000")
+
+	if _, err := f.srv.CompleteSaleDraft(f.cashierCtx, completeSaleDraftReq(draftA.Id, gen.Cash, nil)); err != nil {
+		t.Fatalf("complete draftA: %v", err)
+	}
+	if _, err := f.srv.CompleteSaleDraft(f.cashierCtx, completeSaleDraftReq(draftB.Id, gen.Cash, nil)); err != nil {
+		t.Fatalf("complete draftB: %v", err)
+	}
+
+	var salesCount int
+	if err := f.pool.QueryRow(context.Background(), `SELECT count(*) FROM sales WHERE shop_id = $1`, f.shopID).Scan(&salesCount); err != nil {
+		t.Fatalf("count sales: %v", err)
+	}
+	if salesCount != 2 {
+		t.Fatalf("sales rows = %d, want 2", salesCount)
+	}
+}
