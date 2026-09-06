@@ -800,24 +800,47 @@ export function planDraftPay(input: {
 
 /**
  * `details.entity` for a `404 NOT_FOUND` (`apierr.NotFound`,
- * `api/internal/apierr/apierr.go`) — `"variant"` means a line in the
- * draft's own stored/submitted `items` references a variant that no
- * longer resolves (soft-deleted, deactivated, or never existed;
- * `resolveSaleItems`, `api/internal/sales/create.go`, shared by
- * `PATCH /sales/drafts/{id}` when it replaces `items`), never that the
- * draft itself is gone. Every other entity (`"draft"`, `"location"`,
- * `"customer"`) means something the request named directly is missing.
- * A caller passes `error.details` straight through; `undefined` (no
- * details at all, or a non-`NOT_FOUND` error) is not a variant miss.
+ * `api/internal/apierr/apierr.go`), normalized to the closed set this
+ * app's three sale-writing legs (create a sale/draft, `PATCH` a draft,
+ * `complete` a draft) can actually name: `"variant"` means a line's
+ * variant no longer resolves (soft-deleted, deactivated, or never
+ * existed; `resolveSaleItems`, `api/internal/sales/create.go`, shared by
+ * every leg that replaces/reads `items`, including — via
+ * `CompleteSaleDraftTx`'s own internal `CreateSaleTx` call,
+ * `api/internal/sales/drafts_write.go` — the `complete` leg too, not
+ * only `PATCH`); `"location"`/`"customer"` mean the request's own
+ * `locationId`/`customerId` no longer resolves (`CreateSaleTx`'s
+ * `GetLocation`/`GetCustomer` checks, reached the same way by `complete`
+ * completing a draft whose stored location/customer has since gone);
+ * `"draft"` means the draft itself is gone. `"other"` covers every
+ * value this app has no specific handling for, including no details at
+ * all (a non-`NOT_FOUND` error, or one this app has never seen carry an
+ * `entity`) — callers treat it the same as `"draft"` (T14 fix round,
+ * Opus review MAJOR 2: entity-aware `NOT_FOUND` mapping on all three
+ * legs; supersedes this file's earlier `isVariantNotFoundDetails`,
+ * narrower for exactly one of these five outcomes). A caller passes
+ * `error.details` straight through.
  */
-export function isVariantNotFoundDetails(details: Record<string, unknown> | undefined): boolean {
-  return details?.entity === "variant";
+export type NotFoundEntity = "draft" | "variant" | "location" | "customer" | "other";
+
+export function entityOf(details: Record<string, unknown> | undefined): NotFoundEntity {
+  switch (details?.entity) {
+    case "draft":
+    case "variant":
+    case "location":
+    case "customer":
+      return details.entity;
+    default:
+      return "other";
+  }
 }
 
 export type DraftPayErrorAction =
   | "retryCompleteSameKey"
   | "draftGone"
   | "lineVariantGone"
+  | "locationGone"
+  | "customerGone"
   | "forbiddenToEditDraft"
   | "patchNetworkSafe"
   | "completeNetworkAmbiguous"
@@ -830,17 +853,22 @@ export interface DraftPayErrorInput {
    * timeout — a response that was never received at all, the same
    * "undecoded" convention `idempotencyOutcome` below already uses. */
   code: ErrorCode | undefined;
-  /** `isVariantNotFoundDetails` on the `patch` leg's own error `details`
-   * — meaningless (and ignored) on the `complete` leg, whose only
-   * `NOT_FOUND` is `apierr.NotFound("draft")`
-   * (`api/internal/sales/drafts_write.go`), never a variant. */
-  isVariantNotFound: boolean;
-  /** `true` only when this `NOT_FOUND` is itself the response to the
-   * one-shot same-key replay `"retryCompleteSameKey"` asked for —
-   * distinguishes "this is the very first `NOT_FOUND` seen for this
-   * attempt" (worth one retry) from "the retry also `NOT_FOUND`ed"
-   * (genuinely gone, T14 fix round MAJOR 2). Ignored for every other
-   * leg/code combination. */
+  /** `entityOf` of this error's own `details` — meaningful (and
+   * consulted) only when `code === "NOT_FOUND"`; ignored otherwise. */
+  entity: NotFoundEntity;
+  /** `true` only when this error is itself the response to the one-shot
+   * same-key replay `"retryCompleteSameKey"` asked for, on the
+   * `complete` leg's own *undecoded* (network/timeout) failure —
+   * distinguishes "the first attempt's response was simply lost" (worth
+   * one immediate retry under the same key, since the server may well
+   * have already committed it, `idempotencyKey`'s own doc comment) from
+   * "the retry failed the exact same way too" (genuinely unreachable,
+   * shown as `completeNetworkAmbiguous`). Never consulted for a
+   * *decoded* `NOT_FOUND` (T14 fix round, Opus review MAJOR 2: a
+   * decoded 404 is the server's own definitive, already-final answer —
+   * retrying the identical request under the same key can only 404
+   * again identically, unlike a lost response, whose outcome is
+   * genuinely unknown) or for any other leg/code combination. */
   isRetry: boolean;
 }
 
@@ -854,27 +882,46 @@ export interface DraftPayErrorInput {
  * transition applies (T14 fix round, Opus review).
  *
  * patch leg:
- * | code                | isVariantNotFound | action              |
- * | ------------------- | ------------------ | ------------------- |
- * | NOT_FOUND           | true                | lineVariantGone      |
- * | NOT_FOUND           | false               | draftGone            |
- * | FORBIDDEN           | —                   | forbiddenToEditDraft |
- * | undefined (network) | —                   | patchNetworkSafe     |
- * | anything else       | —                   | patchGenericError    |
+ * | code                | entity            | action              |
+ * | ------------------- | ----------------- | ------------------- |
+ * | NOT_FOUND           | variant            | lineVariantGone      |
+ * | NOT_FOUND           | location           | locationGone         |
+ * | NOT_FOUND           | customer           | customerGone         |
+ * | NOT_FOUND           | draft / other      | draftGone            |
+ * | FORBIDDEN           | —                  | forbiddenToEditDraft |
+ * | undefined (network) | —                  | patchNetworkSafe     |
+ * | anything else       | —                  | patchGenericError    |
  *
  * complete leg:
- * | code                 | isRetry | action                |
- * | -------------------- | ------- | --------------------- |
- * | NOT_FOUND            | false   | retryCompleteSameKey   |
- * | NOT_FOUND            | true    | draftGone              |
- * | undefined (network)  | —       | completeNetworkAmbiguous |
- * | anything else        | —       | useIdempotencyOutcome  |
+ * | code                 | entity        | isRetry | action                   |
+ * | -------------------- | ------------- | ------- | ------------------------ |
+ * | NOT_FOUND            | variant        | —       | lineVariantGone           |
+ * | NOT_FOUND            | location       | —       | locationGone              |
+ * | NOT_FOUND            | customer       | —       | customerGone              |
+ * | NOT_FOUND            | draft / other  | —       | draftGone                 |
+ * | undefined (network)  | —              | false   | retryCompleteSameKey      |
+ * | undefined (network)  | —              | true    | completeNetworkAmbiguous  |
+ * | anything else        | —              | —       | useIdempotencyOutcome     |
+ *
+ * A decoded `NOT_FOUND` never triggers the same-key replay on either leg
+ * (it is the server's own final answer, not an unknown outcome) — only
+ * an undecoded `complete`-leg failure does, exactly once (`isRetry`'s
+ * own doc comment).
  */
 export function nextAfterDraftPayError(input: DraftPayErrorInput): DraftPayErrorAction {
-  if (input.leg === "patch") {
-    if (input.code === "NOT_FOUND") {
-      return input.isVariantNotFound ? "lineVariantGone" : "draftGone";
+  if (input.code === "NOT_FOUND") {
+    switch (input.entity) {
+      case "variant":
+        return "lineVariantGone";
+      case "location":
+        return "locationGone";
+      case "customer":
+        return "customerGone";
+      default:
+        return "draftGone";
     }
+  }
+  if (input.leg === "patch") {
     if (input.code === "FORBIDDEN") {
       return "forbiddenToEditDraft";
     }
@@ -883,11 +930,33 @@ export function nextAfterDraftPayError(input: DraftPayErrorInput): DraftPayError
     }
     return "patchGenericError";
   }
-  if (input.code === "NOT_FOUND") {
-    return input.isRetry ? "draftGone" : "retryCompleteSameKey";
-  }
   if (input.code === undefined) {
-    return "completeNetworkAmbiguous";
+    return input.isRetry ? "completeNetworkAmbiguous" : "retryCompleteSameKey";
   }
   return "useIdempotencyOutcome";
+}
+
+/**
+ * Once a `POST .../complete` attempt has been sent for the loaded draft
+ * (`CartState.completionAttempted`), the cart becomes read-only in the
+ * UI — lines, qty, discount, customer, note and location controls all
+ * disabled; only Pay (a same-key retry) and Clear/Unlink stay active
+ * (T14 fix round, Opus review CRITICAL). Before this, an edit made while
+ * the first attempt's outcome was still unknown was silently never sent
+ * to the server: `planDraftPay` never PATCHes again once
+ * `completionAttempted` is `true` (its own doc comment has the full
+ * reasoning — a PATCH after an attempt that might have already committed
+ * could race with, or paper over, a `complete` that already succeeded),
+ * so the cashier's own further edits looked accepted in the UI but were
+ * simply discarded on the next Pay/Save (the matching MINOR this same
+ * fix round closes). Making the cart read-only instead makes that
+ * impossible: there is nothing left to silently lose. A thin, named
+ * wrapper around `CartState.completionAttempted` — not a new field of
+ * its own — so `sale/index.tsx` reads intent rather than a raw flag, and
+ * so this one-line rule is pinned in Vitest without needing a full
+ * `SaleScreen` render (D-85: only pure, RN-free logic is Vitest-testable
+ * here).
+ */
+export function isCartReadOnly(cart: CartState): boolean {
+  return cart.completionAttempted;
 }

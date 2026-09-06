@@ -41,12 +41,13 @@ import {
   cartLinesToSaleItems,
   cartReducer,
   type DiscountKind,
+  entityOf,
   estimateCartTotals,
   generateIdempotencyKey,
   idempotencyOutcome,
   initialCartState,
+  isCartReadOnly,
   isValidDiscountValue,
-  isVariantNotFoundDetails,
   multiplyMoneyByQty,
   nextAfterDraftPayError,
   planDraftPay,
@@ -425,14 +426,26 @@ export default function SaleScreen() {
       return;
     }
     const draft = draftQuery.data;
-    appliedDraftIdRef.current = draftIdParam;
-    router.setParams({ draftId: undefined });
+    // Narrowed once, outside the nested function below — TS's control-flow
+    // narrowing of `draftIdParam` (from the guard above) doesn't carry into
+    // a nested function declaration's body, only a plain local `const` in
+    // this same scope does.
+    const confirmedDraftId = draftIdParam;
 
     // Nested inside the effect (rather than a top-level function) so it
     // isn't itself an `useExhaustiveDependencies` dependency — this
     // codebase has no `useCallback` precedent to give it a stable
     // identity, and it's only ever needed from right here anyway.
     function applyDraftToCart() {
+      // Only marked "applied"/cleared from the URL on the branch that
+      // actually loads the draft — a cashier who cancels the
+      // confirm-before-replace prompt below must still see it again the
+      // next time they tap "Edit" on this same draft; marking it applied
+      // (or clearing the param) unconditionally, before the prompt could
+      // even be answered, silently swallowed that second "Edit" tap
+      // instead (T14 fix round, Opus review MAJOR 3).
+      appliedDraftIdRef.current = confirmedDraftId;
+      router.setParams({ draftId: undefined });
       // This tab's screen instance stays mounted across a tab switch
       // (T12/D-90), so a still-showing success view from an earlier
       // Pay/Save on this same screen (`completedSale`/`savedDraft`)
@@ -445,6 +458,17 @@ export default function SaleScreen() {
       const draftLocation = activeLocations.find((l) => l.id === draft.locationId);
       if (draftLocation) {
         setSelectedLocation(draftLocation);
+      } else {
+        // The draft's own stored location has since been deactivated or
+        // deleted — never silently keep whatever location this screen
+        // happened to have selected before (its own cashier's remembered
+        // default, say): `null` blocks Pay/Save via `formInvalid`'s
+        // existing check until the cashier deliberately picks one, which
+        // (via `handlePickLocation`'s own `markDirty`) is exactly what
+        // this draft needs PATCHed onto it before it can complete (T14
+        // fix round, Opus review MINOR 4).
+        setSelectedLocation(null);
+        setGeneralError(t("mobile.sale.errors.draftLocationGone"));
       }
       dispatch({
         type: "loadDraft",
@@ -512,6 +536,11 @@ export default function SaleScreen() {
   // currently in the cart.
   const estimate = estimateCartTotals(cart.lines, cart.discount);
   const hasEstimatedDiscount = estimate.discountAmount !== "0.00";
+  // Once a complete attempt has been sent for the loaded draft, every
+  // editing control is disabled — only Pay (a same-key retry) and
+  // Clear/Unlink stay active (`isCartReadOnly`'s own doc comment, T14 fix
+  // round, Opus review CRITICAL).
+  const readOnly = isCartReadOnly(cart);
 
   function handleDiscountKindChange(kind: "none" | DiscountKind) {
     setDiscountKind(kind);
@@ -548,9 +577,19 @@ export default function SaleScreen() {
   const deleteDraft = useDeleteSaleDraft();
   const completeDraft = useCompleteSaleDraft();
 
+  /** Picking a location is a deliberate change on this screen, same as
+   * `handleCustomerChange` below — unconditional (harmless when no draft
+   * is loaded, `CartState.dirty`'s own doc comment) rather than gated on
+   * `cart.draftId`, so Pay's own `planDraftPay` PATCHes the new
+   * `locationId` onto a loaded draft before completing it instead of
+   * completing under the draft's stale, already-replaced location (T14
+   * fix round, Opus review CRITICAL — found live: editing a loaded
+   * draft's location and tapping Pay directly completed it under the
+   * *old* location, since nothing had marked the cart dirty). */
   function handlePickLocation(location: Location) {
     setSelectedLocation(location);
     void persistLocationId(location.id);
+    dispatch({ type: "markDirty" });
   }
 
   /** Attaches/detaches a customer as a deliberate change on this screen —
@@ -704,6 +743,35 @@ export default function SaleScreen() {
         setGeneralError(t("sales.errors.discountExceedsSubtotal"));
         return;
       }
+      if (error.code === "NOT_FOUND") {
+        // Reached only from a brand-new sale/draft (`createSale`, or
+        // `createDraft` via `handleSaveDraft`'s own `onSaveError` ->
+        // `handlePatchLegError` for the *update* case, never this
+        // function) — `"draft"` cannot occur here (nothing in the
+        // request names an existing draft), so this only ever
+        // distinguishes `"location"`/`"customer"` from everything else
+        // (T14 fix round, Opus review MAJOR 2). Never touches the cart
+        // itself either way (hard rule: a location/customer 404 must
+        // never clear or unlink it).
+        const entity = entityOf(error.details);
+        if (entity === "location") {
+          setGeneralError(t("mobile.sale.errors.locationGone"));
+          setLocationModalOpen(true);
+          return;
+        }
+        if (entity === "customer") {
+          setGeneralError(t("mobile.sale.errors.customerGone"));
+          handleCustomerChange(null);
+          return;
+        }
+        // `"variant"` here carries no line index (unlike the draft-only
+        // soft `VALIDATION_FAILED` above — `resolveSaleItems`'s hard 404
+        // names no specific item, this file's own `entityOf` doc
+        // comment) — the same general message covers it and the
+        // defensive `"other"` case.
+        setGeneralError(t("mobile.drafts.errors.itemNoLongerAvailable"));
+        return;
+      }
     }
     // `idempotencyOutcome` takes the error's `code` when it was a
     // decoded server response, else `undefined` — a network drop or
@@ -772,7 +840,7 @@ export default function SaleScreen() {
     const action = nextAfterDraftPayError({
       leg: "patch",
       code,
-      isVariantNotFound: isVariantNotFoundDetails(details),
+      entity: entityOf(details),
       isRetry: false,
     });
     switch (action) {
@@ -781,10 +849,26 @@ export default function SaleScreen() {
         // this cart was loaded — never seen if `formInvalid`'s own
         // unavailable-line check already caught it, so this is only a
         // narrow race (it went bad in between); the response names no
-        // line index (`isVariantNotFoundDetails`'s own doc comment), so
-        // this can only be a general message, not a specific tag. Never
-        // clears or unlinks the cart (T14 fix round MAJOR 3).
+        // line index (`entityOf`'s own doc comment), so this can only be
+        // a general message, not a specific tag. Never clears or unlinks
+        // the cart (T14 fix round MAJOR 3).
         setGeneralError(t("mobile.drafts.errors.itemNoLongerAvailable"));
+        return;
+      case "locationGone":
+        // The draft's own `locationId` (whatever this screen just sent)
+        // no longer resolves — reopen the picker so the cashier can
+        // choose another right away; never clears/unlinks the cart
+        // either (T14 fix round, Opus review MAJOR 2).
+        setGeneralError(t("mobile.sale.errors.locationGone"));
+        setLocationModalOpen(true);
+        return;
+      case "customerGone":
+        // Same reasoning as `locationGone` above, for `customerId` —
+        // detaches the now-gone customer (`handleCustomerChange(null)`,
+        // which also marks the cart dirty for the next PATCH/complete)
+        // so the cashier can simply retry.
+        setGeneralError(t("mobile.sale.errors.customerGone"));
+        handleCustomerChange(null);
         return;
       case "draftGone":
         onDraftGone();
@@ -820,10 +904,17 @@ export default function SaleScreen() {
    * defers to the existing `handlePaymentError`, unchanged. */
   function handleCompleteLegError(error: unknown, isRetry: boolean) {
     const code = error instanceof SalesApiError ? error.code : undefined;
+    const details = error instanceof SalesApiError ? error.details : undefined;
     const action = nextAfterDraftPayError({
       leg: "complete",
       code,
-      isVariantNotFound: false,
+      // `CompleteSaleDraftTx` hands the draft's stored location/customer
+      // straight to `CreateSaleTx`, so a `NOT_FOUND` here can name
+      // `"location"`/`"customer"` (gone since the draft was created or
+      // last edited) just as much as `PATCH` can, not only `"draft"`
+      // (T14 fix round, Opus review MAJOR 2 — the hard-coded `false`
+      // this replaced could never have reported either).
+      entity: entityOf(details),
       isRetry,
     });
     switch (action) {
@@ -832,6 +923,17 @@ export default function SaleScreen() {
         return;
       case "draftGone":
         handleDraftGoneDuringPay();
+        return;
+      case "lineVariantGone":
+        setGeneralError(t("mobile.drafts.errors.itemNoLongerAvailable"));
+        return;
+      case "locationGone":
+        setGeneralError(t("mobile.sale.errors.locationGone"));
+        setLocationModalOpen(true);
+        return;
+      case "customerGone":
+        setGeneralError(t("mobile.sale.errors.customerGone"));
+        handleCustomerChange(null);
         return;
       case "completeNetworkAmbiguous":
         setGeneralError(t("mobile.sale.errors.networkUnknown"));
@@ -1062,6 +1164,12 @@ export default function SaleScreen() {
           </View>
         ) : null}
 
+        {readOnly ? (
+          <View className="gap-1 rounded-md border border-border bg-muted/30 p-3">
+            <Text>{t("mobile.sale.readOnlyBanner")}</Text>
+          </View>
+        ) : null}
+
         {locationsError ? (
           <View className="gap-2 rounded-md border border-border p-3">
             <Text variant="muted">{t("errors.generic")}</Text>
@@ -1079,6 +1187,7 @@ export default function SaleScreen() {
         ) : (
           <Pressable
             accessibilityRole="button"
+            disabled={readOnly}
             className="min-h-14 justify-center rounded-md border border-input bg-background px-3"
             onPress={() => setLocationModalOpen(true)}
           >
@@ -1090,7 +1199,11 @@ export default function SaleScreen() {
         <View className="gap-2">
           <View className="flex-row items-center justify-between">
             <Text variant="large">{t("sales.items.title")}</Text>
-            <Button size="sm" disabled={!selectedLocation} onPress={() => setPickerOpen(true)}>
+            <Button
+              size="sm"
+              disabled={!selectedLocation || readOnly}
+              onPress={() => setPickerOpen(true)}
+            >
               <Plus size={16} color={tokens.color.surface} />
               <Text>{t("mobile.sale.addItem")}</Text>
             </Button>
@@ -1120,6 +1233,7 @@ export default function SaleScreen() {
                     <Pressable
                       accessibilityRole="button"
                       accessibilityLabel={t("sales.items.remove")}
+                      disabled={readOnly}
                       className="h-9 w-9 items-center justify-center"
                       onPress={() => handleRemoveLine(line.variantId)}
                     >
@@ -1131,6 +1245,7 @@ export default function SaleScreen() {
                       <Pressable
                         accessibilityRole="button"
                         accessibilityLabel={t("mobile.sale.qty.decrease")}
+                        disabled={readOnly}
                         className="h-11 w-11 items-center justify-center rounded-md border border-border active:bg-accent"
                         onPress={() => handleDecrement(line.variantId)}
                       >
@@ -1142,6 +1257,7 @@ export default function SaleScreen() {
                       <Pressable
                         accessibilityRole="button"
                         accessibilityLabel={t("mobile.sale.qty.increase")}
+                        disabled={readOnly}
                         className="h-11 w-11 items-center justify-center rounded-md border border-border active:bg-accent"
                         onPress={() => handleIncrement(line.variantId)}
                       >
@@ -1159,6 +1275,7 @@ export default function SaleScreen() {
                       </Text>
                       <Pressable
                         accessibilityRole="button"
+                        disabled={readOnly}
                         onPress={() => handleRemoveLine(line.variantId)}
                       >
                         <Text className="text-primary">{t("sales.items.remove")}</Text>
@@ -1186,6 +1303,7 @@ export default function SaleScreen() {
               <Button
                 key={kind}
                 size="sm"
+                disabled={readOnly}
                 className="h-auto min-h-9 flex-1 py-2"
                 variant={discountKind === kind ? "default" : "outline"}
                 onPress={() => handleDiscountKindChange(kind)}
@@ -1204,6 +1322,7 @@ export default function SaleScreen() {
                 keyboardType="decimal-pad"
                 placeholder={t("mobile.sale.discount.valuePlaceholder")}
                 value={cart.discount?.value ?? ""}
+                editable={!readOnly}
                 onChangeText={handleDiscountValueChange}
               />
               {discountValueInvalid ? (
@@ -1214,6 +1333,7 @@ export default function SaleScreen() {
               <Input
                 placeholder={t("mobile.sale.discount.reasonPlaceholder")}
                 value={cart.discount?.reason ?? ""}
+                editable={!readOnly}
                 onChangeText={handleDiscountReasonChange}
               />
             </>
@@ -1248,6 +1368,7 @@ export default function SaleScreen() {
             accessibilityLabel={
               customer ? t("mobile.sale.customer.change") : t("mobile.sale.customer.attach")
             }
+            disabled={readOnly}
             className="min-h-14 justify-center rounded-md border border-input bg-background px-3"
             onPress={() => setCustomerModalOpen(true)}
           >
@@ -1259,7 +1380,11 @@ export default function SaleScreen() {
             </Text>
           </Pressable>
           {customer ? (
-            <Pressable accessibilityRole="button" onPress={() => handleCustomerChange(null)}>
+            <Pressable
+              accessibilityRole="button"
+              disabled={readOnly}
+              onPress={() => handleCustomerChange(null)}
+            >
               <Text className="text-primary">{t("sales.items.remove")}</Text>
             </Pressable>
           ) : null}
@@ -1287,6 +1412,7 @@ export default function SaleScreen() {
           <Input
             placeholder={t("mobile.sale.notePlaceholder")}
             value={cart.note}
+            editable={!readOnly}
             onChangeText={(note) => dispatch({ type: "setNote", note })}
           />
         </View>
@@ -1319,7 +1445,12 @@ export default function SaleScreen() {
             <Button
               variant="outline"
               className="flex-1"
-              disabled={createDraft.isPending || updateDraft.isPending}
+              // Save is a form of editing (a `PATCH`, for a loaded draft)
+              // — disabled once read-only for the same reason every other
+              // editing control on this screen is (`readOnly`'s own doc
+              // comment): only Pay and Clear/Unlink stay active once a
+              // complete attempt has been sent.
+              disabled={createDraft.isPending || updateDraft.isPending || readOnly}
               onPress={handleSaveDraft}
             >
               <Text>

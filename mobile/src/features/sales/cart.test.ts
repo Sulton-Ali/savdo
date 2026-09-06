@@ -8,12 +8,13 @@ import {
   cartLinesFromDraftItems,
   cartLinesToSaleItems,
   cartReducer,
+  entityOf,
   estimateCartTotals,
   generateIdempotencyKey,
   idempotencyOutcome,
   initialCartState,
+  isCartReadOnly,
   isValidDiscountValue,
-  isVariantNotFoundDetails,
   isZeroDecimalString,
   multiplyMoneyByQty,
   nextAfterDraftPayError,
@@ -792,54 +793,101 @@ describe("planDraftPay", () => {
   });
 });
 
-describe("isVariantNotFoundDetails", () => {
-  it("is true only for details.entity === 'variant'", () => {
-    expect(isVariantNotFoundDetails({ entity: "variant" })).toBe(true);
+describe("isCartReadOnly", () => {
+  it("is false for a fresh cart", () => {
+    expect(isCartReadOnly(initialCartState())).toBe(false);
   });
 
-  it("is false for a different entity", () => {
-    expect(isVariantNotFoundDetails({ entity: "draft" })).toBe(false);
-    expect(isVariantNotFoundDetails({ entity: "location" })).toBe(false);
-    expect(isVariantNotFoundDetails({ entity: "customer" })).toBe(false);
+  it("is false for a dirty, not-yet-attempted draft", () => {
+    const loaded = cartReducer(addA(initialCartState(), 1), {
+      type: "loadDraft",
+      draftId: "draft-1",
+      lines: [],
+      discount: null,
+      note: "",
+      idempotencyKey: "k",
+    });
+    expect(isCartReadOnly(loaded)).toBe(false);
   });
 
-  it("is false for undefined details", () => {
-    expect(isVariantNotFoundDetails(undefined)).toBe(false);
+  it("is true the moment completionAttempted is set, even if the cart is edited again after", () => {
+    const attempted = cartReducer(initialCartState(), { type: "completionAttempted" });
+    expect(isCartReadOnly(attempted)).toBe(true);
+    const editedAfter = cartReducer(attempted, { type: "markDirty" });
+    expect(isCartReadOnly(editedAfter)).toBe(true);
   });
 
-  it("is false for details with no entity field", () => {
-    expect(isVariantNotFoundDetails({ fields: { items: "invalid" } })).toBe(false);
+  it("is false again once the draft is unlinked (confirmed gone)", () => {
+    const attempted = cartReducer(initialCartState(), { type: "completionAttempted" });
+    const unlinked = cartReducer(attempted, { type: "unlinkDraft", idempotencyKey: "k2" });
+    expect(isCartReadOnly(unlinked)).toBe(false);
+  });
+});
+
+describe("entityOf", () => {
+  it("recognizes 'draft'", () => {
+    expect(entityOf({ entity: "draft" })).toBe("draft");
+  });
+
+  it("recognizes 'variant'", () => {
+    expect(entityOf({ entity: "variant" })).toBe("variant");
+  });
+
+  it("recognizes 'location'", () => {
+    expect(entityOf({ entity: "location" })).toBe("location");
+  });
+
+  it("recognizes 'customer'", () => {
+    expect(entityOf({ entity: "customer" })).toBe("customer");
+  });
+
+  it("falls back to 'other' for an entity value this app has no specific handling for", () => {
+    expect(entityOf({ entity: "sale" })).toBe("other");
+  });
+
+  it("falls back to 'other' for undefined details", () => {
+    expect(entityOf(undefined)).toBe("other");
+  });
+
+  it("falls back to 'other' for details with no entity field", () => {
+    expect(entityOf({ fields: { items: "invalid" } })).toBe("other");
   });
 });
 
 describe("nextAfterDraftPayError", () => {
   it.each([
-    ["NOT_FOUND" as const, true, "lineVariantGone"],
-    ["NOT_FOUND" as const, false, "draftGone"],
-    ["FORBIDDEN" as const, false, "forbiddenToEditDraft"],
-    [undefined, false, "patchNetworkSafe"],
-    ["VALIDATION_FAILED" as const, false, "patchGenericError"],
-    ["DISCOUNT_EXCEEDS_SUBTOTAL" as const, false, "patchGenericError"],
-  ] as const)(
-    "patch leg: code=%s isVariantNotFound=%s -> %s",
-    (code, isVariantNotFound, expected) => {
-      expect(
-        nextAfterDraftPayError({ leg: "patch", code, isVariantNotFound, isRetry: false }),
-      ).toBe(expected);
-    },
-  );
+    ["NOT_FOUND" as const, "variant" as const, "lineVariantGone"],
+    ["NOT_FOUND" as const, "location" as const, "locationGone"],
+    ["NOT_FOUND" as const, "customer" as const, "customerGone"],
+    ["NOT_FOUND" as const, "draft" as const, "draftGone"],
+    ["NOT_FOUND" as const, "other" as const, "draftGone"],
+    ["FORBIDDEN" as const, "other" as const, "forbiddenToEditDraft"],
+    [undefined, "other" as const, "patchNetworkSafe"],
+    ["VALIDATION_FAILED" as const, "other" as const, "patchGenericError"],
+    ["DISCOUNT_EXCEEDS_SUBTOTAL" as const, "other" as const, "patchGenericError"],
+  ] as const)("patch leg: code=%s entity=%s -> %s", (code, entity, expected) => {
+    expect(nextAfterDraftPayError({ leg: "patch", code, entity, isRetry: false })).toBe(expected);
+  });
 
   it.each([
-    ["NOT_FOUND" as const, false, "retryCompleteSameKey"],
-    ["NOT_FOUND" as const, true, "draftGone"],
-    [undefined, false, "completeNetworkAmbiguous"],
-    ["STOCK_INSUFFICIENT" as const, false, "useIdempotencyOutcome"],
-    ["VALIDATION_FAILED" as const, false, "useIdempotencyOutcome"],
-    ["DISCOUNT_EXCEEDS_SUBTOTAL" as const, false, "useIdempotencyOutcome"],
-    ["IDEMPOTENCY_KEY_REUSED" as const, false, "useIdempotencyOutcome"],
-  ] as const)("complete leg: code=%s isRetry=%s -> %s", (code, isRetry, expected) => {
-    expect(
-      nextAfterDraftPayError({ leg: "complete", code, isVariantNotFound: false, isRetry }),
-    ).toBe(expected);
-  });
+    ["NOT_FOUND" as const, "variant" as const, false, "lineVariantGone"],
+    ["NOT_FOUND" as const, "location" as const, false, "locationGone"],
+    ["NOT_FOUND" as const, "customer" as const, false, "customerGone"],
+    ["NOT_FOUND" as const, "draft" as const, false, "draftGone"],
+    ["NOT_FOUND" as const, "other" as const, false, "draftGone"],
+    // A decoded 404 never replays, on either leg — `isRetry` is ignored
+    // once `code` is `NOT_FOUND` (T14 fix round, Opus review MAJOR 2).
+    ["NOT_FOUND" as const, "draft" as const, true, "draftGone"],
+    [undefined, "other" as const, false, "retryCompleteSameKey"],
+    [undefined, "other" as const, true, "completeNetworkAmbiguous"],
+    ["STOCK_INSUFFICIENT" as const, "other" as const, false, "useIdempotencyOutcome"],
+    ["VALIDATION_FAILED" as const, "other" as const, false, "useIdempotencyOutcome"],
+    ["DISCOUNT_EXCEEDS_SUBTOTAL" as const, "other" as const, false, "useIdempotencyOutcome"],
+    ["IDEMPOTENCY_KEY_REUSED" as const, "other" as const, false, "useIdempotencyOutcome"],
+  ] as const)(
+    "complete leg: code=%s entity=%s isRetry=%s -> %s",
+    (code, entity, isRetry, expected) => {
+      expect(nextAfterDraftPayError({ leg: "complete", code, entity, isRetry })).toBe(expected);
+    },
+  );
 });

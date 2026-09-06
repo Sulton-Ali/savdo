@@ -68,7 +68,7 @@ function DraftRow({
       </View>
       <View className="flex-row items-center justify-between">
         <Text variant="muted" numberOfLines={1}>
-          {draft.customerName ?? "—"}
+          {draft.customerName ?? t("mobile.sale.customer.none")}
         </Text>
         <Text variant="muted">
           {t("mobile.drafts.list.lineCount", { count: draft.items.length })}

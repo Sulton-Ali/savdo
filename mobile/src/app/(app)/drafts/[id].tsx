@@ -267,7 +267,7 @@ export default function DraftDetailScreen() {
           </View>
           <View className="flex-row justify-between">
             <Text variant="muted">{t("sales.detail.fields.customer")}</Text>
-            <Text>{draft.customerName ?? "—"}</Text>
+            <Text>{draft.customerName ?? t("mobile.sale.customer.none")}</Text>
           </View>
           {draft.note ? (
             <View className="flex-row justify-between gap-2">
