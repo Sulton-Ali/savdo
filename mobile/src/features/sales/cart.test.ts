@@ -13,9 +13,12 @@ import {
   idempotencyOutcome,
   initialCartState,
   isValidDiscountValue,
+  isVariantNotFoundDetails,
   isZeroDecimalString,
   multiplyMoneyByQty,
+  nextAfterDraftPayError,
   percentOfMoney,
+  planDraftPay,
   qtyExceedsAvailable,
   resolveSubmitDiscount,
   resolveSubmitDiscountReason,
@@ -84,6 +87,7 @@ describe("addItem", () => {
         unitPrice: "10000.00",
         availableQty: "5.000",
         qty: 1,
+        available: true,
       },
     ]);
   });
@@ -431,21 +435,75 @@ describe("estimateCartTotals", () => {
 });
 
 describe("T14 draft integration", () => {
-  it("initialCartState starts with an empty note and no draftId", () => {
+  it("initialCartState starts with an empty note, no draftId, clean and unattempted", () => {
     const state = initialCartState();
     expect(state.note).toBe("");
     expect(state.draftId).toBeNull();
+    expect(state.dirty).toBe(false);
+    expect(state.completionAttempted).toBe(false);
   });
 
-  it("setNote updates the note without touching anything else", () => {
+  it("setNote updates the note, marks dirty, without touching anything else", () => {
     const state = addA(initialCartState(), 1);
     const next = cartReducer(state, { type: "setNote", note: "Deliver by 6pm" });
     expect(next.note).toBe("Deliver by 6pm");
     expect(next.lines).toEqual(state.lines);
     expect(next.idempotencyKey).toBe(state.idempotencyKey);
+    expect(next.dirty).toBe(true);
   });
 
-  it("loadDraft replaces the whole cart with the draft's own state", () => {
+  it("addItem/incrementQty/decrementQty/setQty/removeItem/setDiscount all mark dirty", () => {
+    const draftLine = {
+      variantId: "v9",
+      label: "Variant Z",
+      productName: "Product Z",
+      unitPrice: "7000.00",
+      availableQty: "999999.000",
+      qty: 2,
+      available: true,
+    };
+    const clean = cartReducer(initialCartState(), {
+      type: "loadDraft",
+      draftId: "draft-1",
+      lines: [draftLine],
+      discount: null,
+      note: "",
+      idempotencyKey: "key-1",
+    });
+    expect(clean.dirty).toBe(false);
+
+    expect(cartReducer(clean, { type: "incrementQty", variantId: "v9" }).dirty).toBe(true);
+    expect(cartReducer(clean, { type: "decrementQty", variantId: "v9" }).dirty).toBe(true);
+    expect(cartReducer(clean, { type: "setQty", variantId: "v9", qty: 5 }).dirty).toBe(true);
+    expect(cartReducer(clean, { type: "removeItem", variantId: "v9" }).dirty).toBe(true);
+    expect(
+      cartReducer(clean, {
+        type: "setDiscount",
+        discount: { kind: "fixed", value: "1", reason: "" },
+      }).dirty,
+    ).toBe(true);
+    expect(
+      addA(clean, 1, "key-2").dirty, // addItem
+    ).toBe(true);
+  });
+
+  it("markDirty sets dirty without touching anything else", () => {
+    const state = initialCartState();
+    const next = cartReducer(state, { type: "markDirty" });
+    expect(next.dirty).toBe(true);
+    expect(next.lines).toEqual(state.lines);
+    expect(next.idempotencyKey).toBe(state.idempotencyKey);
+  });
+
+  it("completionAttempted sets the flag and is idempotent", () => {
+    const state = initialCartState();
+    const once = cartReducer(state, { type: "completionAttempted" });
+    expect(once.completionAttempted).toBe(true);
+    const twice = cartReducer(once, { type: "completionAttempted" });
+    expect(twice).toBe(once); // same reference — a true-to-true dispatch is a no-op
+  });
+
+  it("loadDraft replaces the whole cart with the draft's own state, clean and unattempted", () => {
     const before = addA(initialCartState(), 3);
     const loaded = cartReducer(before, {
       type: "loadDraft",
@@ -458,6 +516,7 @@ describe("T14 draft integration", () => {
           unitPrice: "7000.00",
           availableQty: "999999.000",
           qty: 2,
+          available: true,
         },
       ],
       discount: { kind: "fixed", value: "1000.00", reason: "loyalty" },
@@ -473,53 +532,98 @@ describe("T14 draft integration", () => {
           unitPrice: "7000.00",
           availableQty: "999999.000",
           qty: 2,
+          available: true,
         },
       ],
       discount: { kind: "fixed", value: "1000.00", reason: "loyalty" },
       note: "from draft",
       draftId: "draft-1",
+      dirty: false,
+      completionAttempted: false,
       idempotencyKey: "key-from-draft",
     });
   });
 
-  it("clear resets draftId and note back to a fresh cart", () => {
-    const loaded = cartReducer(initialCartState(), {
-      type: "loadDraft",
-      draftId: "draft-1",
-      lines: [],
-      discount: null,
-      note: "from draft",
-      idempotencyKey: "key-from-draft",
-    });
+  it("clear resets draftId/note/dirty/completionAttempted back to a fresh cart", () => {
+    const loaded = cartReducer(
+      cartReducer(initialCartState(), {
+        type: "loadDraft",
+        draftId: "draft-1",
+        lines: [],
+        discount: null,
+        note: "from draft",
+        idempotencyKey: "key-from-draft",
+      }),
+      { type: "completionAttempted" },
+    );
     const cleared = cartReducer(loaded, { type: "clear" });
     expect(cleared.draftId).toBeNull();
     expect(cleared.note).toBe("");
+    expect(cleared.dirty).toBe(false);
+    expect(cleared.completionAttempted).toBe(false);
   });
 
-  it("completed resets draftId and note back to a fresh cart", () => {
-    const loaded = cartReducer(initialCartState(), {
-      type: "loadDraft",
-      draftId: "draft-1",
-      lines: [],
-      discount: null,
-      note: "from draft",
-      idempotencyKey: "key-from-draft",
-    });
+  it("completed resets draftId/note/dirty/completionAttempted back to a fresh cart", () => {
+    const loaded = cartReducer(
+      cartReducer(initialCartState(), {
+        type: "loadDraft",
+        draftId: "draft-1",
+        lines: [],
+        discount: null,
+        note: "from draft",
+        idempotencyKey: "key-from-draft",
+      }),
+      { type: "completionAttempted" },
+    );
     const completed = cartReducer(loaded, { type: "completed" });
     expect(completed.draftId).toBeNull();
     expect(completed.note).toBe("");
+    expect(completed.dirty).toBe(false);
+    expect(completed.completionAttempted).toBe(false);
+  });
+
+  it("unlinkDraft drops draftId and resets dirty/completionAttempted but keeps lines/discount/note", () => {
+    const loaded = cartReducer(
+      cartReducer(initialCartState(), {
+        type: "loadDraft",
+        draftId: "draft-1",
+        lines: [
+          {
+            variantId: "v9",
+            label: "Variant Z",
+            productName: "Product Z",
+            unitPrice: "7000.00",
+            availableQty: "999999.000",
+            qty: 2,
+            available: true,
+          },
+        ],
+        discount: { kind: "fixed", value: "500", reason: "" },
+        note: "keep me",
+        idempotencyKey: "key-from-draft",
+      }),
+      { type: "completionAttempted" },
+    );
+    const unlinked = cartReducer(loaded, { type: "unlinkDraft", idempotencyKey: "fresh-key" });
+    expect(unlinked.draftId).toBeNull();
+    expect(unlinked.dirty).toBe(false);
+    expect(unlinked.completionAttempted).toBe(false);
+    expect(unlinked.idempotencyKey).toBe("fresh-key");
+    expect(unlinked.lines).toEqual(loaded.lines);
+    expect(unlinked.discount).toEqual(loaded.discount);
+    expect(unlinked.note).toBe("keep me");
   });
 });
 
 describe("cartLinesFromDraftItems / cartDiscountFromDraft", () => {
-  it("maps a SaleDraftItem to a CartLine, rounding a fractional qty to a whole unit", () => {
+  it("maps a SaleDraftItem to a CartLine, truncating a fractional qty to a whole unit (never rounding up)", () => {
     const lines = cartLinesFromDraftItems([
       {
         variantId: "v1",
         productId: "p1",
         productName: "Shirt",
         variantLabel: "M / Blue",
-        qty: "2.600",
+        qty: "2.900",
         unitPrice: "15000.00",
         lineTotal: "39000.00",
         available: true,
@@ -532,12 +636,13 @@ describe("cartLinesFromDraftItems / cartDiscountFromDraft", () => {
         productName: "Shirt",
         unitPrice: "15000.00",
         availableQty: "999999.000",
-        qty: 3,
+        qty: 2,
+        available: true,
       },
     ]);
   });
 
-  it("never rounds an unavailable-priced line's qty down to 0", () => {
+  it("never truncates a line's qty down to 0", () => {
     const lines = cartLinesFromDraftItems([
       {
         variantId: "v1",
@@ -551,6 +656,7 @@ describe("cartLinesFromDraftItems / cartDiscountFromDraft", () => {
       },
     ]);
     expect(lines[0]?.qty).toBe(1);
+    expect(lines[0]?.available).toBe(false);
   });
 
   it("maps a null draft discount to null", () => {
@@ -672,5 +778,68 @@ describe("buildDraftCreateBody / buildDraftPatchBody", () => {
       discountReason: null,
       note: "call before delivery",
     });
+  });
+});
+
+describe("planDraftPay", () => {
+  it.each([
+    [false, false, "complete"],
+    [false, true, "complete"],
+    [true, false, "patchThenComplete"],
+    [true, true, "complete"],
+  ] as const)("dirty=%s completionAttempted=%s -> %s", (dirty, completionAttempted, expected) => {
+    expect(planDraftPay({ draftId: "draft-1", dirty, completionAttempted })).toBe(expected);
+  });
+});
+
+describe("isVariantNotFoundDetails", () => {
+  it("is true only for details.entity === 'variant'", () => {
+    expect(isVariantNotFoundDetails({ entity: "variant" })).toBe(true);
+  });
+
+  it("is false for a different entity", () => {
+    expect(isVariantNotFoundDetails({ entity: "draft" })).toBe(false);
+    expect(isVariantNotFoundDetails({ entity: "location" })).toBe(false);
+    expect(isVariantNotFoundDetails({ entity: "customer" })).toBe(false);
+  });
+
+  it("is false for undefined details", () => {
+    expect(isVariantNotFoundDetails(undefined)).toBe(false);
+  });
+
+  it("is false for details with no entity field", () => {
+    expect(isVariantNotFoundDetails({ fields: { items: "invalid" } })).toBe(false);
+  });
+});
+
+describe("nextAfterDraftPayError", () => {
+  it.each([
+    ["NOT_FOUND" as const, true, "lineVariantGone"],
+    ["NOT_FOUND" as const, false, "draftGone"],
+    ["FORBIDDEN" as const, false, "forbiddenToEditDraft"],
+    [undefined, false, "patchNetworkSafe"],
+    ["VALIDATION_FAILED" as const, false, "patchGenericError"],
+    ["DISCOUNT_EXCEEDS_SUBTOTAL" as const, false, "patchGenericError"],
+  ] as const)(
+    "patch leg: code=%s isVariantNotFound=%s -> %s",
+    (code, isVariantNotFound, expected) => {
+      expect(
+        nextAfterDraftPayError({ leg: "patch", code, isVariantNotFound, isRetry: false }),
+      ).toBe(expected);
+    },
+  );
+
+  it.each([
+    ["NOT_FOUND" as const, false, "retryCompleteSameKey"],
+    ["NOT_FOUND" as const, true, "draftGone"],
+    [undefined, false, "completeNetworkAmbiguous"],
+    ["STOCK_INSUFFICIENT" as const, false, "useIdempotencyOutcome"],
+    ["VALIDATION_FAILED" as const, false, "useIdempotencyOutcome"],
+    ["DISCOUNT_EXCEEDS_SUBTOTAL" as const, false, "useIdempotencyOutcome"],
+    ["IDEMPOTENCY_KEY_REUSED" as const, false, "useIdempotencyOutcome"],
+  ] as const)("complete leg: code=%s isRetry=%s -> %s", (code, isRetry, expected) => {
+    expect(
+      nextAfterDraftPayError({ leg: "complete", code, isVariantNotFound: false, isRetry }),
+    ).toBe(expected);
   });
 });

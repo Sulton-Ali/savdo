@@ -3,31 +3,25 @@ import { describe, expect, it } from "vitest";
 import { canManageDraft, draftAge, parseUnavailableLineIndexes } from "./drafts";
 
 describe("canManageDraft", () => {
-  it("allows an owner regardless of who created the draft", () => {
-    expect(canManageDraft("owner", "u1", "someone-else")).toBe(true);
-    expect(canManageDraft("owner", "u1", null)).toBe(true);
+  it("allows manager+ (canManage true) regardless of who created the draft", () => {
+    expect(canManageDraft("someone-else", "u1", true)).toBe(true);
+    expect(canManageDraft(null, "u1", true)).toBe(true);
   });
 
-  it("allows a manager regardless of who created the draft", () => {
-    expect(canManageDraft("manager", "u1", "someone-else")).toBe(true);
-    expect(canManageDraft("manager", "u1", null)).toBe(true);
+  it("allows the draft's own creator even without manager+", () => {
+    expect(canManageDraft("u1", "u1", false)).toBe(true);
   });
 
-  it("allows a cashier who is the draft's own creator", () => {
-    expect(canManageDraft("cashier", "u1", "u1")).toBe(true);
+  it("denies a non-manager who is not the draft's creator", () => {
+    expect(canManageDraft("u2", "u1", false)).toBe(false);
   });
 
-  it("denies a cashier who is not the draft's creator", () => {
-    expect(canManageDraft("cashier", "u1", "u2")).toBe(false);
+  it("denies a non-manager when the draft has no creator on record", () => {
+    expect(canManageDraft(null, "u1", false)).toBe(false);
   });
 
-  it("denies a cashier when the draft has no creator on record", () => {
-    expect(canManageDraft("cashier", "u1", null)).toBe(false);
-  });
-
-  it("denies when the role or user id is unknown (session still loading)", () => {
-    expect(canManageDraft(undefined, undefined, "u1")).toBe(false);
-    expect(canManageDraft("cashier", undefined, "u1")).toBe(false);
+  it("denies when the current user id is unknown (session still loading) and canManage is false", () => {
+    expect(canManageDraft("u1", undefined, false)).toBe(false);
   });
 });
 

@@ -82,7 +82,7 @@ export default function DraftDetailScreen() {
   const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { shop, role, me, can } = useSession();
+  const { shop, me, can } = useSession();
   const currency = shop?.currency ?? "UZS";
 
   const draftQuery = useDraft(id);
@@ -126,7 +126,7 @@ export default function DraftDetailScreen() {
     );
   }
 
-  const canManage = canManageDraft(role, me?.user.id, draft.createdBy);
+  const canManage = canManageDraft(draft.createdBy, me?.user.id, can("sales.void"));
   const canPay = can("sales.create");
 
   // A `NOT_FOUND` here means someone else completed or deleted this exact

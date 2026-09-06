@@ -1,4 +1,5 @@
 import { tokens } from "@savdo/ui-tokens";
+import { useQueryClient } from "@tanstack/react-query";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Minus, Plus, Trash2, UserPlus } from "lucide-react-native";
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
@@ -45,7 +46,10 @@ import {
   idempotencyOutcome,
   initialCartState,
   isValidDiscountValue,
+  isVariantNotFoundDetails,
   multiplyMoneyByQty,
+  nextAfterDraftPayError,
+  planDraftPay,
   qtyExceedsAvailable,
   resolveSubmitDiscount,
   resolveSubmitDiscountReason,
@@ -61,6 +65,7 @@ import {
 } from "@/features/sales/hooks";
 import { persistLocationId, readStoredLocationId } from "@/features/sales/locationStorage";
 import { formatMoney } from "@/lib/money";
+import { draftsKeys } from "@/lib/queryKeys";
 import { useSession } from "@/lib/session";
 
 const PAYMENT_METHODS: PaymentMethod[] = ["cash", "card", "transfer"];
@@ -253,6 +258,7 @@ function LocationPickerModal({
 export default function SaleScreen() {
   const { t } = useTranslation();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
   const { shop } = useSession();
   const currency = shop?.currency ?? "UZS";
@@ -362,11 +368,18 @@ export default function SaleScreen() {
       return;
     }
     appliedAttachIdRef.current = params.attachCustomerId;
+    // Inlined rather than calling the shared `handleCustomerChange` below
+    // (which also marks the cart `dirty`) — a plain top-level function
+    // reference would fail `useExhaustiveDependencies` (it's a new
+    // identity every render, having no `useCallback` of its own; this
+    // codebase doesn't use `useCallback` anywhere else either) if listed
+    // as this effect's dependency.
     setCustomer({
       id: params.attachCustomerId,
       fullName: params.attachCustomerName ?? "",
       phone: params.attachCustomerPhone || null,
     });
+    dispatch({ type: "markDirty" });
     router.setParams({
       attachCustomerId: undefined,
       attachCustomerName: undefined,
@@ -390,9 +403,20 @@ export default function SaleScreen() {
   // cashier's own next fresh sale defaults to).
   const draftIdParam = params.draftId;
   const draftQuery = useDraft(draftIdParam);
+  // `null` whenever this cart isn't mid-way through applying a specific
+  // draft id — reset by every place that returns the cart to that state
+  // (`handleClearCart`, `handlePaymentSuccess`, `handleSaveDraft`'s
+  // `onSaved`), not just set once and left alone: editing the *same*
+  // draft a second time after Saving/Paying it once already on this same
+  // screen instance (which stays mounted across a tab switch, T12/D-90)
+  // must re-apply it, not be skipped as "already applied" (T14 fix round
+  // MAJOR 4 — found live: open A -> Edit -> Save -> View draft -> Edit
+  // again showed the stale "Draft saved" success view instead of A's
+  // freshly reloaded form).
   const appliedDraftIdRef = useRef<string | null>(null);
   const [draftCustomerId, setDraftCustomerId] = useState<string | null>(null);
   const draftCustomerQuery = useCustomer(draftCustomerId ?? undefined);
+
   useEffect(() => {
     if (!draftIdParam || draftIdParam === appliedDraftIdRef.current) {
       return;
@@ -402,30 +426,66 @@ export default function SaleScreen() {
     }
     const draft = draftQuery.data;
     appliedDraftIdRef.current = draftIdParam;
-    // This tab's screen instance stays mounted across a tab switch (T12/
-    // D-90), so a still-showing success view from an earlier Pay/Save on
-    // this same screen (`completedSale`/`savedDraft`) would otherwise sit
-    // in front of the form this effect is about to fill — clear both so
-    // "Edit" always lands on the loaded draft, not a stale confirmation
-    // screen (found live during this task's own device smoke).
-    setCompletedSale(null);
-    setSavedDraft(null);
-    const draftLocation = activeLocations.find((l) => l.id === draft.locationId);
-    if (draftLocation) {
-      setSelectedLocation(draftLocation);
-    }
-    dispatch({
-      type: "loadDraft",
-      draftId: draft.id,
-      lines: cartLinesFromDraftItems(draft.items),
-      discount: cartDiscountFromDraft(draft.discount, draft.discountReason),
-      note: draft.note ?? "",
-      idempotencyKey: generateIdempotencyKey(),
-    });
-    setDiscountKind(draft.discount ? draft.discount.type : "none");
-    setDraftCustomerId(draft.customerId);
     router.setParams({ draftId: undefined });
-  }, [draftIdParam, draftQuery.data, locationHydrated, activeLocations, router]);
+
+    // Nested inside the effect (rather than a top-level function) so it
+    // isn't itself an `useExhaustiveDependencies` dependency — this
+    // codebase has no `useCallback` precedent to give it a stable
+    // identity, and it's only ever needed from right here anyway.
+    function applyDraftToCart() {
+      // This tab's screen instance stays mounted across a tab switch
+      // (T12/D-90), so a still-showing success view from an earlier
+      // Pay/Save on this same screen (`completedSale`/`savedDraft`)
+      // would otherwise sit in front of the form this is about to fill —
+      // clear both so "Edit" always lands on the loaded draft, not a
+      // stale confirmation screen (found live during this task's own
+      // device smoke).
+      setCompletedSale(null);
+      setSavedDraft(null);
+      const draftLocation = activeLocations.find((l) => l.id === draft.locationId);
+      if (draftLocation) {
+        setSelectedLocation(draftLocation);
+      }
+      dispatch({
+        type: "loadDraft",
+        draftId: draft.id,
+        lines: cartLinesFromDraftItems(draft.items),
+        discount: cartDiscountFromDraft(draft.discount, draft.discountReason),
+        note: draft.note ?? "",
+        idempotencyKey: generateIdempotencyKey(),
+      });
+      setDiscountKind(draft.discount ? draft.discount.type : "none");
+      setDraftCustomerId(draft.customerId);
+    }
+
+    // A cashier already mid-way through an unrelated, unsaved cart
+    // (`cart.draftId` still `null`) who then opens a draft to edit — a
+    // stray tap on an old "Edit" link, say — must not silently lose that
+    // work (T14 fix round MINOR 10); a cart already linked to *some*
+    // draft (including this very one) is safe to replace without asking,
+    // same as before.
+    if (cart.lines.length > 0 && !cart.draftId) {
+      Alert.alert(t("mobile.drafts.replaceCartConfirm.title"), undefined, [
+        { text: t("common.cancel"), style: "cancel" },
+        {
+          text: t("mobile.drafts.replaceCartConfirm.replace"),
+          style: "destructive",
+          onPress: applyDraftToCart,
+        },
+      ]);
+      return;
+    }
+    applyDraftToCart();
+  }, [
+    draftIdParam,
+    draftQuery.data,
+    locationHydrated,
+    activeLocations,
+    router,
+    t,
+    cart.lines.length,
+    cart.draftId,
+  ]);
 
   // `SaleDraft.customerId` is only an id — this resolves it to a display
   // name/phone for the customer row, same as `attachCustomerId` above.
@@ -493,6 +553,19 @@ export default function SaleScreen() {
     void persistLocationId(location.id);
   }
 
+  /** Attaches/detaches a customer as a deliberate change on this screen —
+   * unlike the location/lines/discount/note fields, `customer` lives
+   * outside `CartState` (a `SelectedCustomer` local to this screen, not
+   * `CartState.dirty`'s own doc comment), so this dispatches `markDirty`
+   * itself wherever a *user* action changes it. Never used for the
+   * draft-loading effects below, which resolve a *just-loaded* draft's
+   * own customer onto this same local state and must leave the freshly
+   * loaded cart's `dirty: false` alone. */
+  function handleCustomerChange(next: SelectedCustomer | null) {
+    setCustomer(next);
+    dispatch({ type: "markDirty" });
+  }
+
   function clearLineError(variantId: string) {
     setLineErrors((prev) => {
       if (!(variantId in prev)) {
@@ -529,6 +602,10 @@ export default function SaleScreen() {
     setPossiblyRecorded(false);
     setCustomer(null);
     setDiscountKind("none");
+    // The cart is a fresh, unlinked one again — a future "Edit" on this
+    // very draft id (or any other) must be able to re-apply, not be
+    // skipped as "already applied" (T14 fix round MAJOR 4).
+    appliedDraftIdRef.current = null;
   }
 
   function handlePickVariant(variant: Variant, availableQty: string, product: Product) {
@@ -565,6 +642,16 @@ export default function SaleScreen() {
     }
     if (discountValueInvalid) {
       setGeneralError(t("errors.field.invalid"));
+      return true;
+    }
+    // A line loaded from a draft whose variant/product has since gone
+    // inactive or been soft-deleted (`CartLine.available`'s own doc
+    // comment) — both `PATCH` and `POST .../complete` fail hard on it
+    // server-side, so Save/Pay are blocked client-side until it's removed
+    // (T14 fix round MAJOR 3); the per-line "unavailable" tag/message
+    // already names which one.
+    if (cart.lines.some((line) => !line.available)) {
+      setGeneralError(t("mobile.drafts.errors.itemNoLongerAvailable"));
       return true;
     }
     return false;
@@ -651,6 +738,131 @@ export default function SaleScreen() {
     setCustomer(null);
     setDiscountKind("none");
     setLineErrors({});
+    // See `handleClearCart`'s own comment (T14 fix round MAJOR 4).
+    appliedDraftIdRef.current = null;
+  }
+
+  /** Detaches the cart from a draft that Pay has just confirmed is
+   * genuinely gone (`nextAfterDraftPayError`'s `"draftGone"`, either
+   * leg) — keeps the lines/discount/note so the cashier may deliberately
+   * re-sell the same cart, invalidates the drafts list (the vanished row)
+   * and `["sales"]` (in case it was in fact *this* attempt that
+   * completed it, just with the response lost), and shows the "already
+   * paid or deleted" message with a link to today's sales list so the
+   * cashier can check first (T14 fix round MAJOR 2). */
+  function handleDraftGoneDuringPay() {
+    setGeneralError(t("mobile.drafts.errors.notFound"));
+    setPossiblyRecorded(true);
+    queryClient.invalidateQueries({ queryKey: draftsKeys.all });
+    queryClient.invalidateQueries({ queryKey: ["sales"] });
+    dispatch({ type: "unlinkDraft", idempotencyKey: generateIdempotencyKey() });
+    appliedDraftIdRef.current = null;
+  }
+
+  /** The `PATCH` leg's own error mapping for Pay-on-a-loaded-draft, via
+   * `nextAfterDraftPayError` (T14 fix round). Shared with
+   * `handleSaveDraft`'s own `onSaveError` below for the same two special
+   * cases (`lineVariantGone`/`forbiddenToEditDraft`) — `isDraftGone`
+   * lets the two callers still disagree on what "gone" does to the cart
+   * (Pay keeps the lines, `handleSaveDraft` drops the link and clears —
+   * its own doc comment). */
+  function handlePatchLegError(error: unknown, onDraftGone: () => void) {
+    const code = error instanceof SalesApiError ? error.code : undefined;
+    const details = error instanceof SalesApiError ? error.details : undefined;
+    const action = nextAfterDraftPayError({
+      leg: "patch",
+      code,
+      isVariantNotFound: isVariantNotFoundDetails(details),
+      isRetry: false,
+    });
+    switch (action) {
+      case "lineVariantGone":
+        // A line's variant/product has gone inactive/soft-deleted since
+        // this cart was loaded — never seen if `formInvalid`'s own
+        // unavailable-line check already caught it, so this is only a
+        // narrow race (it went bad in between); the response names no
+        // line index (`isVariantNotFoundDetails`'s own doc comment), so
+        // this can only be a general message, not a specific tag. Never
+        // clears or unlinks the cart (T14 fix round MAJOR 3).
+        setGeneralError(t("mobile.drafts.errors.itemNoLongerAvailable"));
+        return;
+      case "draftGone":
+        onDraftGone();
+        return;
+      case "forbiddenToEditDraft":
+        setGeneralError(t("mobile.drafts.errors.forbiddenEdit"));
+        return;
+      case "patchNetworkSafe":
+        // A `PATCH` is naturally idempotent (it just re-replaces the same
+        // target state), so — unlike `complete` — a lost response here is
+        // safe to retry without any "might already be recorded" warning
+        // (T14 fix round MINOR 5): `possiblyRecorded` stays untouched.
+        setGeneralError(t("errors.generic"));
+        return;
+      default:
+        // "patchGenericError" — VALIDATION_FAILED (e.g. `items` too_long,
+        // vanishingly unlikely mid-edit) or DISCOUNT_EXCEEDS_SUBTOTAL.
+        if (code === "DISCOUNT_EXCEEDS_SUBTOTAL") {
+          setGeneralError(t("sales.errors.discountExceedsSubtotal"));
+          return;
+        }
+        setGeneralError(t("errors.generic"));
+    }
+  }
+
+  /** The `complete` leg's own error mapping for Pay (plain or
+   * on-a-loaded-draft), via `nextAfterDraftPayError` (T14 fix round).
+   * `isRetry` is `true` only for the response to the one-shot same-key
+   * replay `"retryCompleteSameKey"` itself triggers. Every code this
+   * doesn't special-case (`STOCK_INSUFFICIENT`, the unavailable-line
+   * `VALIDATION_FAILED`, `DISCOUNT_EXCEEDS_SUBTOTAL`,
+   * `IDEMPOTENCY_KEY_REUSED`, a network drop otherwise unclassified)
+   * defers to the existing `handlePaymentError`, unchanged. */
+  function handleCompleteLegError(error: unknown, isRetry: boolean) {
+    const code = error instanceof SalesApiError ? error.code : undefined;
+    const action = nextAfterDraftPayError({
+      leg: "complete",
+      code,
+      isVariantNotFound: false,
+      isRetry,
+    });
+    switch (action) {
+      case "retryCompleteSameKey":
+        sendDraftComplete(true);
+        return;
+      case "draftGone":
+        handleDraftGoneDuringPay();
+        return;
+      case "completeNetworkAmbiguous":
+        setGeneralError(t("mobile.sale.errors.networkUnknown"));
+        setPossiblyRecorded(true);
+        return;
+      default:
+        handlePaymentError(error);
+    }
+  }
+
+  /** Sends `POST /sales/drafts/{id}/complete` for the currently loaded
+   * draft under the cart's own `idempotencyKey` — used both for the
+   * first attempt and (`isRetry: true`) for `handleCompleteLegError`'s
+   * one-shot same-key replay after a `NOT_FOUND`. Marks
+   * `completionAttempted` the moment the request is sent, before its
+   * response arrives (`CartState.completionAttempted`'s own doc comment,
+   * T14 fix round CRITICAL) — idempotent to dispatch twice, so the retry
+   * calling this again is harmless. */
+  function sendDraftComplete(isRetry: boolean) {
+    if (!cart.draftId) {
+      return;
+    }
+    const draftId = cart.draftId;
+    dispatch({ type: "completionAttempted" });
+    completeDraft.mutate(
+      { id: draftId, body: { paymentMethod }, idempotencyKey: cart.idempotencyKey },
+      {
+        onSuccess: handlePaymentSuccess,
+        onError: (error) => handleCompleteLegError(error, isRetry),
+      },
+    );
   }
 
   function handlePay() {
@@ -660,32 +872,35 @@ export default function SaleScreen() {
       return;
     }
 
-    // Editing a loaded draft (T14/D-87): Pay first replaces the draft's
-    // server-side state with whatever this screen currently shows
-    // (`buildDraftPatchBody`, same body `handleSaveDraft` would send),
-    // then completes it — so a qty/discount/customer change made on this
-    // screen before tapping Pay is never silently lost, and the draft
-    // itself is deleted server-side by the same completion (D-87)
-    // regardless of whether the patch changed anything. The `PATCH` has no
-    // `Idempotency-Key` of its own (not in the contract; a duplicate PATCH
-    // is naturally idempotent, it just re-replaces the same state) — only
-    // `.../complete` carries `cart.idempotencyKey`, exactly the semantics
-    // `createSale` already uses.
+    // Editing a loaded draft (T14/D-87, fix round CRITICAL): `planDraftPay`
+    // decides whether this needs a `PATCH` first — only when the cart has
+    // changed since it was loaded (or since the last successful Save/Pay)
+    // *and* no complete attempt for it has been sent yet. Once a complete
+    // attempt has been sent, every further Pay tap replays `complete`
+    // directly under the *same* `Idempotency-Key`, never PATCHing again —
+    // `planDraftPay`'s and `CartState.completionAttempted`'s own doc
+    // comments have the full reasoning (a PATCH after an attempt whose
+    // outcome is unknown could race with, or paper over, a complete that
+    // already committed).
     if (cart.draftId) {
       const draftId = cart.draftId;
-      const patchBody = buildDraftPatchBody(cart, selectedLocation.id, customer?.id ?? null);
-      updateDraft.mutate(
-        { id: draftId, body: patchBody },
-        {
-          onSuccess: () => {
-            completeDraft.mutate(
-              { id: draftId, body: { paymentMethod }, idempotencyKey: cart.idempotencyKey },
-              { onSuccess: handlePaymentSuccess, onError: handlePaymentError },
-            );
+      const plan = planDraftPay({
+        draftId,
+        dirty: cart.dirty,
+        completionAttempted: cart.completionAttempted,
+      });
+      if (plan === "patchThenComplete") {
+        const patchBody = buildDraftPatchBody(cart, selectedLocation.id, customer?.id ?? null);
+        updateDraft.mutate(
+          { id: draftId, body: patchBody },
+          {
+            onSuccess: () => sendDraftComplete(false),
+            onError: (error) => handlePatchLegError(error, handleDraftGoneDuringPay),
           },
-          onError: handlePaymentError,
-        },
-      );
+        );
+        return;
+      }
+      sendDraftComplete(false);
       return;
     }
 
@@ -729,28 +944,23 @@ export default function SaleScreen() {
       setCustomer(null);
       setDiscountKind("none");
       setLineErrors({});
+      appliedDraftIdRef.current = null;
     }
 
+    // Shares `handlePatchLegError`'s leg mapping with `handlePay` (T14 fix
+    // round item 3: a `404` naming an unavailable variant —
+    // `isVariantNotFoundDetails` — must never be treated as "the draft
+    // itself is gone"). Unlike Pay's own `handleDraftGoneDuringPay`, a
+    // genuinely-gone draft here drops the link and clears the cart
+    // outright (unchanged from before this fix round) — nothing left to
+    // PATCH, so the cashier starts a brand-new draft instead of resuming
+    // one that no longer exists.
     function onSaveError(error: unknown) {
-      if (error instanceof SalesApiError) {
-        if (error.code === "DISCOUNT_EXCEEDS_SUBTOTAL") {
-          setGeneralError(t("sales.errors.discountExceedsSubtotal"));
-          return;
-        }
-        if (error.code === "FORBIDDEN") {
-          setGeneralError(t("errors.forbidden"));
-          return;
-        }
-        if (error.code === "NOT_FOUND") {
-          // The draft being edited was completed/deleted elsewhere in the
-          // meantime — nothing left to PATCH; drop the link to it and let
-          // the cashier save a brand-new draft instead.
-          setGeneralError(t("mobile.drafts.errors.notFound"));
-          dispatch({ type: "clear" });
-          return;
-        }
-      }
-      setGeneralError(t("errors.generic"));
+      handlePatchLegError(error, () => {
+        setGeneralError(t("mobile.drafts.errors.notFound"));
+        dispatch({ type: "clear" });
+        appliedDraftIdRef.current = null;
+      });
     }
 
     if (cart.draftId) {
@@ -902,6 +1112,11 @@ export default function SaleScreen() {
                         {line.label}
                       </Text>
                     </View>
+                    {!line.available ? (
+                      <Text variant="small" className="text-destructive">
+                        {t("mobile.drafts.detail.unavailable")}
+                      </Text>
+                    ) : null}
                     <Pressable
                       accessibilityRole="button"
                       accessibilityLabel={t("sales.items.remove")}
@@ -937,7 +1152,19 @@ export default function SaleScreen() {
                       {formatMoney(multiplyMoneyByQty(line.unitPrice, line.qty), currency)}
                     </Text>
                   </View>
-                  {lineError ? (
+                  {!line.available ? (
+                    <View className="gap-1">
+                      <Text variant="small" className="text-destructive">
+                        {t("mobile.drafts.errors.lineUnavailable", { name: line.productName })}
+                      </Text>
+                      <Pressable
+                        accessibilityRole="button"
+                        onPress={() => handleRemoveLine(line.variantId)}
+                      >
+                        <Text className="text-primary">{t("sales.items.remove")}</Text>
+                      </Pressable>
+                    </View>
+                  ) : lineError ? (
                     <Text variant="small" className="text-destructive">
                       {lineError}
                     </Text>
@@ -1032,7 +1259,7 @@ export default function SaleScreen() {
             </Text>
           </Pressable>
           {customer ? (
-            <Pressable accessibilityRole="button" onPress={() => setCustomer(null)}>
+            <Pressable accessibilityRole="button" onPress={() => handleCustomerChange(null)}>
               <Text className="text-primary">{t("sales.items.remove")}</Text>
             </Pressable>
           ) : null}
@@ -1075,10 +1302,10 @@ export default function SaleScreen() {
       >
         <Button
           size="lg"
-          disabled={createSale.isPending || completeDraft.isPending}
+          disabled={createSale.isPending || updateDraft.isPending || completeDraft.isPending}
           onPress={handlePay}
         >
-          {createSale.isPending || completeDraft.isPending ? (
+          {createSale.isPending || updateDraft.isPending || completeDraft.isPending ? (
             <>
               <ActivityIndicator color={tokens.color.surface} />
               <Text>{t("mobile.sale.paying")}</Text>
@@ -1145,7 +1372,7 @@ export default function SaleScreen() {
       <CustomerPickerModal
         visible={customerModalOpen}
         onClose={() => setCustomerModalOpen(false)}
-        onPick={setCustomer}
+        onPick={handleCustomerChange}
       />
     </KeyboardAvoidingView>
   );

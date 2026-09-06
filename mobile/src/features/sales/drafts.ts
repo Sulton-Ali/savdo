@@ -1,5 +1,3 @@
-import type { components } from "@savdo/api-client";
-
 /**
  * Pure, RN-free helpers for sale drafts (D-85..D-90, T14) — no React or
  * React Native import, same D-85 contract as `features/sales/cart.ts` and
@@ -11,8 +9,6 @@ import type { components } from "@savdo/api-client";
  * failed" error parser, and the list row's age.
  */
 
-type Role = components["schemas"]["Role"];
-
 /**
  * `PATCH`/`DELETE /sales/drafts/{id}` require `cashier+` *and* either the
  * draft's own creator or `manager+` (D-89, `docs/05-API.md`'s drafts rows);
@@ -21,19 +17,28 @@ type Role = components["schemas"]["Role"];
  * this predicate — `drafts/[id].tsx` only calls this for its Edit/Delete
  * actions. `createdBy` is `null` for a draft with no creator on record,
  * editable/deletable only by manager+ in that case
- * (`SaleDraft.createdBy`'s own doc comment). The API remains the actual
+ * (`SaleDraft.createdBy`'s own doc comment).
+ *
+ * Takes the caller's manager+ capability as a plain `canManage` boolean —
+ * the same shape (and parameter order) `admin/src/sales/draftsHelpers.ts`'s
+ * own `canManageDraft` uses — rather than hand-coding a role comparison
+ * here, so this stays in step with the app's one permission-key
+ * convention (`me.permissions`/`can(...)`) instead of a second,
+ * role-based path to the same answer (T14 fix round, Sonnet review nit).
+ * `drafts/[id].tsx` passes `can("sales.void")`, the same manager+-only
+ * capability the admin's own call site uses. The API remains the actual
  * enforcement point (ADR-010) — this only decides whether the UI shows
  * the buttons.
  */
 export function canManageDraft(
-  role: Role | undefined,
-  userId: string | undefined,
   createdBy: string | null,
+  currentUserId: string | undefined,
+  canManage: boolean,
 ): boolean {
-  if (role === "owner" || role === "manager") {
+  if (canManage) {
     return true;
   }
-  return createdBy != null && userId != null && createdBy === userId;
+  return createdBy != null && currentUserId != null && createdBy === currentUserId;
 }
 
 /** Matches a `422 VALIDATION_FAILED` `details.fields` key naming an

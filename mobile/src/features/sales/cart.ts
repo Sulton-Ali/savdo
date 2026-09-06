@@ -43,6 +43,7 @@ type SaleDiscount = components["schemas"]["SaleDiscount"];
 type SaleDraftItem = components["schemas"]["SaleDraftItem"];
 type SaleDraftCreate = components["schemas"]["SaleDraftCreate"];
 type SaleDraftPatch = components["schemas"]["SaleDraftPatch"];
+type ErrorCode = components["schemas"]["ErrorCode"];
 
 export type DiscountKind = "percent" | "fixed";
 
@@ -81,6 +82,18 @@ export interface CartLine {
    * sale. Always >= 1 — a line whose qty would drop to 0 is removed
    * instead (`cartReducer`'s `decrementQty`/`setQty`). */
   qty: number;
+  /** `true` for a line added from `VariantPicker` (always a currently
+   * active, resolvable variant) or a draft line whose `SaleDraftItem.
+   * available` was `true` at load time; `false` only for a line loaded
+   * from a draft whose variant/product had already gone inactive or
+   * soft-deleted (`cartLinesFromDraftItems`, T14 fix round MAJOR 3) — the
+   * screen tags such a line "unavailable" and blocks Save/Pay until it is
+   * removed, since `PATCH`/`POST .../complete` would otherwise fail hard
+   * on it server-side (`resolveSaleItems`'s own `404 NOT_FOUND
+   * {entity:"variant"}`/`errDraftLineUnavailable`'s `422
+   * VALIDATION_FAILED`). Never re-checked as the cart is edited, same
+   * staleness caveat `availableQty` above already carries. */
+  available: boolean;
 }
 
 export interface CartState {
@@ -144,6 +157,32 @@ export interface CartState {
    * — paying or discarding a loaded draft always returns the screen to a
    * fresh, unlinked cart. */
   draftId: string | null;
+  /** `false` immediately after `loadDraft` (the cart matches what the
+   * server already has stored) or after a successful Save/Pay on this
+   * draft; `true` from the moment any line/qty/discount/note changes, or
+   * the screen dispatches `markDirty` for a change it owns itself
+   * (attaching/detaching a customer, which lives outside this reducer —
+   * `sale/index.tsx`'s own doc comment). Pay-on-a-loaded-draft
+   * (`planDraftPay` below) only PATCHes when this is `true`: a clean
+   * (`false`) draft is already correct server-side, so completing it
+   * directly is both correct and strictly safer than a needless PATCH
+   * (T14 fix round, Opus review CRITICAL). */
+  dirty: boolean;
+  /** `false` until the moment a `POST .../complete` request for this
+   * loaded draft is actually sent (set by the screen dispatching
+   * `completionAttempted`, *before* that request's response arrives) —
+   * once `true`, it stays `true` for the rest of this draft's session
+   * (until `loadDraft`, `clear` or `completed`) even if the cart is
+   * edited further, so `planDraftPay` never again chooses to PATCH: a
+   * complete attempt whose outcome is unknown (the response was lost)
+   * might already have committed, and PATCHing over a since-completed
+   * (and therefore already-deleted) draft — or racing a duplicate
+   * complete under a fresh body — is exactly the risk this flag exists
+   * to rule out. Every further Pay tap instead replays `complete` under
+   * the *same* `idempotencyKey`, which the server answers with its
+   * already-stored 201 if the first attempt did commit
+   * (`nextAfterDraftPayError` below covers the case where it did not). */
+  completionAttempted: boolean;
 }
 
 export type CartAction =
@@ -200,7 +239,29 @@ export type CartAction =
    * earlier attempt is the one they meant before paying again. Every other
    * failure — including one with no response at all — keeps the key
    * instead (`idempotencyKey`'s own doc comment has the full reasoning). */
-  | { type: "rekey"; idempotencyKey: string };
+  | { type: "rekey"; idempotencyKey: string }
+  /** Marks the cart `dirty` for a change this reducer doesn't otherwise
+   * see itself — today, only attaching/detaching a customer, which
+   * `sale/index.tsx` keeps as its own local state rather than on
+   * `CartState` (T14 fix round). Every action below that touches
+   * `lines`/`discount`/`note` already sets `dirty: true` on its own. */
+  | { type: "markDirty" }
+  /** Set by the screen the moment it sends a `POST .../complete` for the
+   * loaded draft, before that request's response arrives
+   * (`CartState.completionAttempted`'s own doc comment has the full
+   * reasoning). Idempotent — dispatching it again once already `true` is
+   * a no-op. */
+  | { type: "completionAttempted" }
+  /** Detaches the cart from a draft that is now confirmed gone (`404
+   * NOT_FOUND` on either leg of Pay, not naming an unavailable variant —
+   * `nextAfterDraftPayError`'s `"draftGone"`) without discarding the
+   * cashier's own lines/discount/note, so they may deliberately re-sell
+   * the same cart as a brand-new sale/draft instead of retyping it
+   * (T14 fix round MAJOR 2). Mints a fresh `idempotencyKey` (same
+   * reasoning as `loadDraft`/`rekey` above) since this is the start of a
+   * new attempt series against a different endpoint (`POST /sales` or
+   * `POST /sales/drafts`, never the now-gone draft's own routes again). */
+  | { type: "unlinkDraft"; idempotencyKey: string };
 
 /**
  * Generates an idempotency key with no dependency on a runtime global this
@@ -224,6 +285,8 @@ export function initialCartState(): CartState {
     discount: null,
     note: "",
     draftId: null,
+    dirty: false,
+    completionAttempted: false,
     idempotencyKey: generateIdempotencyKey(),
   };
 }
@@ -409,7 +472,7 @@ export function estimateCartTotals(lines: CartLine[], discount: CartDiscount | n
 }
 
 function updateLines(state: CartState, lines: CartLine[]): CartState {
-  return { ...state, lines };
+  return { ...state, lines, dirty: true };
 }
 
 export function cartReducer(state: CartState, action: CartAction): CartState {
@@ -433,6 +496,7 @@ export function cartReducer(state: CartState, action: CartAction): CartState {
               unitPrice: action.unitPrice,
               availableQty: action.availableQty,
               qty: addedQty,
+              available: true,
             },
           ];
       const wasEmpty = state.lines.length === 0;
@@ -487,9 +551,9 @@ export function cartReducer(state: CartState, action: CartAction): CartState {
       // `isValidDiscountValue` itself to show an inline error and to
       // decide whether to include `discount` in `SaleCreate` at all; the
       // server is the actual authority regardless (D-57, hard rule 8).
-      return { ...state, discount: action.discount };
+      return { ...state, discount: action.discount, dirty: true };
     case "setNote":
-      return { ...state, note: action.note };
+      return { ...state, note: action.note, dirty: true };
     case "clear":
     case "completed":
       return initialCartState();
@@ -501,6 +565,20 @@ export function cartReducer(state: CartState, action: CartAction): CartState {
         discount: action.discount,
         note: action.note,
         draftId: action.draftId,
+        dirty: false,
+        completionAttempted: false,
+        idempotencyKey: action.idempotencyKey,
+      };
+    case "markDirty":
+      return { ...state, dirty: true };
+    case "completionAttempted":
+      return state.completionAttempted ? state : { ...state, completionAttempted: true };
+    case "unlinkDraft":
+      return {
+        ...state,
+        draftId: null,
+        dirty: false,
+        completionAttempted: false,
         idempotencyKey: action.idempotencyKey,
       };
     default:
@@ -632,16 +710,32 @@ export function buildDraftPatchBody(
  * module's own top-of-file doc comment). */
 const UNKNOWN_AVAILABLE_QTY = "999999.000";
 
+/** Truncates a possibly-fractional stored quantity to a whole unit for
+ * `cartLinesFromDraftItems` below — `Math.trunc`, never `Math.round`
+ * (T14 fix round MINOR 7): rounding a value like `"1.6"` up to `2` would
+ * silently show/sell more than the draft actually recorded, the exact
+ * kind of client-side quantity inflation hard rule 8 exists to rule out
+ * (the server still recomputes and validates everything regardless, so
+ * this is only ever a display/edit-starting-point concern). Never below
+ * `1` — this app's cart has no zero/negative-qty line (`CartLine.qty`'s
+ * own doc comment) — and never `NaN` for a malformed value. */
+function truncateToWholeUnit(raw: string): number {
+  const truncated = Math.trunc(Number(raw));
+  return Number.isFinite(truncated) && truncated >= 1 ? truncated : 1;
+}
+
 /**
  * Maps a fetched `SaleDraft`'s `items` to `CartLine[]` for `loadDraft`
  * (T14) — `unitPrice`/`label`/`productName` come straight from the
  * server's own read-time resolution (`SaleDraftItem`'s own doc comment:
  * the same D-67 rule `SaleItem.unitPrice` uses), not recomputed here.
- * `qty` is rounded to a whole unit — this app's cart has only ever
- * supported whole-unit lines (`CartLine.qty`'s own doc comment); a draft
- * created or edited elsewhere (the admin web) with a fractional qty is
- * rounded rather than rejected, since `POST .../complete` recomputes and
- * validates everything server-side regardless (hard rule 8).
+ * `qty` is truncated to a whole unit (`truncateToWholeUnit`) — this app's
+ * cart has only ever supported whole-unit lines (`CartLine.qty`'s own
+ * doc comment); a draft created or edited elsewhere (the admin web) with
+ * a fractional qty is truncated rather than rejected, since `POST
+ * .../complete` recomputes and validates everything server-side
+ * regardless (hard rule 8). `available` carries straight through
+ * (`CartLine.available`'s own doc comment).
  */
 export function cartLinesFromDraftItems(items: SaleDraftItem[]): CartLine[] {
   return items.map((item) => ({
@@ -650,7 +744,8 @@ export function cartLinesFromDraftItems(items: SaleDraftItem[]): CartLine[] {
     productName: item.productName,
     unitPrice: item.unitPrice,
     availableQty: UNKNOWN_AVAILABLE_QTY,
-    qty: Math.max(1, Math.round(Number(item.qty)) || 1),
+    qty: truncateToWholeUnit(item.qty),
+    available: item.available,
   }));
 }
 
@@ -665,4 +760,134 @@ export function cartDiscountFromDraft(
     return null;
   }
   return { kind: discount.type, value: discount.value, reason: discountReason ?? "" };
+}
+
+export type DraftPayPlan = "complete" | "patchThenComplete";
+
+/**
+ * Decides whether Pay on a loaded draft (`cart.draftId` set) needs to
+ * PATCH the draft to this screen's current state before completing it,
+ * or can complete directly (T14 fix round, Opus review CRITICAL).
+ * `dirty` false means nothing has changed since `loadDraft` (or since
+ * the last successful Save/Pay on it) — the server's own stored draft
+ * already matches the cart, so completing it directly is both correct
+ * and strictly safer than a needless PATCH. `completionAttempted` — set
+ * the moment *any* complete request for this draft is sent, before its
+ * response arrives (`CartState.completionAttempted`'s own doc comment)
+ * — permanently rules out `patchThenComplete` for the rest of this
+ * draft's session once `true`, even if the cart is edited again
+ * afterwards: a PATCH following an attempt whose outcome is unknown (a
+ * lost response) could race with, or paper over, a complete that already
+ * committed. Every later Pay tap instead replays `complete` under the
+ * *same* `idempotencyKey`, which the server answers with its
+ * already-stored 201 if the first attempt did commit
+ * (`nextAfterDraftPayError` below covers what happens if it did not).
+ *
+ * | dirty | completionAttempted | plan              |
+ * | ----- | -------------------- | ----------------- |
+ * | false | false                | complete           |
+ * | false | true                 | complete           |
+ * | true  | false                | patchThenComplete  |
+ * | true  | true                 | complete           |
+ */
+export function planDraftPay(input: {
+  draftId: string | null;
+  dirty: boolean;
+  completionAttempted: boolean;
+}): DraftPayPlan {
+  return input.dirty && !input.completionAttempted ? "patchThenComplete" : "complete";
+}
+
+/**
+ * `details.entity` for a `404 NOT_FOUND` (`apierr.NotFound`,
+ * `api/internal/apierr/apierr.go`) — `"variant"` means a line in the
+ * draft's own stored/submitted `items` references a variant that no
+ * longer resolves (soft-deleted, deactivated, or never existed;
+ * `resolveSaleItems`, `api/internal/sales/create.go`, shared by
+ * `PATCH /sales/drafts/{id}` when it replaces `items`), never that the
+ * draft itself is gone. Every other entity (`"draft"`, `"location"`,
+ * `"customer"`) means something the request named directly is missing.
+ * A caller passes `error.details` straight through; `undefined` (no
+ * details at all, or a non-`NOT_FOUND` error) is not a variant miss.
+ */
+export function isVariantNotFoundDetails(details: Record<string, unknown> | undefined): boolean {
+  return details?.entity === "variant";
+}
+
+export type DraftPayErrorAction =
+  | "retryCompleteSameKey"
+  | "draftGone"
+  | "lineVariantGone"
+  | "forbiddenToEditDraft"
+  | "patchNetworkSafe"
+  | "completeNetworkAmbiguous"
+  | "patchGenericError"
+  | "useIdempotencyOutcome";
+
+export interface DraftPayErrorInput {
+  leg: "patch" | "complete";
+  /** The decoded server error code, or `undefined` for a network drop/
+   * timeout — a response that was never received at all, the same
+   * "undecoded" convention `idempotencyOutcome` below already uses. */
+  code: ErrorCode | undefined;
+  /** `isVariantNotFoundDetails` on the `patch` leg's own error `details`
+   * — meaningless (and ignored) on the `complete` leg, whose only
+   * `NOT_FOUND` is `apierr.NotFound("draft")`
+   * (`api/internal/sales/drafts_write.go`), never a variant. */
+  isVariantNotFound: boolean;
+  /** `true` only when this `NOT_FOUND` is itself the response to the
+   * one-shot same-key replay `"retryCompleteSameKey"` asked for —
+   * distinguishes "this is the very first `NOT_FOUND` seen for this
+   * attempt" (worth one retry) from "the retry also `NOT_FOUND`ed"
+   * (genuinely gone, T14 fix round MAJOR 2). Ignored for every other
+   * leg/code combination. */
+  isRetry: boolean;
+}
+
+/**
+ * The state-machine decisions Pay-on-a-loaded-draft's two legs (`PATCH`,
+ * `complete`) need beyond the existing `idempotencyOutcome` (still used,
+ * unchanged, for the `complete` leg's own rekey-vs-keep-key decision on
+ * every code this function answers `"useIdempotencyOutcome"` for).
+ * Message text stays where every other error mapping in this app
+ * already lives, in the screen itself; this only decides which *state*
+ * transition applies (T14 fix round, Opus review).
+ *
+ * patch leg:
+ * | code                | isVariantNotFound | action              |
+ * | ------------------- | ------------------ | ------------------- |
+ * | NOT_FOUND           | true                | lineVariantGone      |
+ * | NOT_FOUND           | false               | draftGone            |
+ * | FORBIDDEN           | —                   | forbiddenToEditDraft |
+ * | undefined (network) | —                   | patchNetworkSafe     |
+ * | anything else       | —                   | patchGenericError    |
+ *
+ * complete leg:
+ * | code                 | isRetry | action                |
+ * | -------------------- | ------- | --------------------- |
+ * | NOT_FOUND            | false   | retryCompleteSameKey   |
+ * | NOT_FOUND            | true    | draftGone              |
+ * | undefined (network)  | —       | completeNetworkAmbiguous |
+ * | anything else        | —       | useIdempotencyOutcome  |
+ */
+export function nextAfterDraftPayError(input: DraftPayErrorInput): DraftPayErrorAction {
+  if (input.leg === "patch") {
+    if (input.code === "NOT_FOUND") {
+      return input.isVariantNotFound ? "lineVariantGone" : "draftGone";
+    }
+    if (input.code === "FORBIDDEN") {
+      return "forbiddenToEditDraft";
+    }
+    if (input.code === undefined) {
+      return "patchNetworkSafe";
+    }
+    return "patchGenericError";
+  }
+  if (input.code === "NOT_FOUND") {
+    return input.isRetry ? "draftGone" : "retryCompleteSameKey";
+  }
+  if (input.code === undefined) {
+    return "completeNetworkAmbiguous";
+  }
+  return "useIdempotencyOutcome";
 }
