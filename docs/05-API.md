@@ -171,7 +171,7 @@ Phase numbers refer to `06-ROADMAP.md`.
 | GET    | `/sales/drafts`              | cashier+ (cursor; optional `createdBy`; newest first) |
 | POST   | `/sales/drafts`              | cashier+             |
 | GET    | `/sales/drafts/{id}`         | cashier+             |
-| PUT    | `/sales/drafts/{id}`         | creator or manager+  |
+| PATCH  | `/sales/drafts/{id}`         | creator or manager+ (partial update; `items`, when present, replaces the whole line set) |
 | DELETE | `/sales/drafts/{id}`         | creator or manager+ (204) |
 | POST   | `/sales/drafts/{id}/complete` | cashier+ (Idempotency-Key required; body `paymentMethod`; returns completed `Sale` with 201; `409 IDEMPOTENCY_KEY_REUSED` or `STOCK_INSUFFICIENT`) |
 | GET    | `/reports/sales/summary`     | manager+ (cashier: own day) |
