@@ -1971,6 +1971,8 @@ export interface components {
             qty: components["schemas"]["Decimal"];
             unitPrice: components["schemas"]["Decimal"];
             lineTotal: components["schemas"]["Decimal"];
+            /** @description `false` when the line's variant or product has since become inactive or was soft-deleted while the draft was open — the line still renders (`unitPrice`/`lineTotal` reported as `"0.00"`, excluded from `subtotal`) so the draft stays editable, but `POST .../complete` fails with `422 VALIDATION_FAILED` naming it if the line is still present at completion time. */
+            available: boolean;
         };
         /** @description `items` carries only `variantId` and `qty`, the same as `SaleCreate.items` — no client-supplied price (D-56, D-87). */
         SaleDraftCreate: {
@@ -2007,21 +2009,23 @@ export interface components {
             /** Format: uuid */
             locationId: string;
             /** Format: uuid */
-            customerId?: string;
-            discount?: components["schemas"]["SaleDiscount"];
-            discountReason?: string;
-            note?: string;
+            customerId: string | null;
+            /** @description `null` when the draft has no manual discount. The OpenAPI 3.1 `anyOf`-with-`null` idiom is used here (rather than the `SaleDiscount` `$ref` alone) so this always-present, possibly-null field matches `Sale`'s own nullable-field convention (`customerId`, `voidedBy`, …) instead of the plain-optional shape `SaleCreate.discount`/ `SaleDraftCreate.discount` use. docs/04-DATA-MODEL.md § 4 / D-52. `value` is a percentage (0..100) when `type: percent`, or a fixed sum (>= 0) when `type: fixed`. docs/05-API.md § Conventions. */
+            discount: components["schemas"]["SaleDiscount"] | null;
+            discountReason: string | null;
+            note: string | null;
             items: components["schemas"]["SaleDraftItem"][];
+            /** @description Sum of every `available` line's `lineTotal` — an unavailable line (D-96/§ 04-DATA-MODEL.md § 4) contributes `"0.00"` and is excluded. */
             subtotal: components["schemas"]["Decimal"];
-            /** @description The manual discount's amount, computed from `discount` against `subtotal` and capped at `subtotal` (D-57) — a discount that exceeded the subtotal after the draft's items changed since it was set is reported capped here rather than failing the read; `PATCH`/`POST` reject the same case outright (`409 DISCOUNT_EXCEEDS_SUBTOTAL`). */
+            /** @description The manual discount's amount, computed from `discount` against `subtotal` and capped at `subtotal` (D-57) — a discount that exceeded the subtotal after the draft's items changed since it was set is reported capped here rather than failing the read; `PATCH`/`POST` that touch `items` or the discount reject the same case outright (`409 DISCOUNT_EXCEEDS_SUBTOTAL`); a `PATCH` touching neither leaves a stale discount alone. */
             discountAmount: components["schemas"]["Decimal"];
             /** @description `subtotal` minus `discountAmount` — an estimate, not authoritative: `POST .../complete` recomputes everything server-side (D-56). */
             estimatedTotal: components["schemas"]["Decimal"];
             /**
              * Format: uuid
-             * @description The staff id who created the draft; absent for a draft with no creator on record, editable/deletable only by `manager+` in that case (D-89).
+             * @description The staff id who created the draft; `null` for a draft with no creator on record, editable/deletable only by `manager+` in that case (D-89). Any staff who may create a sale may complete the draft regardless of `createdBy` (D-96).
              */
-            createdBy?: string;
+            createdBy: string | null;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
@@ -4208,6 +4212,15 @@ export interface operations {
             404: components["responses"]["NotFound"];
             /** @description `409 STOCK_INSUFFICIENT details.variantId/locationId/available` when a line can no longer be fulfilled (D-88 — the client shows which line and lets the user edit the draft); `409 DISCOUNT_EXCEEDS_SUBTOTAL` when the draft's discount is greater than the recomputed subtotal (D-57); `409 IDEMPOTENCY_KEY_REUSED` when the same key was already used for a different request; `409 CONFLICT details.reason: "deadlock"` when a concurrent write could not be serialized — safe to retry. */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `422 VALIDATION_FAILED details.fields` naming `items[<index>].variantId: invalid` when that line's variant or product is inactive or was soft-deleted since the draft was created (`available: false` on a read, D-96) — the request is well-formed, but the draft can no longer be completed as it stands; the client shows which line and lets the user edit the draft (D-88). */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

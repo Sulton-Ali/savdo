@@ -1012,25 +1012,25 @@ type SaleDiscount struct {
 type SaleDraft struct {
 	CreatedAt time.Time `json:"createdAt"`
 
-	// CreatedBy The staff id who created the draft; absent for a draft with no creator on record, editable/deletable only by `manager+` in that case (D-89).
-	CreatedBy  *openapi_types.UUID `json:"createdBy,omitempty"`
-	CustomerId *openapi_types.UUID `json:"customerId,omitempty"`
+	// CreatedBy The staff id who created the draft; `null` for a draft with no creator on record, editable/deletable only by `manager+` in that case (D-89). Any staff who may create a sale may complete the draft regardless of `createdBy` (D-96).
+	CreatedBy  nullable.Nullable[openapi_types.UUID] `json:"createdBy"`
+	CustomerId nullable.Nullable[openapi_types.UUID] `json:"customerId"`
 
-	// Discount A manual per-sale discount (D-52). `value` is a percentage (0..100) when `type: percent`, or a fixed sum (>= 0, in shop currency) when `type: fixed`; either way it is capped at the computed subtotal — `409 DISCOUNT_EXCEEDS_SUBTOTAL` otherwise (D-57). Validated server-side; not enforceable by JSON Schema since `Decimal` is a string.
-	Discount *SaleDiscount `json:"discount,omitempty"`
+	// Discount `null` when the draft has no manual discount. The OpenAPI 3.1 `anyOf`-with-`null` idiom is used here (rather than the `SaleDiscount` `$ref` alone) so this always-present, possibly-null field matches `Sale`'s own nullable-field convention (`customerId`, `voidedBy`, …) instead of the plain-optional shape `SaleCreate.discount`/ `SaleDraftCreate.discount` use. docs/04-DATA-MODEL.md § 4 / D-52. `value` is a percentage (0..100) when `type: percent`, or a fixed sum (>= 0) when `type: fixed`. docs/05-API.md § Conventions.
+	Discount nullable.Nullable[SaleDiscount] `json:"discount"`
 
-	// DiscountAmount The manual discount's amount, computed from `discount` against `subtotal` and capped at `subtotal` (D-57) — a discount that exceeded the subtotal after the draft's items changed since it was set is reported capped here rather than failing the read; `PATCH`/`POST` reject the same case outright (`409 DISCOUNT_EXCEEDS_SUBTOTAL`).
-	DiscountAmount Decimal `json:"discountAmount"`
-	DiscountReason *string `json:"discountReason,omitempty"`
+	// DiscountAmount The manual discount's amount, computed from `discount` against `subtotal` and capped at `subtotal` (D-57) — a discount that exceeded the subtotal after the draft's items changed since it was set is reported capped here rather than failing the read; `PATCH`/`POST` that touch `items` or the discount reject the same case outright (`409 DISCOUNT_EXCEEDS_SUBTOTAL`); a `PATCH` touching neither leaves a stale discount alone.
+	DiscountAmount Decimal                   `json:"discountAmount"`
+	DiscountReason nullable.Nullable[string] `json:"discountReason"`
 
 	// EstimatedTotal `subtotal` minus `discountAmount` — an estimate, not authoritative: `POST .../complete` recomputes everything server-side (D-56).
-	EstimatedTotal Decimal            `json:"estimatedTotal"`
-	Id             openapi_types.UUID `json:"id"`
-	Items          []SaleDraftItem    `json:"items"`
-	LocationId     openapi_types.UUID `json:"locationId"`
-	Note           *string            `json:"note,omitempty"`
+	EstimatedTotal Decimal                   `json:"estimatedTotal"`
+	Id             openapi_types.UUID        `json:"id"`
+	Items          []SaleDraftItem           `json:"items"`
+	LocationId     openapi_types.UUID        `json:"locationId"`
+	Note           nullable.Nullable[string] `json:"note"`
 
-	// Subtotal money and quantities as decimal strings (ADR-007)
+	// Subtotal Sum of every `available` line's `lineTotal` — an unavailable line (D-96/§ 04-DATA-MODEL.md § 4) contributes `"0.00"` and is excluded.
 	Subtotal  Decimal   `json:"subtotal"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
@@ -1055,6 +1055,9 @@ type SaleDraftCreate struct {
 
 // SaleDraftItem One line of a draft sale (docs/04-DATA-MODEL.md § 4, D-87). `unitPrice`/`lineTotal` are resolved from the catalogue at read time by the same rule `SaleItem.unitPrice` uses (promo price when active, else the variant's override, else the product's base price — D-67); a changed price or an expired promo since the line was added is reflected immediately, never stale. No `unitCost` — a draft never carries cost, for any role (hard rule 5).
 type SaleDraftItem struct {
+	// Available `false` when the line's variant or product has since become inactive or was soft-deleted while the draft was open — the line still renders (`unitPrice`/`lineTotal` reported as `"0.00"`, excluded from `subtotal`) so the draft stays editable, but `POST .../complete` fails with `422 VALIDATION_FAILED` naming it if the line is still present at completion time.
+	Available bool `json:"available"`
+
 	// LineTotal money and quantities as decimal strings (ADR-007)
 	LineTotal   Decimal            `json:"lineTotal"`
 	ProductId   openapi_types.UUID `json:"productId"`
@@ -8135,6 +8138,20 @@ func (response CompleteSaleDraft409JSONResponse) VisitCompleteSaleDraftResponse(
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteSaleDraft422JSONResponse Error
+
+func (response CompleteSaleDraft422JSONResponse) VisitCompleteSaleDraftResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(422)
 	_, err := buf.WriteTo(w)
 	return err
 }
