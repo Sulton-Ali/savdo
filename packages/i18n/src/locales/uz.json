@@ -868,8 +868,12 @@
       "notePlaceholder": "Izoh (ixtiyoriy)",
       "paying": "Bajarilmoqda…",
       "locationRequired": "Sotuvni yakunlashdan oldin filialni tanlang.",
+      "readOnlyBanner": "To‘lov allaqachon amalga oshirilgan; tahrirlash o‘chirilgan. Yakunlash uchun yana «To‘lash»ni bosing yoki bugungi sotuvlarni tekshiring.",
       "errors": {
-        "networkUnknown": "Aloqa uzildi. Sotuv allaqachon qayd etilgan bo‘lishi mumkin — qayta to‘lashdan oldin bugungi ro‘yxatni tekshiring."
+        "networkUnknown": "Aloqa uzildi. Sotuv allaqachon qayd etilgan bo‘lishi mumkin — qayta to‘lashdan oldin bugungi ro‘yxatni tekshiring.",
+        "locationGone": "Tanlangan filial endi mavjud emas — boshqasini tanlang.",
+        "customerGone": "Biriktirilgan mijoz endi mavjud emas.",
+        "draftLocationGone": "Ushbu qoralamaning filiali endi mavjud emas — filial tanlang."
       },
       "list": {
         "title": "Bugungi sotuvlar",

@@ -868,8 +868,12 @@
       "notePlaceholder": "Note (optional)",
       "paying": "Processing…",
       "locationRequired": "Pick a location before completing the sale.",
+      "readOnlyBanner": "A payment was already attempted; edits are disabled. Tap Pay again to finish, or check today's sales.",
       "errors": {
-        "networkUnknown": "Connection lost. The sale may already be recorded: check today's list before paying again."
+        "networkUnknown": "Connection lost. The sale may already be recorded: check today's list before paying again.",
+        "locationGone": "The selected location is no longer available; choose another.",
+        "customerGone": "The attached customer no longer exists.",
+        "draftLocationGone": "This draft's location is no longer available — choose a location."
       },
       "list": {
         "title": "Today's sales",
