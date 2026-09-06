@@ -905,13 +905,19 @@
         "discardLocal": "Faqat mahalliy o'zgarishlarni bekor qilish",
         "deleteServer": "Qoralamani o'chirish"
       },
+      "replaceCartConfirm": {
+        "title": "Joriy savatcha ushbu qoralama bilan almashtirilsinmi? Saqlanmagan tovarlar yo'qoladi.",
+        "replace": "Savatchani almashtirish"
+      },
       "detail": {
         "title": "Qoralama",
         "unavailable": "Mavjud emas"
       },
       "errors": {
         "notFound": "Bu qoralama allaqachon to'langan yoki o'chirilgan.",
-        "lineUnavailable": "\"{{name}}\" endi mavjud emas — uni olib tashlash uchun qoralamani tahrirlang."
+        "lineUnavailable": "\"{{name}}\" endi mavjud emas — uni olib tashlash uchun qoralamani tahrirlang.",
+        "forbiddenEdit": "Bu qoralamani tahrirlay olmaysiz — uni Qoralamalar ekranidan to'lang yoki muallif yoki menejerdan so'rang.",
+        "itemNoLongerAvailable": "Ushbu qoralamadagi tovarlardan biri endi mavjud emas. Davom etish uchun uni savatchadan olib tashlang."
       },
       "filter": {
         "all": "Barchasi",

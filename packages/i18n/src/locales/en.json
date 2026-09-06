@@ -905,13 +905,19 @@
         "discardLocal": "Discard local changes",
         "deleteServer": "Delete draft"
       },
+      "replaceCartConfirm": {
+        "title": "Replace the current cart with this draft? Items you haven't saved will be lost.",
+        "replace": "Replace cart"
+      },
       "detail": {
         "title": "Draft",
         "unavailable": "Unavailable"
       },
       "errors": {
         "notFound": "This draft was already paid or deleted.",
-        "lineUnavailable": "{{name}} is no longer available — edit the draft to remove it."
+        "lineUnavailable": "{{name}} is no longer available — edit the draft to remove it.",
+        "forbiddenEdit": "You can't edit this draft — pay it from the Drafts screen, or ask the creator or a manager.",
+        "itemNoLongerAvailable": "One of the items in this draft is no longer available. Remove it from the cart to continue."
       },
       "filter": {
         "all": "All",
