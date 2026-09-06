@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildDraftCreateBody,
+  buildDraftPatchBody,
   type CartState,
+  cartDiscountFromDraft,
+  cartLinesFromDraftItems,
+  cartLinesToSaleItems,
   cartReducer,
   estimateCartTotals,
   generateIdempotencyKey,
@@ -12,6 +17,8 @@ import {
   multiplyMoneyByQty,
   percentOfMoney,
   qtyExceedsAvailable,
+  resolveSubmitDiscount,
+  resolveSubmitDiscountReason,
   subtractMoney,
   sumMoney,
 } from "./cart";
@@ -419,6 +426,251 @@ describe("estimateCartTotals", () => {
       subtotal: "0.00",
       discountAmount: "0.00",
       total: "0.00",
+    });
+  });
+});
+
+describe("T14 draft integration", () => {
+  it("initialCartState starts with an empty note and no draftId", () => {
+    const state = initialCartState();
+    expect(state.note).toBe("");
+    expect(state.draftId).toBeNull();
+  });
+
+  it("setNote updates the note without touching anything else", () => {
+    const state = addA(initialCartState(), 1);
+    const next = cartReducer(state, { type: "setNote", note: "Deliver by 6pm" });
+    expect(next.note).toBe("Deliver by 6pm");
+    expect(next.lines).toEqual(state.lines);
+    expect(next.idempotencyKey).toBe(state.idempotencyKey);
+  });
+
+  it("loadDraft replaces the whole cart with the draft's own state", () => {
+    const before = addA(initialCartState(), 3);
+    const loaded = cartReducer(before, {
+      type: "loadDraft",
+      draftId: "draft-1",
+      lines: [
+        {
+          variantId: "v9",
+          label: "Variant Z",
+          productName: "Product Z",
+          unitPrice: "7000.00",
+          availableQty: "999999.000",
+          qty: 2,
+        },
+      ],
+      discount: { kind: "fixed", value: "1000.00", reason: "loyalty" },
+      note: "from draft",
+      idempotencyKey: "key-from-draft",
+    });
+    expect(loaded).toEqual({
+      lines: [
+        {
+          variantId: "v9",
+          label: "Variant Z",
+          productName: "Product Z",
+          unitPrice: "7000.00",
+          availableQty: "999999.000",
+          qty: 2,
+        },
+      ],
+      discount: { kind: "fixed", value: "1000.00", reason: "loyalty" },
+      note: "from draft",
+      draftId: "draft-1",
+      idempotencyKey: "key-from-draft",
+    });
+  });
+
+  it("clear resets draftId and note back to a fresh cart", () => {
+    const loaded = cartReducer(initialCartState(), {
+      type: "loadDraft",
+      draftId: "draft-1",
+      lines: [],
+      discount: null,
+      note: "from draft",
+      idempotencyKey: "key-from-draft",
+    });
+    const cleared = cartReducer(loaded, { type: "clear" });
+    expect(cleared.draftId).toBeNull();
+    expect(cleared.note).toBe("");
+  });
+
+  it("completed resets draftId and note back to a fresh cart", () => {
+    const loaded = cartReducer(initialCartState(), {
+      type: "loadDraft",
+      draftId: "draft-1",
+      lines: [],
+      discount: null,
+      note: "from draft",
+      idempotencyKey: "key-from-draft",
+    });
+    const completed = cartReducer(loaded, { type: "completed" });
+    expect(completed.draftId).toBeNull();
+    expect(completed.note).toBe("");
+  });
+});
+
+describe("cartLinesFromDraftItems / cartDiscountFromDraft", () => {
+  it("maps a SaleDraftItem to a CartLine, rounding a fractional qty to a whole unit", () => {
+    const lines = cartLinesFromDraftItems([
+      {
+        variantId: "v1",
+        productId: "p1",
+        productName: "Shirt",
+        variantLabel: "M / Blue",
+        qty: "2.600",
+        unitPrice: "15000.00",
+        lineTotal: "39000.00",
+        available: true,
+      },
+    ]);
+    expect(lines).toEqual([
+      {
+        variantId: "v1",
+        label: "M / Blue",
+        productName: "Shirt",
+        unitPrice: "15000.00",
+        availableQty: "999999.000",
+        qty: 3,
+      },
+    ]);
+  });
+
+  it("never rounds an unavailable-priced line's qty down to 0", () => {
+    const lines = cartLinesFromDraftItems([
+      {
+        variantId: "v1",
+        productId: "p1",
+        productName: "Shirt",
+        variantLabel: "M / Blue",
+        qty: "0.200",
+        unitPrice: "0.00",
+        lineTotal: "0.00",
+        available: false,
+      },
+    ]);
+    expect(lines[0]?.qty).toBe(1);
+  });
+
+  it("maps a null draft discount to null", () => {
+    expect(cartDiscountFromDraft(null, null)).toBeNull();
+  });
+
+  it("maps a draft discount and its separate reason", () => {
+    expect(cartDiscountFromDraft({ type: "percent", value: "15" }, "regular")).toEqual({
+      kind: "percent",
+      value: "15",
+      reason: "regular",
+    });
+  });
+
+  it("defaults the reason to an empty string when the draft has none", () => {
+    expect(cartDiscountFromDraft({ type: "fixed", value: "2000" }, null)).toEqual({
+      kind: "fixed",
+      value: "2000",
+      reason: "",
+    });
+  });
+});
+
+describe("resolveSubmitDiscount / resolveSubmitDiscountReason", () => {
+  it("is undefined for no discount", () => {
+    expect(resolveSubmitDiscount(null)).toBeUndefined();
+    expect(resolveSubmitDiscountReason(null)).toBeUndefined();
+  });
+
+  it("is undefined for an invalid discount value", () => {
+    const discount = { kind: "percent" as const, value: "150", reason: "" };
+    expect(resolveSubmitDiscount(discount)).toBeUndefined();
+  });
+
+  it("is undefined for a zero discount value", () => {
+    const discount = { kind: "fixed" as const, value: "0", reason: "" };
+    expect(resolveSubmitDiscount(discount)).toBeUndefined();
+  });
+
+  it("resolves a real discount, trimmed", () => {
+    const discount = { kind: "percent" as const, value: " 10 ", reason: "" };
+    expect(resolveSubmitDiscount(discount)).toEqual({ type: "percent", value: "10" });
+  });
+
+  it("omits the reason when blank even for an active discount", () => {
+    const discount = { kind: "percent" as const, value: "10", reason: "   " };
+    expect(resolveSubmitDiscount(discount)).toEqual({ type: "percent", value: "10" });
+    expect(resolveSubmitDiscountReason(discount)).toBeUndefined();
+  });
+
+  it("trims and returns a non-blank reason", () => {
+    const discount = { kind: "percent" as const, value: "10", reason: " loyalty " };
+    expect(resolveSubmitDiscountReason(discount)).toBe("loyalty");
+  });
+});
+
+describe("cartLinesToSaleItems", () => {
+  it("maps lines to variantId/qty only, never a price", () => {
+    const state = addB(addA(initialCartState(), 2), 1);
+    expect(cartLinesToSaleItems(state.lines)).toEqual([
+      { variantId: "a", qty: "2" },
+      { variantId: "b", qty: "1" },
+    ]);
+  });
+});
+
+describe("buildDraftCreateBody / buildDraftPatchBody", () => {
+  it("builds a minimal create body with no customer/discount/note", () => {
+    const state = addA(initialCartState(), 2);
+    expect(buildDraftCreateBody(state, "loc-1", null)).toEqual({
+      locationId: "loc-1",
+      items: [{ variantId: "a", qty: "2" }],
+    });
+  });
+
+  it("builds a full create body with customer, discount, reason and note", () => {
+    let state = addA(initialCartState(), 2);
+    state = cartReducer(state, {
+      type: "setDiscount",
+      discount: { kind: "percent", value: "10", reason: "loyalty" },
+    });
+    state = cartReducer(state, { type: "setNote", note: "  Gift wrap  " });
+    expect(buildDraftCreateBody(state, "loc-1", "cust-1")).toEqual({
+      locationId: "loc-1",
+      items: [{ variantId: "a", qty: "2" }],
+      customerId: "cust-1",
+      discount: { type: "percent", value: "10" },
+      discountReason: "loyalty",
+      note: "Gift wrap",
+    });
+  });
+
+  it("builds a patch body that explicitly clears customer/discount/note when absent", () => {
+    const state = addA(initialCartState(), 1);
+    expect(buildDraftPatchBody(state, "loc-1", null)).toEqual({
+      locationId: "loc-1",
+      items: [{ variantId: "a", qty: "1" }],
+      customerId: null,
+      discountType: null,
+      discountValue: null,
+      discountReason: null,
+      note: null,
+    });
+  });
+
+  it("builds a patch body carrying an active discount and note", () => {
+    let state = addA(initialCartState(), 1);
+    state = cartReducer(state, {
+      type: "setDiscount",
+      discount: { kind: "fixed", value: "1000", reason: "" },
+    });
+    state = cartReducer(state, { type: "setNote", note: "call before delivery" });
+    expect(buildDraftPatchBody(state, "loc-1", "cust-2")).toEqual({
+      locationId: "loc-1",
+      items: [{ variantId: "a", qty: "1" }],
+      customerId: "cust-2",
+      discountType: "fixed",
+      discountValue: "1000",
+      discountReason: null,
+      note: "call before delivery",
     });
   });
 });

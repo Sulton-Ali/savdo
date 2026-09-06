@@ -12,6 +12,14 @@ export type PaymentMethod = components["schemas"]["PaymentMethod"];
 export type DiscountType = components["schemas"]["DiscountType"];
 export type ErrorCode = components["schemas"]["ErrorCode"];
 
+/** A mutable, shared, unpaid order (D-87..D-90, T14) — see this type's own
+ * doc comment in `schema.d.ts` for the full shape/reasoning. */
+export type SaleDraft = components["schemas"]["SaleDraft"];
+export type SaleDraftItem = components["schemas"]["SaleDraftItem"];
+export type SaleDraftCreate = components["schemas"]["SaleDraftCreate"];
+export type SaleDraftPatch = components["schemas"]["SaleDraftPatch"];
+export type SaleDraftComplete = components["schemas"]["SaleDraftComplete"];
+
 /** Matches every other collection endpoint's default (`docs/05-API.md` §
  * Conventions). */
 const PAGE_LIMIT = 50;
@@ -89,6 +97,110 @@ export async function getSale(id: string): Promise<Sale> {
   });
   if (error) {
     throw new SalesApiError(error.error.code);
+  }
+  return data;
+}
+
+export interface ListSaleDraftsParams {
+  createdBy?: string;
+  cursor?: string | null;
+}
+
+/** `GET /sales/drafts` — cursor-paginated, newest first; `cashier+` may
+ * list every draft in the shop, optionally narrowed to `createdBy` ("mine"
+ * toggle) — not scoped to the caller by default (D-87: a draft is shared
+ * across staff and devices). */
+export async function listSaleDrafts(params: ListSaleDraftsParams): Promise<CursorPage<SaleDraft>> {
+  const { data, error } = await api.GET("/sales/drafts", {
+    params: {
+      query: {
+        limit: PAGE_LIMIT,
+        cursor: params.cursor ?? undefined,
+        createdBy: params.createdBy,
+      },
+    },
+  });
+  if (error) {
+    throw new SalesApiError(error.error.code);
+  }
+  return data;
+}
+
+/** `GET /sales/drafts/{id}` — requires `cashier+`; any staff may view any
+ * draft (D-87). `404 NOT_FOUND` once the draft has been completed or
+ * deleted by anyone else. */
+export async function getSaleDraft(id: string): Promise<SaleDraft> {
+  const { data, error } = await api.GET("/sales/drafts/{id}", {
+    params: { path: { id } },
+  });
+  if (error) {
+    throw new SalesApiError(error.error.code);
+  }
+  return data;
+}
+
+/** `POST /sales/drafts` — requires `cashier+`. `items` carries only
+ * `variantId`/`qty`, never a price (D-56/D-87). `409
+ * DISCOUNT_EXCEEDS_SUBTOTAL` when `discount` exceeds the computed
+ * subtotal (D-57). No stock reservation happens here (D-88). */
+export async function createSaleDraft(body: SaleDraftCreate): Promise<SaleDraft> {
+  const { data, error } = await api.POST("/sales/drafts", { body });
+  if (error) {
+    throw new SalesApiError(error.error.code, error.error.details as Record<string, unknown>);
+  }
+  return data;
+}
+
+/** `PATCH /sales/drafts/{id}` — requires the draft's own creator or
+ * `manager+` (D-89, `403 FORBIDDEN` otherwise). Partial update; `items`,
+ * when present, replaces the whole line set; `customerId`/`discountType`/
+ * `discountValue`/`discountReason`/`note` are nullable (D-35): explicit
+ * `null` clears the field. */
+export async function updateSaleDraft(id: string, body: SaleDraftPatch): Promise<SaleDraft> {
+  const { data, error } = await api.PATCH("/sales/drafts/{id}", {
+    params: { path: { id } },
+    body,
+  });
+  if (error) {
+    throw new SalesApiError(error.error.code, error.error.details as Record<string, unknown>);
+  }
+  return data;
+}
+
+/** `DELETE /sales/drafts/{id}` — requires the draft's own creator or
+ * `manager+` (D-89, `403 FORBIDDEN` otherwise); hard-deletes, no ledger
+ * effect (D-89, drafts never touch stock — D-88). */
+export async function deleteSaleDraft(id: string): Promise<void> {
+  const { error } = await api.DELETE("/sales/drafts/{id}", {
+    params: { path: { id } },
+  });
+  if (error) {
+    throw new SalesApiError(error.error.code);
+  }
+}
+
+/** `POST /sales/drafts/{id}/complete` — any staff who can create a sale
+ * may complete any draft, regardless of who created it (D-96); creates the
+ * `Sale` and deletes the draft in one transaction (D-87). `idempotencyKey`
+ * follows the exact same lifecycle `createSale`'s doc comment describes
+ * (`features/sales/cart.ts`'s `idempotencyKey`/`idempotencyOutcome`): minted
+ * once per attempt series, kept on a network error or any other decoded
+ * failure, re-minted only for `409 IDEMPOTENCY_KEY_REUSED`. `409
+ * STOCK_INSUFFICIENT` when a line can no longer be fulfilled (D-88); `422
+ * VALIDATION_FAILED details.fields["items[i].variantId"]` when a line has
+ * gone unavailable since it was added (`features/sales/drafts.ts`'s
+ * `parseUnavailableLineIndexes` reads this shape). */
+export async function completeSaleDraft(
+  id: string,
+  body: SaleDraftComplete,
+  idempotencyKey: string,
+): Promise<Sale> {
+  const { data, error } = await api.POST("/sales/drafts/{id}/complete", {
+    params: { path: { id }, header: { "Idempotency-Key": idempotencyKey } },
+    body,
+  });
+  if (error) {
+    throw new SalesApiError(error.error.code, error.error.details as Record<string, unknown>);
   }
   return data;
 }

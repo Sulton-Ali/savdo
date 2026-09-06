@@ -19,7 +19,30 @@
  * a line above the stock last seen at pick time (`qtyExceedsAvailable`) —
  * the server still re-checks authoritatively and can still answer `409
  * STOCK_INSUFFICIENT` regardless (stock can move between pick and pay).
+ *
+ * T14 (D-87..D-90) additive: `CartState` also carries `note` and `draftId`
+ * so the same cart can either build a `POST /sales` body (`Pay`, as
+ * before) or a `SaleDraftCreate`/`SaleDraftPatch` body (`Save draft`) —
+ * `draftId` is `null` while composing a brand-new sale/draft and set once
+ * the cart was loaded from an existing draft (`loadDraft`, dispatched by
+ * `sale/index.tsx` after `GET /sales/drafts/{id}` resolves), at which
+ * point `sale/index.tsx`'s Save action switches from `createSaleDraft` to
+ * `updateSaleDraft` and its Pay action `updateSaleDraft`s before
+ * completing (this task's own brief). Only `variantId`/`qty` per line and
+ * `note`/`discount` ever leave this module in a request body — never a
+ * price (D-56/D-87, hard rule 8), matching the reasoning above.
  */
+
+// Type-only import (ADR-002: no hand-declared request/response shapes) —
+// erased at build time, so it adds nothing to this module's zero-RN-import
+// contract (D-85) and doesn't affect Vitest.
+import type { components } from "@savdo/api-client";
+
+type SaleItemCreate = components["schemas"]["SaleItemCreate"];
+type SaleDiscount = components["schemas"]["SaleDiscount"];
+type SaleDraftItem = components["schemas"]["SaleDraftItem"];
+type SaleDraftCreate = components["schemas"]["SaleDraftCreate"];
+type SaleDraftPatch = components["schemas"]["SaleDraftPatch"];
 
 export type DiscountKind = "percent" | "fixed";
 
@@ -107,6 +130,20 @@ export interface CartState {
    * duplicate.
    */
   idempotencyKey: string;
+  /** A small optional note (T14, mirrors `SaleCreate.note`/
+   * `SaleDraftCreate.note`) — bound to a single `TextInput` on
+   * `sale/index.tsx` and sent with either `Pay` or `Save draft`, trimmed
+   * and omitted entirely when blank (`buildDraftCreateBody`/
+   * `buildDraftPatchBody` below; `sale/index.tsx`'s own `handlePay` does
+   * the same for `SaleCreate.note`). Reset on `clear`/`completed`, carried
+   * over as-is by `loadDraft` from `SaleDraft.note`. */
+  note: string;
+  /** `null` for a sale/draft being composed from scratch; the loaded
+   * draft's id once `loadDraft` has run (this module's own doc comment
+   * above has the full reasoning). Reset to `null` on `clear`/`completed`
+   * — paying or discarding a loaded draft always returns the screen to a
+   * fresh, unlinked cart. */
+  draftId: string | null;
 }
 
 export type CartAction =
@@ -129,8 +166,28 @@ export type CartAction =
   | { type: "setQty"; variantId: string; qty: number }
   | { type: "removeItem"; variantId: string }
   | { type: "setDiscount"; discount: CartDiscount | null }
+  | { type: "setNote"; note: string }
   | { type: "clear" }
   | { type: "completed" }
+  /** Replaces the whole cart with a draft's own state (T14) — dispatched
+   * once by `sale/index.tsx` after `GET /sales/drafts/{id}` resolves (and
+   * the shop's locations have loaded, so the screen can resolve
+   * `draft.locationId` to a `Location` itself; that resolution lives on
+   * the screen, not here, since this module knows nothing about
+   * `Location`). `lines`/`discount` are built by this module's own
+   * `cartLinesFromDraftItems`/`cartDiscountFromDraft` from the fetched
+   * `SaleDraft`; `idempotencyKey` is minted by the dispatching screen
+   * (same reasoning as `addItem`/`rekey` above) since a fresh edit of an
+   * existing draft is its own attempt series, unrelated to whatever key
+   * (if any) this cart held before. */
+  | {
+      type: "loadDraft";
+      draftId: string;
+      lines: CartLine[];
+      discount: CartDiscount | null;
+      note: string;
+      idempotencyKey: string;
+    }
   /** Adopts a fresh `idempotencyKey` (minted by the dispatching component,
    * same as `addItem`) without touching `lines`/`discount` — unlike
    * `clear`/`completed`. Dispatched *only* when `idempotencyOutcome` below
@@ -162,7 +219,13 @@ export function generateIdempotencyKey(): string {
 }
 
 export function initialCartState(): CartState {
-  return { lines: [], discount: null, idempotencyKey: generateIdempotencyKey() };
+  return {
+    lines: [],
+    discount: null,
+    note: "",
+    draftId: null,
+    idempotencyKey: generateIdempotencyKey(),
+  };
 }
 
 export type IdempotencyOutcome = "rekey" | "keepKey";
@@ -425,12 +488,181 @@ export function cartReducer(state: CartState, action: CartAction): CartState {
       // decide whether to include `discount` in `SaleCreate` at all; the
       // server is the actual authority regardless (D-57, hard rule 8).
       return { ...state, discount: action.discount };
+    case "setNote":
+      return { ...state, note: action.note };
     case "clear":
     case "completed":
       return initialCartState();
     case "rekey":
       return { ...state, idempotencyKey: action.idempotencyKey };
+    case "loadDraft":
+      return {
+        lines: action.lines,
+        discount: action.discount,
+        note: action.note,
+        draftId: action.draftId,
+        idempotencyKey: action.idempotencyKey,
+      };
     default:
       return state;
   }
+}
+
+/**
+ * `SaleCreate.items`/`SaleDraftCreate.items`/`SaleDraftPatch.items` are all
+ * the exact same shape (`SaleItemCreate[]`: `variantId`/`qty` only — never
+ * a price, D-56/D-87) — this is the one place that maps a cart's lines to
+ * it, used by `sale/index.tsx`'s `handlePay` and by
+ * `buildDraftCreateBody`/`buildDraftPatchBody` below so the three request
+ * bodies can never drift out of sync with each other.
+ */
+export function cartLinesToSaleItems(lines: CartLine[]): SaleItemCreate[] {
+  return lines.map((line) => ({ variantId: line.variantId, qty: String(line.qty) }));
+}
+
+/**
+ * The active, submittable discount for a request body, or `undefined`
+ * when there is none to send — the exact same "is this discount really
+ * on" test `estimateCartTotals` above already applies for the preview
+ * (invalid format, blank, or exactly zero all count as "no discount"),
+ * factored out so `sale/index.tsx`'s `handlePay` and
+ * `buildDraftCreateBody`/`buildDraftPatchBody` below all agree with the
+ * preview about what counts as "has a discount" (previously duplicated
+ * inline in `handlePay` alone; T14 review would otherwise have three
+ * copies of this same test to keep in sync).
+ */
+function activeDiscount(discount: CartDiscount | null): CartDiscount | null {
+  if (
+    discount == null ||
+    discount.value.trim() === "" ||
+    !isValidDiscountValue(discount.kind, discount.value) ||
+    isZeroDecimalString(discount.value)
+  ) {
+    return null;
+  }
+  return discount;
+}
+
+export interface SubmitDiscount {
+  type: DiscountKind;
+  value: string;
+}
+
+/** `SaleCreate.discount`/`SaleDraftCreate.discount` shape, or `undefined`
+ * when `discount` isn't currently active (`activeDiscount` above). */
+export function resolveSubmitDiscount(discount: CartDiscount | null): SubmitDiscount | undefined {
+  const active = activeDiscount(discount);
+  return active ? { type: active.kind, value: active.value.trim() } : undefined;
+}
+
+/** `SaleCreate.discountReason`/`SaleDraftCreate.discountReason` — only ever
+ * sent alongside an active discount, and only when non-blank (a reason
+ * with no discount, or a blank reason, is never sent, matching
+ * `admin/src/routes/app/QuickSalePage.tsx`). */
+export function resolveSubmitDiscountReason(discount: CartDiscount | null): string | undefined {
+  const active = activeDiscount(discount);
+  const reason = active?.reason.trim();
+  return reason ? reason : undefined;
+}
+
+/**
+ * Builds the exact `POST /sales/drafts` body (T14/D-87) from the cart plus
+ * the two pieces of screen-owned state a cart doesn't carry itself
+ * (`locationId`, resolved from the picked `Location`; `customerId`, from
+ * the attached `SelectedCustomer`, if any). Mirrors
+ * `features/purchases/draft.ts`'s `buildCreateBody` shape/reasoning.
+ */
+export function buildDraftCreateBody(
+  cart: CartState,
+  locationId: string,
+  customerId: string | null,
+): SaleDraftCreate {
+  const discount = resolveSubmitDiscount(cart.discount);
+  const discountReason = resolveSubmitDiscountReason(cart.discount);
+  const note = cart.note.trim();
+  return {
+    locationId,
+    items: cartLinesToSaleItems(cart.lines),
+    ...(customerId ? { customerId } : {}),
+    ...(discount ? { discount } : {}),
+    ...(discountReason ? { discountReason } : {}),
+    ...(note ? { note } : {}),
+  };
+}
+
+/**
+ * Builds the exact `PATCH /sales/drafts/{id}` body for the "Save" action
+ * while editing an already-loaded draft (`cart.draftId` set) — a full
+ * replace of `items`/`customerId`/`discountType`/`discountValue`/
+ * `discountReason`/`note` to match the form's current state exactly
+ * (this task's own brief: "replacing `items`, customer, discount, note"),
+ * not a partial diff against whatever the draft held before. `customerId`/
+ * `discountReason`/`note` are explicit `null` (not omitted) when absent,
+ * and `discountType`/`discountValue` are cleared together as the pair the
+ * contract documents (`SaleDraftPatch`'s own doc comment, D-35) — omitting
+ * a field here would leave the server's stored value untouched instead of
+ * clearing it, which would silently disagree with what the form shows.
+ */
+export function buildDraftPatchBody(
+  cart: CartState,
+  locationId: string,
+  customerId: string | null,
+): SaleDraftPatch {
+  const discount = resolveSubmitDiscount(cart.discount);
+  const discountReason = resolveSubmitDiscountReason(cart.discount);
+  const note = cart.note.trim();
+  return {
+    locationId,
+    items: cartLinesToSaleItems(cart.lines),
+    customerId: customerId ?? null,
+    discountType: discount ? discount.type : null,
+    discountValue: discount ? discount.value : null,
+    discountReason: discountReason ?? null,
+    note: note ? note : null,
+  };
+}
+
+/** A generous stand-in `availableQty` for a cart line loaded from a draft
+ * (`cartLinesFromDraftItems` below): unlike `VariantPicker`'s pick-time
+ * snapshot, `SaleDraftItem` reports only `available` (a boolean — the
+ * variant/product still exists and is active), never a stock quantity, so
+ * there is no real number to put here. A value this large means
+ * `qtyExceedsAvailable` never flags a loaded line's qty in the UI; the
+ * server remains the only actual authority regardless (hard rule 8, this
+ * module's own top-of-file doc comment). */
+const UNKNOWN_AVAILABLE_QTY = "999999.000";
+
+/**
+ * Maps a fetched `SaleDraft`'s `items` to `CartLine[]` for `loadDraft`
+ * (T14) — `unitPrice`/`label`/`productName` come straight from the
+ * server's own read-time resolution (`SaleDraftItem`'s own doc comment:
+ * the same D-67 rule `SaleItem.unitPrice` uses), not recomputed here.
+ * `qty` is rounded to a whole unit — this app's cart has only ever
+ * supported whole-unit lines (`CartLine.qty`'s own doc comment); a draft
+ * created or edited elsewhere (the admin web) with a fractional qty is
+ * rounded rather than rejected, since `POST .../complete` recomputes and
+ * validates everything server-side regardless (hard rule 8).
+ */
+export function cartLinesFromDraftItems(items: SaleDraftItem[]): CartLine[] {
+  return items.map((item) => ({
+    variantId: item.variantId,
+    label: item.variantLabel,
+    productName: item.productName,
+    unitPrice: item.unitPrice,
+    availableQty: UNKNOWN_AVAILABLE_QTY,
+    qty: Math.max(1, Math.round(Number(item.qty)) || 1),
+  }));
+}
+
+/** Maps a fetched `SaleDraft`'s `discount`/`discountReason` pair to this
+ * module's own `CartDiscount` shape for `loadDraft` — `null` when the
+ * draft has no manual discount (`SaleDraft.discount`'s own doc comment). */
+export function cartDiscountFromDraft(
+  discount: SaleDiscount | null,
+  discountReason: string | null,
+): CartDiscount | null {
+  if (!discount) {
+    return null;
+  }
+  return { kind: discount.type, value: discount.value, reason: discountReason ?? "" };
 }
