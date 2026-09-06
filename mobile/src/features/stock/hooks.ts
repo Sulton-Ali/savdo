@@ -8,7 +8,7 @@ import {
 import { useMemo } from "react";
 
 import { getProduct, listAllStockLevels } from "@/features/catalog/api";
-import { catalogKeys, purchasesKeys, stockKeys } from "@/lib/queryKeys";
+import { catalogKeys, purchasesKeys, reportsKeys, stockKeys } from "@/lib/queryKeys";
 
 import {
   createStockAdjustment,
@@ -116,7 +116,14 @@ export function useLowStockRows(enabled: boolean) {
  * Invalidates every cache a stock-affecting write can change: stock levels
  * (`catalogKeys.stockLevels` — the same cache `VariantPicker` fills, per
  * this module's `useVariantStockLevels` doc), low stock, every variant's
- * movement ledger, and the purchases list/detail. Shared by
+ * movement ledger, the purchases list/detail, and every reports query
+ * (`reportsKeys.all`) — a receive or adjustment changes the home screen's
+ * low-stock count (`features/reports/hooks.ts`'s own `useLowStock`, cached
+ * under `reportsKeys.lowStock()`, a *different* key from this module's
+ * `stockKeys.low()` below) and can move today's summary too, so without
+ * this the home screen (`app/(app)/index.tsx`) kept showing stale numbers
+ * until a manual pull-to-refresh (T11 follow-up). `stockKeys.low()` stays
+ * — this module's own `useLowStock` still reads it. Shared by
  * `useCreateStockAdjustment` below and `features/purchases/hooks.ts`'s
  * `useReceivePurchase` — a receive changes a purchase's own status too, and
  * an adjustment invalidating purchases costs nothing beyond an extra
@@ -133,6 +140,7 @@ export async function invalidateStockAndPurchases(
     queryClient.invalidateQueries({ queryKey: stockKeys.low() }),
     queryClient.invalidateQueries({ queryKey: stockKeys.movements() }),
     queryClient.invalidateQueries({ queryKey: purchasesKeys.all }),
+    queryClient.invalidateQueries({ queryKey: reportsKeys.all }),
   ]);
 }
 
