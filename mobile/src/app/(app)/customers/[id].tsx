@@ -2,6 +2,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { ActivityIndicator, FlatList, Pressable, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Text } from "@/components/ui/text";
 import { useCustomer, useCustomerSales } from "@/features/customers/hooks";
@@ -44,11 +45,15 @@ function SaleHistoryRow({
  * /customers/{id}` plus `GET /sales?customerId=` — any `cashier+` may view
  * (D-63: the sales side of this is not limited to the cashier's own
  * sales). Read-only; editing a customer stays admin-web scope for Phase 5
- * (not asked for here).
+ * (not asked for here). `insets.bottom` (D-95) pads the list's bottom —
+ * the Customers stack moved out of the bottom-tabs group in T12 (D-90, now
+ * a drawer item), so its screens no longer sit above the tab bar's own
+ * safe-area buffer and can reach the true bottom of the display.
  */
 export default function CustomerDetailScreen() {
   const { t } = useTranslation();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { shop } = useSession();
   const currency = shop?.currency ?? "UZS";
@@ -84,7 +89,7 @@ export default function CustomerDetailScreen() {
   return (
     <FlatList
       className="flex-1 bg-background"
-      contentContainerStyle={{ padding: 16, gap: 12 }}
+      contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 16, gap: 12 }}
       data={sales}
       keyExtractor={(sale) => sale.id}
       onEndReachedThreshold={0.4}

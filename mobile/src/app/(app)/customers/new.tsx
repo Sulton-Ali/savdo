@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { KeyboardAvoidingView, Platform, ScrollView, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,6 +34,7 @@ interface NewCustomerFormValues {
 export default function NewCustomerScreen() {
   const { t } = useTranslation();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { returnTo } = useLocalSearchParams<{ returnTo?: string }>();
   const createCustomer = useCreateCustomer();
   const [duplicatePhone, setDuplicatePhone] = useState(false);
@@ -99,7 +101,7 @@ export default function NewCustomerScreen() {
       className="flex-1 bg-background"
     >
       <ScrollView
-        contentContainerStyle={{ padding: 16, gap: 16 }}
+        contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 16, gap: 16 }}
         keyboardShouldPersistTaps="handled"
       >
         {returnTo === "sale" ? (
