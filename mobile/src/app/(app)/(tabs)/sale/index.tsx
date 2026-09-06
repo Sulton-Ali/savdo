@@ -14,6 +14,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -106,7 +107,7 @@ function CustomerPickerModal({
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={handleClose}>
-      <View className="flex-1 gap-3 bg-background p-4 pt-12">
+      <SafeAreaView className="flex-1 gap-3 bg-background p-4" edges={["top", "bottom"]}>
         <View className="flex-row items-center justify-between">
           <Text variant="h4">{t("sales.fields.customer")}</Text>
           <Pressable
@@ -161,7 +162,7 @@ function CustomerPickerModal({
           <UserPlus size={18} color={tokens.color.primary} />
           <Text>{t("mobile.sale.customer.newCustomer")}</Text>
         </Button>
-      </View>
+      </SafeAreaView>
     </Modal>
   );
 }
@@ -237,6 +238,7 @@ function LocationPickerModal({
 export default function SaleScreen() {
   const { t } = useTranslation();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { shop } = useSession();
   const currency = shop?.currency ?? "UZS";
   const timeZone = shop?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -584,8 +586,8 @@ export default function SaleScreen() {
           <View className="gap-1 rounded-md bg-destructive/10 p-3">
             <Text className="text-destructive">{generalError}</Text>
             {possiblyRecorded ? (
-              <Pressable accessibilityRole="button" onPress={() => router.push("/sale/list")}>
-                <Text className="text-destructive underline">{t("mobile.sale.list.title")}</Text>
+              <Pressable accessibilityRole="button" onPress={() => router.push("/sales")}>
+                <Text className="text-destructive underline">{t("mobile.sale.list.link")}</Text>
               </Pressable>
             ) : null}
           </View>
@@ -693,16 +695,16 @@ export default function SaleScreen() {
 
         <View className="gap-2">
           <Text variant="small">{t("sales.fields.discountType")}</Text>
-          <View className="flex-row gap-2">
+          <View className="flex-row flex-wrap gap-2">
             {DISCOUNT_KINDS.map((kind) => (
               <Button
                 key={kind}
                 size="sm"
-                className="flex-1"
+                className="h-auto min-h-9 flex-1 py-2"
                 variant={discountKind === kind ? "default" : "outline"}
                 onPress={() => handleDiscountKindChange(kind)}
               >
-                <Text>
+                <Text className="text-center">
                   {kind === "none"
                     ? t("mobile.sale.discount.kindNone")
                     : t(`sales.discountType.${kind}`)}
@@ -779,23 +781,23 @@ export default function SaleScreen() {
 
         <View className="gap-2">
           <Text variant="small">{t("sales.fields.paymentMethod")}</Text>
-          <View className="flex-row gap-2">
+          <View className="flex-row flex-wrap gap-2">
             {PAYMENT_METHODS.map((method) => (
               <Button
                 key={method}
                 size="sm"
-                className="flex-1"
+                className="h-auto min-h-9 flex-1 py-2"
                 variant={paymentMethod === method ? "default" : "outline"}
                 onPress={() => setPaymentMethod(method)}
               >
-                <Text>{t(`sales.paymentMethod.${method}`)}</Text>
+                <Text className="text-center">{t(`sales.paymentMethod.${method}`)}</Text>
               </Button>
             ))}
           </View>
         </View>
 
-        <Pressable accessibilityRole="button" onPress={() => router.push("/sale/list")}>
-          <Text className="text-center text-primary">{t("mobile.sale.list.title")}</Text>
+        <Pressable accessibilityRole="button" onPress={() => router.push("/sales")}>
+          <Text className="text-center text-primary">{t("mobile.sale.list.link")}</Text>
         </Pressable>
 
         {cart.lines.length > 0 ? (
@@ -805,7 +807,10 @@ export default function SaleScreen() {
         ) : null}
       </ScrollView>
 
-      <View className="border-border border-t bg-background p-4">
+      <View
+        className="border-border border-t bg-background px-4 pt-4"
+        style={{ paddingBottom: Math.max(insets.bottom, 16) }}
+      >
         <Button size="lg" disabled={createSale.isPending} onPress={handlePay}>
           {createSale.isPending ? (
             <>
@@ -826,7 +831,7 @@ export default function SaleScreen() {
       />
 
       <Modal visible={pickerOpen} animationType="slide" onRequestClose={() => setPickerOpen(false)}>
-        <View className="flex-1 gap-2 bg-background p-4 pt-12">
+        <SafeAreaView className="flex-1 gap-2 bg-background p-4" edges={["top", "bottom"]}>
           <View className="flex-row items-center justify-between">
             <Text variant="h4">{t("mobile.sale.addItem")}</Text>
             <Pressable
@@ -844,7 +849,7 @@ export default function SaleScreen() {
               onPick={handlePickVariant}
             />
           ) : null}
-        </View>
+        </SafeAreaView>
       </Modal>
 
       <CustomerPickerModal

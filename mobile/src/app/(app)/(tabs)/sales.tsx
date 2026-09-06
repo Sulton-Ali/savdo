@@ -1,24 +1,24 @@
 import { useRouter } from "expo-router";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ActivityIndicator, FlatList, Pressable, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { Input } from "@/components/ui/input";
 import { Text } from "@/components/ui/text";
+import { useDebouncedValue } from "@/features/catalog/hooks";
 import type { SaleSummary } from "@/features/sales/api";
+import {
+  DATE_RANGE_PRESETS,
+  type DateRangePreset,
+  isValidRangeInput,
+  presetRange,
+} from "@/features/sales/dateRange";
 import { useSales } from "@/features/sales/hooks";
 import { formatMoney } from "@/lib/money";
 import { useSession } from "@/lib/session";
 
-/** `date`'s calendar date (`YYYY-MM-DD`) in `timeZone` — mirrors
- * `features/catalog/pricing.ts`'s own (private) `calendarDateInTimeZone`. */
-function calendarDateInTimeZone(date: Date, timeZone: string): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(date);
-}
+const RANGE_DEBOUNCE_MS = 300;
 
 function SaleRow({
   sale,
@@ -64,23 +64,40 @@ function SaleRow({
 }
 
 /**
- * Today's sales (T4 deliverable 3), cursor-paginated, newest first (`GET
- * /sales`). Deliberately scoped to today only, in the shop's own timezone
- * — a quick-sale companion list, not the full sales browser (`admin`'s
- * `SalesPage` already covers any day/location/cashier filter). D-63 lets
- * every `cashier+` role see every sale for the whole shop and any day
- * regardless — this screen's own "today" scope is a UI simplification,
- * not a permission restriction; flagged in this task's report since the
- * brief cited D-71 for it, which is actually about the *reports* summary
- * netting refunds to the original cashier, not this list's visibility.
+ * The "Sales list" tab (T12/D-91, promoted from the old `sale/list.tsx`
+ * push screen): completed sales newest first (the server orders `GET
+ * /sales` that way), defaulting to today, with a preset row (Today,
+ * Yesterday, Last 7 days, This month — `features/sales/dateRange.ts`) plus
+ * two editable `YYYY-MM-DD` fields for a custom range. A preset button
+ * fills both fields with its computed range; typing a custom range clears
+ * whichever preset no longer matches it (a preset button is highlighted
+ * only when the current fields exactly equal its computed range — derived
+ * each render, not tracked as separate state). An invalid or reversed
+ * range shows a validation message and the list query stays disabled
+ * (D-63 lets every `cashier+` role see every sale for the whole shop and
+ * any day, so there is no permission gate here, unlike the old "today
+ * only" scoping this replaces).
  */
-export default function SaleListScreen() {
+export default function SalesListScreen() {
   const { t } = useTranslation();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { shop } = useSession();
   const timeZone = shop?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
   const currency = shop?.currency ?? "UZS";
-  const today = useMemo(() => calendarDateInTimeZone(new Date(), timeZone), [timeZone]);
+
+  const initialRange = useMemo(() => presetRange("today", timeZone), [timeZone]);
+  const [fromInput, setFromInput] = useState(initialRange.from);
+  const [toInput, setToInput] = useState(initialRange.to);
+  const debouncedFrom = useDebouncedValue(fromInput, RANGE_DEBOUNCE_MS);
+  const debouncedTo = useDebouncedValue(toInput, RANGE_DEBOUNCE_MS);
+  const rangeValid = isValidRangeInput(debouncedFrom, debouncedTo);
+
+  function applyPreset(preset: DateRangePreset) {
+    const range = presetRange(preset, timeZone);
+    setFromInput(range.from);
+    setToInput(range.to);
+  }
 
   const {
     data,
@@ -91,59 +108,109 @@ export default function SaleListScreen() {
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
-  } = useSales({ from: today, to: today });
+  } = useSales(
+    rangeValid
+      ? { from: debouncedFrom.trim(), to: debouncedTo.trim() }
+      : { from: initialRange.from, to: initialRange.to },
+  );
 
   const sales = useMemo(() => data?.pages.flatMap((page) => page.items) ?? [], [data]);
 
-  if (isPending) {
-    return (
-      <View className="flex-1 items-center justify-center bg-background">
-        <ActivityIndicator />
-      </View>
-    );
-  }
-
-  if (isError) {
-    return (
-      <View className="flex-1 items-center justify-center gap-2 bg-background p-6">
-        <Text variant="muted">{t("errors.generic")}</Text>
-        <Pressable accessibilityRole="button" onPress={() => refetch()}>
-          <Text className="text-primary">{t("common.retry")}</Text>
-        </Pressable>
-      </View>
-    );
-  }
-
   return (
     <View className="flex-1 bg-background">
-      <FlatList
-        className="flex-1 px-4"
-        contentContainerStyle={{ paddingVertical: 12, gap: 8 }}
-        data={sales}
-        keyExtractor={(sale) => sale.id}
-        refreshing={isRefetching}
-        onRefresh={refetch}
-        onEndReachedThreshold={0.4}
-        onEndReached={() => {
-          if (hasNextPage && !isFetchingNextPage) {
-            fetchNextPage();
-          }
-        }}
-        ListEmptyComponent={
-          <Text variant="muted" className="p-4 text-center">
-            {t("mobile.sale.list.empty")}
+      <View className="gap-3 px-4 pt-4">
+        <Text variant="small">{t("sales.filters.dateRangeLabel")}</Text>
+        <View className="flex-row flex-wrap gap-2">
+          {DATE_RANGE_PRESETS.map((preset) => {
+            const range = presetRange(preset, timeZone);
+            const selected = fromInput === range.from && toInput === range.to;
+            return (
+              <Pressable
+                key={preset}
+                accessibilityRole="button"
+                accessibilityState={{ selected }}
+                className={`h-10 items-center justify-center rounded-md border px-3 ${
+                  selected ? "border-primary bg-primary" : "border-input bg-background"
+                }`}
+                onPress={() => applyPreset(preset)}
+              >
+                <Text className={selected ? "text-primary-foreground" : undefined}>
+                  {t(`reports.presets.${preset}`)}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+        <View className="flex-row gap-3">
+          <View className="flex-1 gap-1.5">
+            <Text variant="small">{t("mobile.sale.list.fields.from")}</Text>
+            <Input
+              value={fromInput}
+              onChangeText={setFromInput}
+              placeholder="YYYY-MM-DD"
+              autoCorrect={false}
+              keyboardType="numbers-and-punctuation"
+            />
+          </View>
+          <View className="flex-1 gap-1.5">
+            <Text variant="small">{t("mobile.sale.list.fields.to")}</Text>
+            <Input
+              value={toInput}
+              onChangeText={setToInput}
+              placeholder="YYYY-MM-DD"
+              autoCorrect={false}
+              keyboardType="numbers-and-punctuation"
+            />
+          </View>
+        </View>
+        {!rangeValid && (
+          <Text variant="small" className="text-destructive">
+            {t("mobile.sale.list.errors.invalidRange")}
           </Text>
-        }
-        ListFooterComponent={isFetchingNextPage ? <ActivityIndicator className="py-4" /> : null}
-        renderItem={({ item: sale }) => (
-          <SaleRow
-            sale={sale}
-            timeZone={timeZone}
-            currency={currency}
-            onPress={() => router.push(`/sale/${sale.id}`)}
-          />
         )}
-      />
+      </View>
+
+      {isPending ? (
+        <View className="flex-1 items-center justify-center">
+          <ActivityIndicator />
+        </View>
+      ) : isError ? (
+        <View className="flex-1 items-center justify-center gap-2 p-6">
+          <Text variant="muted">{t("errors.generic")}</Text>
+          <Pressable accessibilityRole="button" onPress={() => refetch()}>
+            <Text className="text-primary">{t("common.retry")}</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <FlatList
+          className="flex-1 px-4"
+          contentContainerStyle={{ paddingTop: 12, paddingBottom: insets.bottom + 12, gap: 8 }}
+          data={sales}
+          keyExtractor={(sale) => sale.id}
+          refreshing={isRefetching}
+          onRefresh={refetch}
+          onEndReachedThreshold={0.4}
+          onEndReached={() => {
+            if (hasNextPage && !isFetchingNextPage) {
+              fetchNextPage();
+            }
+          }}
+          ListEmptyComponent={
+            <Text variant="muted" className="p-4 text-center">
+              {t("mobile.sale.list.emptyRange")}
+            </Text>
+          }
+          ListFooterComponent={isFetchingNextPage ? <ActivityIndicator className="py-4" /> : null}
+          renderItem={({ item: sale }) => (
+            <SaleRow
+              sale={sale}
+              timeZone={timeZone}
+              currency={currency}
+              onPress={() => router.push(`/sale/${sale.id}`)}
+            />
+          )}
+        />
+      )}
     </View>
   );
 }
