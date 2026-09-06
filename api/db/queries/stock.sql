@@ -59,21 +59,41 @@ LIMIT sqlc.arg('limit');
 -- name: ListLevels :many
 -- variant/product/location are optional filters (sqlc.narg); product_id is
 -- reached through product_variants since stock_levels itself has no
--- product_id column. Cursor on (variant_id, location_id): those are the
--- immutable identity part of the PK, unlike updated_at, which changes on
--- every stock move and would make keyset pagination unstable while paging.
-SELECT sl.shop_id, sl.variant_id, sl.location_id, sl.qty, sl.updated_at, pv.product_id
+-- product_id column. Ordered newest variant first, then location (D-92):
+-- ORDER BY pv.created_at DESC, pv.id DESC, sl.location_id. The cursor
+-- encodes (variant_created_at, variant_id, location_id); the first two
+-- columns sort DESC and the third sorts ASC, so a single tuple comparison
+-- would silently get the third column's direction wrong — the WHERE
+-- clause instead spells out "this row comes after the cursor row in that
+-- order" explicitly, one OR branch per tie-break level.
+SELECT sl.shop_id, sl.variant_id, sl.location_id, sl.qty, sl.updated_at, pv.product_id, pv.created_at AS variant_created_at
 FROM stock_levels sl
 JOIN product_variants pv ON pv.id = sl.variant_id AND pv.shop_id = sl.shop_id
 WHERE sl.shop_id = sqlc.arg('shop_id')
     AND (sqlc.narg('variant_id')::uuid IS NULL OR sl.variant_id = sqlc.narg('variant_id'))
     AND (sqlc.narg('product_id')::uuid IS NULL OR pv.product_id = sqlc.narg('product_id'))
     AND (sqlc.narg('location_id')::uuid IS NULL OR sl.location_id = sqlc.narg('location_id'))
+    -- Invariant: cursor_variant_created_at, cursor_variant_id and
+    -- cursor_location_id are either all NULL (first page) or all set
+    -- (every later page) — never a partial cursor. levelCursorPtr
+    -- (api/internal/stock/pagination.go) guarantees this by only ever
+    -- returning all three pointers or all three nil. A partial cursor
+    -- would silently drop rows: e.g. cursor_variant_created_at set with
+    -- cursor_variant_id NULL would make the IS NULL check below only
+    -- gate on the first arg, and the second OR branch's
+    -- `pv.id < NULL::uuid` would then be NULL (neither true nor false)
+    -- for every row, so a whole tied created_at group could vanish.
     AND (
-        sqlc.narg('cursor_variant_id')::uuid IS NULL
-        OR (sl.variant_id, sl.location_id) > (sqlc.narg('cursor_variant_id')::uuid, sqlc.narg('cursor_location_id')::uuid)
+        sqlc.narg('cursor_variant_created_at')::timestamptz IS NULL
+        OR pv.created_at < sqlc.narg('cursor_variant_created_at')::timestamptz
+        OR (pv.created_at = sqlc.narg('cursor_variant_created_at')::timestamptz AND pv.id < sqlc.narg('cursor_variant_id')::uuid)
+        OR (
+            pv.created_at = sqlc.narg('cursor_variant_created_at')::timestamptz
+            AND pv.id = sqlc.narg('cursor_variant_id')::uuid
+            AND sl.location_id > sqlc.narg('cursor_location_id')::uuid
+        )
     )
-ORDER BY sl.variant_id, sl.location_id
+ORDER BY pv.created_at DESC, pv.id DESC, sl.location_id
 LIMIT sqlc.arg('limit');
 
 -- name: ListLow :many
@@ -85,23 +105,25 @@ LIMIT sqlc.arg('limit');
 -- "low", it is simply not tracked yet; a variant that sold out to qty 0
 -- DOES still count, since it has a row), and only active products and
 -- active variants (soft-deleted rows are already excluded by
--- deleted_at IS NULL). Cursor on variant_id (stable, unique).
-SELECT t.variant_id, t.product_id, t.qty::numeric(12,3) AS qty, COALESCE(p.low_stock_threshold, s.low_stock_threshold) AS threshold
+-- deleted_at IS NULL). Ordered newest variant first (D-92): ORDER BY
+-- variant_created_at DESC, variant_id DESC — both columns sort the same
+-- direction, so the cursor is an ordinary two-column keyset comparison.
+SELECT t.variant_id, t.product_id, t.qty::numeric(12,3) AS qty, COALESCE(p.low_stock_threshold, s.low_stock_threshold) AS threshold, t.variant_created_at
 FROM (
-    SELECT pv.id AS variant_id, pv.product_id, SUM(sl.qty) AS qty
+    SELECT pv.id AS variant_id, pv.product_id, pv.created_at AS variant_created_at, SUM(sl.qty) AS qty
     FROM product_variants pv
     JOIN stock_levels sl ON sl.variant_id = pv.id AND sl.shop_id = pv.shop_id
     WHERE pv.shop_id = sqlc.arg('shop_id') AND pv.deleted_at IS NULL AND pv.is_active
-    GROUP BY pv.id, pv.product_id
+    GROUP BY pv.id, pv.product_id, pv.created_at
 ) t
 JOIN products p ON p.id = t.product_id AND p.deleted_at IS NULL AND p.is_active
 JOIN shops s ON s.id = sqlc.arg('shop_id')
 WHERE t.qty <= COALESCE(p.low_stock_threshold, s.low_stock_threshold)
     AND (
-        sqlc.narg('cursor_variant_id')::uuid IS NULL
-        OR t.variant_id > sqlc.narg('cursor_variant_id')::uuid
+        sqlc.narg('cursor_variant_created_at')::timestamptz IS NULL
+        OR (t.variant_created_at, t.variant_id) < (sqlc.narg('cursor_variant_created_at')::timestamptz, sqlc.narg('cursor_variant_id')::uuid)
     )
-ORDER BY t.variant_id
+ORDER BY t.variant_created_at DESC, t.variant_id DESC
 LIMIT sqlc.arg('limit');
 
 -- name: TruncateLevelsForShop :exec

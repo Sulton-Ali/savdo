@@ -154,51 +154,74 @@ func (q *Queries) InsertMovement(ctx context.Context, arg InsertMovementParams) 
 }
 
 const listLevels = `-- name: ListLevels :many
-SELECT sl.shop_id, sl.variant_id, sl.location_id, sl.qty, sl.updated_at, pv.product_id
+SELECT sl.shop_id, sl.variant_id, sl.location_id, sl.qty, sl.updated_at, pv.product_id, pv.created_at AS variant_created_at
 FROM stock_levels sl
 JOIN product_variants pv ON pv.id = sl.variant_id AND pv.shop_id = sl.shop_id
 WHERE sl.shop_id = $1
     AND ($2::uuid IS NULL OR sl.variant_id = $2)
     AND ($3::uuid IS NULL OR pv.product_id = $3)
     AND ($4::uuid IS NULL OR sl.location_id = $4)
+    -- Invariant: cursor_variant_created_at, cursor_variant_id and
+    -- cursor_location_id are either all NULL (first page) or all set
+    -- (every later page) — never a partial cursor. levelCursorPtr
+    -- (api/internal/stock/pagination.go) guarantees this by only ever
+    -- returning all three pointers or all three nil. A partial cursor
+    -- would silently drop rows: e.g. cursor_variant_created_at set with
+    -- cursor_variant_id NULL would make the IS NULL check below only
+    -- gate on the first arg, and the second OR branch's
+    -- ` + "`" + `pv.id < NULL::uuid` + "`" + ` would then be NULL (neither true nor false)
+    -- for every row, so a whole tied created_at group could vanish.
     AND (
-        $5::uuid IS NULL
-        OR (sl.variant_id, sl.location_id) > ($5::uuid, $6::uuid)
+        $5::timestamptz IS NULL
+        OR pv.created_at < $5::timestamptz
+        OR (pv.created_at = $5::timestamptz AND pv.id < $6::uuid)
+        OR (
+            pv.created_at = $5::timestamptz
+            AND pv.id = $6::uuid
+            AND sl.location_id > $7::uuid
+        )
     )
-ORDER BY sl.variant_id, sl.location_id
-LIMIT $7
+ORDER BY pv.created_at DESC, pv.id DESC, sl.location_id
+LIMIT $8
 `
 
 type ListLevelsParams struct {
-	ShopID           uuid.UUID  `json:"shop_id"`
-	VariantID        *uuid.UUID `json:"variant_id"`
-	ProductID        *uuid.UUID `json:"product_id"`
-	LocationID       *uuid.UUID `json:"location_id"`
-	CursorVariantID  *uuid.UUID `json:"cursor_variant_id"`
-	CursorLocationID *uuid.UUID `json:"cursor_location_id"`
-	Limit            int32      `json:"limit"`
+	ShopID                 uuid.UUID  `json:"shop_id"`
+	VariantID              *uuid.UUID `json:"variant_id"`
+	ProductID              *uuid.UUID `json:"product_id"`
+	LocationID             *uuid.UUID `json:"location_id"`
+	CursorVariantCreatedAt *time.Time `json:"cursor_variant_created_at"`
+	CursorVariantID        *uuid.UUID `json:"cursor_variant_id"`
+	CursorLocationID       *uuid.UUID `json:"cursor_location_id"`
+	Limit                  int32      `json:"limit"`
 }
 
 type ListLevelsRow struct {
-	ShopID     uuid.UUID      `json:"shop_id"`
-	VariantID  uuid.UUID      `json:"variant_id"`
-	LocationID uuid.UUID      `json:"location_id"`
-	Qty        pgtype.Numeric `json:"qty"`
-	UpdatedAt  time.Time      `json:"updated_at"`
-	ProductID  uuid.UUID      `json:"product_id"`
+	ShopID           uuid.UUID      `json:"shop_id"`
+	VariantID        uuid.UUID      `json:"variant_id"`
+	LocationID       uuid.UUID      `json:"location_id"`
+	Qty              pgtype.Numeric `json:"qty"`
+	UpdatedAt        time.Time      `json:"updated_at"`
+	ProductID        uuid.UUID      `json:"product_id"`
+	VariantCreatedAt time.Time      `json:"variant_created_at"`
 }
 
 // variant/product/location are optional filters (sqlc.narg); product_id is
 // reached through product_variants since stock_levels itself has no
-// product_id column. Cursor on (variant_id, location_id): those are the
-// immutable identity part of the PK, unlike updated_at, which changes on
-// every stock move and would make keyset pagination unstable while paging.
+// product_id column. Ordered newest variant first, then location (D-92):
+// ORDER BY pv.created_at DESC, pv.id DESC, sl.location_id. The cursor
+// encodes (variant_created_at, variant_id, location_id); the first two
+// columns sort DESC and the third sorts ASC, so a single tuple comparison
+// would silently get the third column's direction wrong — the WHERE
+// clause instead spells out "this row comes after the cursor row in that
+// order" explicitly, one OR branch per tie-break level.
 func (q *Queries) ListLevels(ctx context.Context, arg ListLevelsParams) ([]ListLevelsRow, error) {
 	rows, err := q.db.Query(ctx, listLevels,
 		arg.ShopID,
 		arg.VariantID,
 		arg.ProductID,
 		arg.LocationID,
+		arg.CursorVariantCreatedAt,
 		arg.CursorVariantID,
 		arg.CursorLocationID,
 		arg.Limit,
@@ -217,6 +240,7 @@ func (q *Queries) ListLevels(ctx context.Context, arg ListLevelsParams) ([]ListL
 			&i.Qty,
 			&i.UpdatedAt,
 			&i.ProductID,
+			&i.VariantCreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -229,36 +253,38 @@ func (q *Queries) ListLevels(ctx context.Context, arg ListLevelsParams) ([]ListL
 }
 
 const listLow = `-- name: ListLow :many
-SELECT t.variant_id, t.product_id, t.qty::numeric(12,3) AS qty, COALESCE(p.low_stock_threshold, s.low_stock_threshold) AS threshold
+SELECT t.variant_id, t.product_id, t.qty::numeric(12,3) AS qty, COALESCE(p.low_stock_threshold, s.low_stock_threshold) AS threshold, t.variant_created_at
 FROM (
-    SELECT pv.id AS variant_id, pv.product_id, SUM(sl.qty) AS qty
+    SELECT pv.id AS variant_id, pv.product_id, pv.created_at AS variant_created_at, SUM(sl.qty) AS qty
     FROM product_variants pv
     JOIN stock_levels sl ON sl.variant_id = pv.id AND sl.shop_id = pv.shop_id
     WHERE pv.shop_id = $1 AND pv.deleted_at IS NULL AND pv.is_active
-    GROUP BY pv.id, pv.product_id
+    GROUP BY pv.id, pv.product_id, pv.created_at
 ) t
 JOIN products p ON p.id = t.product_id AND p.deleted_at IS NULL AND p.is_active
 JOIN shops s ON s.id = $1
 WHERE t.qty <= COALESCE(p.low_stock_threshold, s.low_stock_threshold)
     AND (
-        $2::uuid IS NULL
-        OR t.variant_id > $2::uuid
+        $2::timestamptz IS NULL
+        OR (t.variant_created_at, t.variant_id) < ($2::timestamptz, $3::uuid)
     )
-ORDER BY t.variant_id
-LIMIT $3
+ORDER BY t.variant_created_at DESC, t.variant_id DESC
+LIMIT $4
 `
 
 type ListLowParams struct {
-	ShopID          uuid.UUID  `json:"shop_id"`
-	CursorVariantID *uuid.UUID `json:"cursor_variant_id"`
-	Limit           int32      `json:"limit"`
+	ShopID                 uuid.UUID  `json:"shop_id"`
+	CursorVariantCreatedAt *time.Time `json:"cursor_variant_created_at"`
+	CursorVariantID        *uuid.UUID `json:"cursor_variant_id"`
+	Limit                  int32      `json:"limit"`
 }
 
 type ListLowRow struct {
-	VariantID uuid.UUID      `json:"variant_id"`
-	ProductID uuid.UUID      `json:"product_id"`
-	Qty       pgtype.Numeric `json:"qty"`
-	Threshold int32          `json:"threshold"`
+	VariantID        uuid.UUID      `json:"variant_id"`
+	ProductID        uuid.UUID      `json:"product_id"`
+	Qty              pgtype.Numeric `json:"qty"`
+	Threshold        int32          `json:"threshold"`
+	VariantCreatedAt time.Time      `json:"variant_created_at"`
 }
 
 // A variant is low when its total qty across every location is at or
@@ -269,9 +295,16 @@ type ListLowRow struct {
 // "low", it is simply not tracked yet; a variant that sold out to qty 0
 // DOES still count, since it has a row), and only active products and
 // active variants (soft-deleted rows are already excluded by
-// deleted_at IS NULL). Cursor on variant_id (stable, unique).
+// deleted_at IS NULL). Ordered newest variant first (D-92): ORDER BY
+// variant_created_at DESC, variant_id DESC — both columns sort the same
+// direction, so the cursor is an ordinary two-column keyset comparison.
 func (q *Queries) ListLow(ctx context.Context, arg ListLowParams) ([]ListLowRow, error) {
-	rows, err := q.db.Query(ctx, listLow, arg.ShopID, arg.CursorVariantID, arg.Limit)
+	rows, err := q.db.Query(ctx, listLow,
+		arg.ShopID,
+		arg.CursorVariantCreatedAt,
+		arg.CursorVariantID,
+		arg.Limit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -284,6 +317,7 @@ func (q *Queries) ListLow(ctx context.Context, arg ListLowParams) ([]ListLowRow,
 			&i.ProductID,
 			&i.Qty,
 			&i.Threshold,
+			&i.VariantCreatedAt,
 		); err != nil {
 			return nil, err
 		}
