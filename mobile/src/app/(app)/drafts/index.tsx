@@ -5,7 +5,6 @@ import { ActivityIndicator, FlatList, Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Text } from "@/components/ui/text";
-import { useCustomer } from "@/features/customers/hooks";
 import type { SaleDraft } from "@/features/sales/api";
 import { draftAge } from "@/features/sales/drafts";
 import { useDrafts } from "@/features/sales/hooks";
@@ -16,24 +15,6 @@ function DraftAgeText({ createdAt }: { createdAt: string }) {
   const { t } = useTranslation();
   const age = draftAge(createdAt);
   return <Text variant="muted">{t(`mobile.drafts.age.${age.unit}`, { count: age.value })}</Text>;
-}
-
-/** Resolves `draft.customerId` to a display name via `GET /customers/{id}`
- * (cashier+ may already read any customer, D-63/§7 permission matrix) — a
- * small per-row lookup rather than a batched name on `SaleDraft` itself,
- * since the contract has no `customerName` field here (unlike
- * `Sale.customerName`); see this task's own report for the gap. */
-function DraftCustomerText({ customerId }: { customerId: string | null }) {
-  const { t } = useTranslation();
-  const customerQuery = useCustomer(customerId ?? undefined);
-  if (!customerId) {
-    return <Text variant="muted">{t("mobile.sale.customer.none")}</Text>;
-  }
-  return (
-    <Text variant="muted" numberOfLines={1}>
-      {customerQuery.data?.fullName ?? "…"}
-    </Text>
-  );
 }
 
 /**
@@ -86,7 +67,9 @@ function DraftRow({
         <Text variant="large">{formatMoney(draft.estimatedTotal, currency)}</Text>
       </View>
       <View className="flex-row items-center justify-between">
-        <DraftCustomerText customerId={draft.customerId} />
+        <Text variant="muted" numberOfLines={1}>
+          {draft.customerName ?? "—"}
+        </Text>
         <Text variant="muted">
           {t("mobile.drafts.list.lineCount", { count: draft.items.length })}
         </Text>

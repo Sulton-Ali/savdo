@@ -9,7 +9,6 @@ import { Button } from "@/components/ui/button";
 import { Text } from "@/components/ui/text";
 import { useLocations } from "@/features/catalog/hooks";
 import { formatQty } from "@/features/catalog/qty";
-import { useCustomer } from "@/features/customers/hooks";
 import type { PaymentMethod } from "@/features/sales/api";
 import { SalesApiError } from "@/features/sales/api";
 import { generateIdempotencyKey, idempotencyOutcome } from "@/features/sales/cart";
@@ -92,8 +91,6 @@ export default function DraftDetailScreen() {
     () => (locations ?? []).find((l) => l.id === draft?.locationId),
     [locations, draft?.locationId],
   );
-  const customerQuery = useCustomer(draft?.customerId ?? undefined);
-
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [completeKey, setCompleteKey] = useState(generateIdempotencyKey);
   const [generalError, setGeneralError] = useState<string | null>(null);
@@ -270,7 +267,7 @@ export default function DraftDetailScreen() {
           </View>
           <View className="flex-row justify-between">
             <Text variant="muted">{t("sales.detail.fields.customer")}</Text>
-            <Text>{customerQuery.data?.fullName ?? t("mobile.sale.customer.none")}</Text>
+            <Text>{draft.customerName ?? "—"}</Text>
           </View>
           {draft.note ? (
             <View className="flex-row justify-between gap-2">
