@@ -73,6 +73,16 @@ WHERE sl.shop_id = sqlc.arg('shop_id')
     AND (sqlc.narg('variant_id')::uuid IS NULL OR sl.variant_id = sqlc.narg('variant_id'))
     AND (sqlc.narg('product_id')::uuid IS NULL OR pv.product_id = sqlc.narg('product_id'))
     AND (sqlc.narg('location_id')::uuid IS NULL OR sl.location_id = sqlc.narg('location_id'))
+    -- Invariant: cursor_variant_created_at, cursor_variant_id and
+    -- cursor_location_id are either all NULL (first page) or all set
+    -- (every later page) — never a partial cursor. levelCursorPtr
+    -- (api/internal/stock/pagination.go) guarantees this by only ever
+    -- returning all three pointers or all three nil. A partial cursor
+    -- would silently drop rows: e.g. cursor_variant_created_at set with
+    -- cursor_variant_id NULL would make the IS NULL check below only
+    -- gate on the first arg, and the second OR branch's
+    -- `pv.id < NULL::uuid` would then be NULL (neither true nor false)
+    -- for every row, so a whole tied created_at group could vanish.
     AND (
         sqlc.narg('cursor_variant_created_at')::timestamptz IS NULL
         OR pv.created_at < sqlc.narg('cursor_variant_created_at')::timestamptz
