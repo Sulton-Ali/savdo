@@ -4769,6 +4769,7 @@ components:
         - id
         - locationId
         - customerId
+        - customerName
         - discount
         - discountReason
         - note
@@ -4790,6 +4791,13 @@ components:
         customerId:
           type: ["string", "null"]
           format: uuid
+        customerName:
+          type: ["string", "null"]
+          description: >
+            The attached customer's display name, resolved server-side
+            (mirrors `Sale.customerName` and this same schema's own
+            `createdByName`); `null` when `customerId` is `null` or the
+            customer no longer exists.
         discount:
           description: >
             `null` when the draft has no manual discount. The
