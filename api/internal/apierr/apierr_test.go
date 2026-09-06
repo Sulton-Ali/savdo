@@ -36,6 +36,18 @@ func TestConstructors(t *testing.T) {
 			},
 		},
 		{
+			name:       "Unprocessable",
+			err:        apierr.Unprocessable(map[string]string{"items[0].variantId": "invalid"}),
+			wantStatus: http.StatusUnprocessableEntity,
+			wantCode:   gen.VALIDATIONFAILED,
+			wantDetail: func(t *testing.T, d map[string]any) {
+				fields, ok := d["fields"].(map[string]string)
+				if !ok || fields["items[0].variantId"] != "invalid" {
+					t.Fatalf("details.fields = %+v, want {items[0].variantId: invalid}", d["fields"])
+				}
+			},
+		},
+		{
 			name:       "Unauthenticated",
 			err:        apierr.Unauthenticated(),
 			wantStatus: http.StatusUnauthorized,

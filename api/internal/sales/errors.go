@@ -150,6 +150,20 @@ func errReturnExceedsSold(index int, saleItemID uuid.UUID) *apierr.Error {
 // already the right shape (or deliberately opaque) and passes through
 // unchanged. Mirrors stock.mapMoveError; duplicated rather than exported
 // cross-package for the same reason isDeadlock is.
+// errDraftLineUnavailable builds a 422 VALIDATION_FAILED naming every
+// unavailable line by its index in the request-equivalent items array
+// (`items[<i>].variantId: invalid`) — apierr.Unprocessable's own
+// `details.fields` shape (docs/05-API.md § Conventions, O-12
+// vocabulary), but at 422: the request itself is well-formed, it is the
+// draft's current state (a line's variant or product having gone
+// inactive or soft-deleted since it was added) that cannot be processed
+// (docs/05-API.md § Conventions' 422 bullet, D-88 — "the client shows
+// which line and lets the user edit the draft"). Used by
+// CompleteSaleDraftTx (drafts_write.go).
+func errDraftLineUnavailable(fields map[string]string) *apierr.Error {
+	return apierr.Unprocessable(fields)
+}
+
 func mapMoveError(err error) error {
 	if isDeadlock(err) {
 		return errDeadlock

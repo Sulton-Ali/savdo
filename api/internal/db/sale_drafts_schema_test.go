@@ -364,7 +364,7 @@ func TestDeleteSaleDraft_cascadesItems(t *testing.T) {
 }
 
 // TestSaleDrafts_foreignKeys proves every FK sale_drafts/sale_draft_items
-// carry (location_id, customer_id, created_by, draft_id, variant_id) is
+// carry (location_id, customer_id, created_by, sale_draft_id, variant_id) is
 // actually enforced by Postgres, not just assumed from the migration
 // text.
 func TestSaleDrafts_foreignKeys(t *testing.T) {
@@ -398,7 +398,7 @@ func TestSaleDrafts_foreignKeys(t *testing.T) {
 	if _, err := f.q.InsertSaleDraftItem(ctx, db.InsertSaleDraftItemParams{
 		ID: uuid.New(), ShopID: f.shopID, SaleDraftID: bogus, VariantID: f.variantID, Qty: numeric(t, "1.000"), Position: 0,
 	}); !isForeignKeyViolation(err) {
-		t.Errorf("want a foreign key violation for a nonexistent draft_id, got: %v", err)
+		t.Errorf("want a foreign key violation for a nonexistent sale_draft_id, got: %v", err)
 	}
 
 	if _, err := f.q.InsertSaleDraftItem(ctx, db.InsertSaleDraftItemParams{

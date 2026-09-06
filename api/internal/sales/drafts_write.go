@@ -19,7 +19,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -171,16 +170,27 @@ type draftDiscountPatch struct {
 }
 
 // resolveDraftDiscountPatch merges SaleDraftPatch's discountType/
-// discountValue against current's already-stored pair: an unspecified
-// field keeps current's own value, an explicit `null` clears that half,
-// a real value sets it — then requires the resulting pair to be either
-// both null (clear) or both set (a valid discount), the same invariant
-// sale_drafts' CHECK constraint enforces, but checked here, before any
-// UPDATE runs, so a lone discountType or discountValue — with or without
-// the other explicitly nulled, e.g. `{"discountType":null,
-// "discountValue":"100.00"}` — is a 400 VALIDATION_FAILED naming
-// whichever half is missing, never a raw constraint-violation 500
-// (review MAJOR).
+// discountValue against current's already-stored pair, following the
+// exact D-35 pairing convention docs/04-DATA-MODEL.md § 4 and the
+// contract's own SaleDraftPatch/updateSaleDraft descriptions state (the
+// same rule ProductPatch's promo fields already use, ClearPromo,
+// catalog.UpdateProduct): an explicit `null` on *either* field clears
+// the discount entirely — even when the other field carries a real
+// value in the very same request, e.g. `{"discountType":null,
+// "discountValue":"100.00"}` clears, it does not 400 — because a clear
+// signal on one half of an atomic pair is unambiguous regardless of
+// what the other half says. Short of an explicit null, naming only one
+// half with a non-null value merges it with current's already-stored
+// other half; if that other half was never stored, the pair cannot be
+// completed and this is a 400 VALIDATION_FAILED naming the missing half
+// (the same invariant sale_drafts' own CHECK constraint enforces,
+// checked here before any UPDATE runs, so a lone half never surfaces as
+// a raw constraint-violation 500). touched is false only when the
+// request named neither field at all — the caller must then leave the
+// discount entirely alone, including skipping the post-write
+// DISCOUNT_EXCEEDS_SUBTOTAL re-check (a note-only PATCH must succeed
+// even when the already-stored discount has since gone stale against
+// the current subtotal).
 func resolveDraftDiscountPatch(typeField, valueField nullable.Nullable[string], current db.SaleDraft) (draftDiscountPatch, error) {
 	typeSet := optionalString(typeField)
 	valueSet := optionalString(valueField)
@@ -188,33 +198,31 @@ func resolveDraftDiscountPatch(typeField, valueField nullable.Nullable[string], 
 		return draftDiscountPatch{touched: false}, nil
 	}
 
+	// An explicit null on either half clears the whole pair outright,
+	// regardless of what the other half names — checked first, before
+	// any parsing of a same-request value the clear makes moot.
+	if (typeSet != nil && *typeSet == nil) || (valueSet != nil && *valueSet == nil) {
+		return draftDiscountPatch{touched: true, clear: true}, nil
+	}
+
 	finalType := current.DiscountType
 	if typeSet != nil {
-		if *typeSet == nil {
-			finalType = nil
-		} else {
-			t := db.DiscountType(**typeSet)
-			if t != db.DiscountTypePercent && t != db.DiscountTypeFixed {
-				return draftDiscountPatch{}, apierr.Validation(map[string]string{"discountType": "invalid"})
-			}
-			finalType = &t
+		t := db.DiscountType(**typeSet)
+		if t != db.DiscountTypePercent && t != db.DiscountTypeFixed {
+			return draftDiscountPatch{}, apierr.Validation(map[string]string{"discountType": "invalid"})
 		}
+		finalType = &t
 	}
 
 	finalValue := current.DiscountValue
 	finalValueSet := current.DiscountValue.Valid
 	if valueSet != nil {
-		if *valueSet == nil {
-			finalValue = pgtype.Numeric{}
-			finalValueSet = false
-		} else {
-			v, apiErr := money.ParseAmount(**valueSet)
-			if apiErr != nil {
-				return draftDiscountPatch{}, apierr.Validation(map[string]string{"discountValue": "invalid"})
-			}
-			finalValue = money.ToNumeric(v)
-			finalValueSet = true
+		v, apiErr := money.ParseAmount(**valueSet)
+		if apiErr != nil {
+			return draftDiscountPatch{}, apierr.Validation(map[string]string{"discountValue": "invalid"})
 		}
+		finalValue = money.ToNumeric(v)
+		finalValueSet = true
 	}
 
 	if (finalType == nil) != !finalValueSet {
@@ -224,7 +232,7 @@ func resolveDraftDiscountPatch(typeField, valueField nullable.Nullable[string], 
 		return draftDiscountPatch{}, apierr.Validation(map[string]string{"discountValue": "required"})
 	}
 
-	return draftDiscountPatch{touched: true, clear: finalType == nil, typ: finalType, value: finalValue}, nil
+	return draftDiscountPatch{touched: true, clear: false, typ: finalType, value: finalValue}, nil
 }
 
 // UpdateSaleDraftTx edits a draft (PATCH /sales/drafts/{id}, D-87).
@@ -430,19 +438,6 @@ func (h *Handler) DeleteSaleDraftTx(ctx context.Context, qtx *db.Queries, id uui
 	return nil
 }
 
-// errDraftLineUnavailable builds a 422 VALIDATION_FAILED naming every
-// unavailable line by its index in the request-equivalent items array
-// (`items[<i>].variantId: invalid`) — the same `details.fields`
-// convention `apierr.Validation`'s 400 uses, docs/05-API.md § Conventions
-// (O-12 vocabulary), but at 422: the request itself is well-formed, it
-// is the draft's current state (a line's variant or product having gone
-// inactive or soft-deleted since it was added) that cannot be processed
-// (docs/05-API.md § Conventions' 422 bullet, review CRITICAL/D-88 — "the
-// client shows which line and lets the user edit the draft").
-func errDraftLineUnavailable(fields map[string]string) *apierr.Error {
-	return &apierr.Error{Status: http.StatusUnprocessableEntity, Code: gen.VALIDATIONFAILED, Details: map[string]any{"fields": fields}}
-}
-
 // CompleteSaleDraftTx completes draftID (POST
 // /sales/drafts/{id}/complete, D-87, D-96): locks the draft
 // (GetSaleDraftForUpdate) against a concurrent second completion or
@@ -509,6 +504,25 @@ func (h *Handler) CompleteSaleDraftTx(ctx context.Context, qtx *db.Queries, draf
 		return gen.Sale{}, err
 	}
 	priced := byDraft[draftID]
+
+	// Defensive line-count check (hard rule 8: never trust a computed
+	// quantity without confirming it against the source of truth): the
+	// draft's own stored item rows are the source of truth for how many
+	// lines a sale must carry; priceDraftItemsBatch's JOIN-based query
+	// should always return exactly that many rows (every FK it joins
+	// through is NOT NULL and blocks a hard delete, drafts.go's own doc
+	// comment), but a mismatch — fewer or more — must never silently
+	// reach CreateSaleTx and sell the wrong line set. This is an internal
+	// error (500), not a client-facing one: nothing in the request caused
+	// it.
+	rawItems, err := qtx.ListSaleDraftItems(ctx, db.ListSaleDraftItemsParams{ShopID: authCtx.ShopID, SaleDraftID: draftID})
+	if err != nil {
+		return gen.Sale{}, fmt.Errorf("sales: list sale draft items: %w", err)
+	}
+	if len(rawItems) != len(priced) {
+		return gen.Sale{}, fmt.Errorf("sales: draft %s has %d stored item(s) but priceDraftItemsBatch priced %d — refusing to complete with a mismatched line count", draftID, len(rawItems), len(priced))
+	}
+
 	if len(priced) == 0 {
 		return gen.Sale{}, apierr.Validation(map[string]string{"items": "required"})
 	}

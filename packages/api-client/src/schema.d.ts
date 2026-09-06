@@ -981,7 +981,7 @@ export interface paths {
         head?: never;
         /**
          * Edit a draft sale.
-         * @description Requires `cashier+`, and either the draft's own creator or `manager+` — a draft whose `createdBy` is `null` may only be edited by `manager+` (D-89). `items`, when present, replaces the whole line set. `customerId`, `discountReason` and `note` are nullable (D-35): explicit `null` clears the field. `discountType`/`discountValue` are nullable as a pair: explicit `null` on either clears the discount entirely, the same pairing rule `05-API.md`'s promo bullet describes for `promoPrice`/ `promoFrom`/`promoTo`; naming only one of the two keeps the other's already-stored value.
+         * @description Requires `cashier+`, and either the draft's own creator or `manager+` — a draft whose `createdBy` is `null` may only be edited by `manager+` (D-89). `items`, when present, replaces the whole line set. `customerId`, `discountReason` and `note` are nullable (D-35): explicit `null` clears the field. `discountType`/`discountValue` are nullable as a pair: explicit `null` on either clears the discount entirely — even when the other half of the pair carries a real value in the same request — the same pairing rule `05-API.md`'s promo bullet describes for `promoPrice`/`promoFrom`/`promoTo`; naming only one of the two with a non-null value keeps the other's already-stored value; naming one non-null while nothing is stored for the pair is `400 VALIDATION_FAILED` on the missing half.
          */
         patch: operations["updateSaleDraft"];
         trace?: never;
@@ -1985,7 +1985,7 @@ export interface components {
             discountReason?: string;
             note?: string;
         };
-        /** @description Partial update — only provided fields change (D-87). `items`, when present, replaces the whole line set. `customerId`, `discountType`, `discountValue`, `discountReason` and `note` are nullable (D-35): explicit `null` clears the field; `discountType`/`discountValue` are cleared together as a pair by an explicit `null` on either one, the same rule `docs/05-API.md`'s promo bullet describes for `promoPrice`/`promoFrom`/`promoTo` — naming only one of the two keeps the other's already-stored value. */
+        /** @description Partial update — only provided fields change (D-87). `items`, when present, replaces the whole line set. `customerId`, `discountType`, `discountValue`, `discountReason` and `note` are nullable (D-35): explicit `null` clears the field; `discountType`/`discountValue` are cleared together as a pair by an explicit `null` on either one — even when the other half of the pair carries a real value in the same request — the same rule `docs/05-API.md`'s promo bullet describes for `promoPrice`/`promoFrom`/`promoTo`; naming only one of the two with a non-null value keeps the other's already-stored value; naming one non-null while nothing is stored for the pair is `400 VALIDATION_FAILED` on the missing half. */
         SaleDraftPatch: {
             /** Format: uuid */
             locationId?: string;

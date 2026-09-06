@@ -1078,7 +1078,7 @@ type SaleDraftList struct {
 	NextCursor nullable.Nullable[string] `json:"nextCursor"`
 }
 
-// SaleDraftPatch Partial update — only provided fields change (D-87). `items`, when present, replaces the whole line set. `customerId`, `discountType`, `discountValue`, `discountReason` and `note` are nullable (D-35): explicit `null` clears the field; `discountType`/`discountValue` are cleared together as a pair by an explicit `null` on either one, the same rule `docs/05-API.md`'s promo bullet describes for `promoPrice`/`promoFrom`/`promoTo` — naming only one of the two keeps the other's already-stored value.
+// SaleDraftPatch Partial update — only provided fields change (D-87). `items`, when present, replaces the whole line set. `customerId`, `discountType`, `discountValue`, `discountReason` and `note` are nullable (D-35): explicit `null` clears the field; `discountType`/`discountValue` are cleared together as a pair by an explicit `null` on either one — even when the other half of the pair carries a real value in the same request — the same rule `docs/05-API.md`'s promo bullet describes for `promoPrice`/`promoFrom`/`promoTo`; naming only one of the two with a non-null value keeps the other's already-stored value; naming one non-null while nothing is stored for the pair is `400 VALIDATION_FAILED` on the missing half.
 type SaleDraftPatch struct {
 	CustomerId     nullable.Nullable[openapi_types.UUID] `json:"customerId,omitempty"`
 	DiscountReason nullable.Nullable[string]             `json:"discountReason,omitempty"`

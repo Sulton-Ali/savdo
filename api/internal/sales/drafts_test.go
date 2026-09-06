@@ -729,12 +729,16 @@ func TestListSaleDrafts_mixedHealthyAndPoisonedDraftsBothRender(t *testing.T) {
 	}
 }
 
-// TestUpdateSaleDraft_partialDiscountPairIsRejected is review MAJOR's own
-// test: naming only one of discountType/discountValue — with or without
-// an explicit `null` on the other — must 400 VALIDATION_FAILED before
-// any UPDATE runs, never surface the sale_drafts CHECK constraint as an
-// opaque 500.
-func TestUpdateSaleDraft_partialDiscountPairIsRejected(t *testing.T) {
+// TestUpdateSaleDraft_partialDiscountPairFollowsD35 is the D-35-aligned
+// truth table's own test (docs/04-DATA-MODEL.md § 4, contracts/
+// openapi.yaml's updateSaleDraft/SaleDraftPatch descriptions): naming
+// only one half of discountType/discountValue with nothing already
+// stored for the pair is 400 VALIDATION_FAILED on the missing half
+// (never a raw sale_drafts CHECK-constraint 500); an explicit `null` on
+// either half clears the whole pair outright — even when the other half
+// carries a real, non-null value in the very same request — the same
+// way ProductPatch's promo fields already work (ClearPromo), not a 400.
+func TestUpdateSaleDraft_partialDiscountPairFollowsD35(t *testing.T) {
 	pool, q := newTestQueries(t)
 	ctx := context.Background()
 	h := sales.NewHandler(sales.NewService(q))
@@ -762,16 +766,13 @@ func TestUpdateSaleDraft_partialDiscountPairIsRejected(t *testing.T) {
 		}
 	}
 
+	// Naming only one half, with nothing stored for the other — 400 on
+	// the missing half.
 	assertPartialDiscount400("discountType only", &gen.SaleDraftPatch{
 		DiscountType: nullable.NewNullableWithValue("fixed"),
 	})
 	assertPartialDiscount400("discountValue only", &gen.SaleDraftPatch{
 		DiscountValue: nullable.NewNullableWithValue("10.00"),
-	})
-	// Explicit null on discountType while giving a real discountValue —
-	// a contradictory pair, also 400 (not silently "clear both").
-	assertPartialDiscount400("null type + real value", &gen.SaleDraftPatch{
-		DiscountType: nullable.NewNullNullable[string](), DiscountValue: nullable.NewNullableWithValue("100.00"),
 	})
 
 	// None of the rejected attempts touched the draft.
@@ -782,6 +783,44 @@ func TestUpdateSaleDraft_partialDiscountPairIsRejected(t *testing.T) {
 	got := resp.(gen.GetSaleDraft200JSONResponse)
 	if !got.Discount.IsNull() {
 		t.Fatalf("Discount = %+v, want still null", got.Discount)
+	}
+
+	// Set a real discount first, so the "explicit null wins" cases below
+	// have something to clear.
+	if _, err := updateDraft(cashierCtx, t, h, pool, q, draft.Id, &gen.SaleDraftPatch{
+		DiscountType: nullable.NewNullableWithValue("fixed"), DiscountValue: nullable.NewNullableWithValue("10.00"),
+	}); err != nil {
+		t.Fatalf("updateDraft (set discount): %v", err)
+	}
+
+	// Explicit null on discountType while giving a real discountValue in
+	// the same request clears the whole pair — the null wins, the real
+	// value is not an error and is simply moot (D-35).
+	cleared, err := updateDraft(cashierCtx, t, h, pool, q, draft.Id, &gen.SaleDraftPatch{
+		DiscountType: nullable.NewNullNullable[string](), DiscountValue: nullable.NewNullableWithValue("100.00"),
+	})
+	if err != nil {
+		t.Fatalf("updateDraft (null type + real value): %v", err)
+	}
+	if !cleared.Discount.IsNull() {
+		t.Fatalf("Discount = %+v, want cleared (null)", cleared.Discount)
+	}
+
+	// Symmetric case: set the discount again, then clear via an explicit
+	// null on discountValue while discountType carries a real value.
+	if _, err := updateDraft(cashierCtx, t, h, pool, q, draft.Id, &gen.SaleDraftPatch{
+		DiscountType: nullable.NewNullableWithValue("percent"), DiscountValue: nullable.NewNullableWithValue("5.00"),
+	}); err != nil {
+		t.Fatalf("updateDraft (set discount again): %v", err)
+	}
+	clearedAgain, err := updateDraft(cashierCtx, t, h, pool, q, draft.Id, &gen.SaleDraftPatch{
+		DiscountType: nullable.NewNullableWithValue("fixed"), DiscountValue: nullable.NewNullNullable[string](),
+	})
+	if err != nil {
+		t.Fatalf("updateDraft (real type + null value): %v", err)
+	}
+	if !clearedAgain.Discount.IsNull() {
+		t.Fatalf("Discount = %+v, want cleared (null)", clearedAgain.Discount)
 	}
 }
 
