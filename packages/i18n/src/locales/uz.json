@@ -873,7 +873,7 @@
         "networkUnknown": "Aloqa uzildi. Sotuv allaqachon qayd etilgan bo‘lishi mumkin — qayta to‘lashdan oldin bugungi ro‘yxatni tekshiring.",
         "locationGone": "Tanlangan filial endi mavjud emas — boshqasini tanlang.",
         "customerGone": "Biriktirilgan mijoz endi mavjud emas.",
-        "draftLocationGone": "Ushbu qoralamaning filiali endi mavjud emas — filial tanlang."
+        "draftLocationGone": "Ushbu qoralamaning filiali endi mavjud emas — u {{location}} filialiga saqlanadi. Kerak bo‘lsa, filialni o‘zgartiring."
       },
       "list": {
         "title": "Bugungi sotuvlar",

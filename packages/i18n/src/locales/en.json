@@ -873,7 +873,7 @@
         "networkUnknown": "Connection lost. The sale may already be recorded: check today's list before paying again.",
         "locationGone": "The selected location is no longer available; choose another.",
         "customerGone": "The attached customer no longer exists.",
-        "draftLocationGone": "This draft's location is no longer available — choose a location."
+        "draftLocationGone": "This draft's location is no longer available; it will be saved at {{location}}. Change it if needed."
       },
       "list": {
         "title": "Today's sales",
