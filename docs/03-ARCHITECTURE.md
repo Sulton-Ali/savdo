@@ -225,6 +225,7 @@ writes `sale_void_in` movements for every line. A return is a new `returns` sale
 referencing the original, with `return_in` movements. Sale numbers are per shop,
 sequential, gap-free within a shop (`shops.next_sale_number` under row lock).
 Amended 2026-09-05 (D-58, D-59, D-61, D-62, D-66): voids are limited to the sale's calendar day in the shop timezone and are refused once a return exists; returns may be partial, refund by the original payment method, and refund each line net of its proportional share of the sale discount. Returns are final and cannot be voided (D-66).
+Amended 2026-09-06 (D-87): draft sales live in separate mutable tables `sale_drafts` and `sale_draft_items` outside the `sales` ledger; a draft stores location, lines, customer, discount and notes with no sale number. Completing a draft creates the sale via `sales.Service` in the same transaction as the draft's deletion, under `Idempotency-Key`. Immutability and void/return rules apply from completion onward; until then, a draft is mutable by its creator or manager+.
 
 ## Cross-cutting
 
