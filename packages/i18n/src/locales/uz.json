@@ -35,6 +35,7 @@
   },
   "nav": {
     "dashboard": "Boshqaruv paneli",
+    "drafts": "Qoralamalar",
     "sales": "Sotuvlar",
     "products": "Mahsulotlar",
     "categories": "Kategoriyalar",
@@ -864,6 +865,7 @@
       },
       "estimate": "Taxminiy — to‘lovda server aniq summani tasdiqlaydi",
       "pay": "To‘lash",
+      "notePlaceholder": "Izoh (ixtiyoriy)",
       "paying": "Bajarilmoqda…",
       "locationRequired": "Sotuvni yakunlashdan oldin filialni tanlang.",
       "errors": {
@@ -881,6 +883,65 @@
         "errors": {
           "invalidRange": "Sanani YYYY-MM-DD formatida kiriting, boshlanish sanasi tugash sanasidan keyin bo‘lmasin."
         }
+      },
+      "clearConfirm": "Savatchadagi barcha tovarlar olib tashlansinmi?"
+    },
+    "drafts": {
+      "saved": {
+        "title": "Qoralama saqlandi",
+        "view": "Qoralamani ko'rish"
+      },
+      "actions": {
+        "saveDraft": "Qoralama sifatida saqlash",
+        "save": "Saqlash",
+        "edit": "Tahrirlash",
+        "delete": "O'chirish"
+      },
+      "deleteConfirm": {
+        "title": "Bu qoralamani o'chirasizmi?"
+      },
+      "discardConfirm": {
+        "title": "O'zgarishlar bekor qilinsinmi?",
+        "discardLocal": "Faqat mahalliy o'zgarishlarni bekor qilish",
+        "deleteServer": "Qoralamani o'chirish"
+      },
+      "detail": {
+        "title": "Qoralama",
+        "unavailable": "Mavjud emas"
+      },
+      "errors": {
+        "notFound": "Bu qoralama allaqachon to'langan yoki o'chirilgan.",
+        "lineUnavailable": "\"{{name}}\" endi mavjud emas — uni olib tashlash uchun qoralamani tahrirlang."
+      },
+      "filter": {
+        "all": "Barchasi",
+        "mine": "Faqat men"
+      },
+      "list": {
+        "empty": "Hozircha qoralamalar yo'q.",
+        "lineCount_one": "{{count}} ta tovar",
+        "lineCount_other": "{{count}} ta tovar",
+        "lineCount_few": "{{count}} ta tovar",
+        "lineCount_many": "{{count}} ta tovar"
+      },
+      "age": {
+        "minutes_one": "{{count}} daqiqa oldin",
+        "minutes_other": "{{count}} daqiqa oldin",
+        "minutes_few": "{{count}} daqiqa oldin",
+        "minutes_many": "{{count}} daqiqa oldin",
+        "hours_one": "{{count}} soat oldin",
+        "hours_other": "{{count}} soat oldin",
+        "hours_few": "{{count}} soat oldin",
+        "hours_many": "{{count}} soat oldin",
+        "days_one": "{{count}} kun oldin",
+        "days_other": "{{count}} kun oldin",
+        "days_few": "{{count}} kun oldin",
+        "days_many": "{{count}} kun oldin"
+      },
+      "createdBy": {
+        "you": "Siz",
+        "other": "Boshqa xodim",
+        "unknown": "Noma'lum"
       }
     },
     "customers": {

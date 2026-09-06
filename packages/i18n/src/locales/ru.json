@@ -35,6 +35,7 @@
   },
   "nav": {
     "dashboard": "Панель управления",
+    "drafts": "Черновики",
     "sales": "Продажи",
     "products": "Товары",
     "categories": "Категории",
@@ -864,6 +865,7 @@
       },
       "estimate": "Оценка — точную сумму сервер подтвердит при оплате",
       "pay": "Оплатить",
+      "notePlaceholder": "Примечание (необязательно)",
       "paying": "Обработка…",
       "locationRequired": "Выберите точку продаж перед завершением продажи.",
       "errors": {
@@ -881,6 +883,65 @@
         "errors": {
           "invalidRange": "Введите дату в формате YYYY-MM-DD, дата начала не позже даты окончания."
         }
+      },
+      "clearConfirm": "Удалить все товары из корзины?"
+    },
+    "drafts": {
+      "saved": {
+        "title": "Черновик сохранён",
+        "view": "Открыть черновик"
+      },
+      "actions": {
+        "saveDraft": "Сохранить черновик",
+        "save": "Сохранить",
+        "edit": "Изменить",
+        "delete": "Удалить"
+      },
+      "deleteConfirm": {
+        "title": "Удалить этот черновик?"
+      },
+      "discardConfirm": {
+        "title": "Отменить изменения?",
+        "discardLocal": "Отменить локальные изменения",
+        "deleteServer": "Удалить черновик"
+      },
+      "detail": {
+        "title": "Черновик",
+        "unavailable": "Недоступно"
+      },
+      "errors": {
+        "notFound": "Этот черновик уже оплачен или удалён.",
+        "lineUnavailable": "«{{name}}» больше недоступен — измените черновик, чтобы убрать его."
+      },
+      "filter": {
+        "all": "Все",
+        "mine": "Мои"
+      },
+      "list": {
+        "empty": "Пока нет черновиков.",
+        "lineCount_one": "{{count}} товар",
+        "lineCount_few": "{{count}} товара",
+        "lineCount_many": "{{count}} товаров",
+        "lineCount_other": "{{count}} товара"
+      },
+      "age": {
+        "minutes_one": "{{count}} мин назад",
+        "minutes_few": "{{count}} мин назад",
+        "minutes_many": "{{count}} мин назад",
+        "minutes_other": "{{count}} мин назад",
+        "hours_one": "{{count}} час назад",
+        "hours_few": "{{count}} часа назад",
+        "hours_many": "{{count}} часов назад",
+        "hours_other": "{{count}} часа назад",
+        "days_one": "{{count}} день назад",
+        "days_few": "{{count}} дня назад",
+        "days_many": "{{count}} дней назад",
+        "days_other": "{{count}} дня назад"
+      },
+      "createdBy": {
+        "you": "Вы",
+        "other": "Другой сотрудник",
+        "unknown": "Неизвестно"
       }
     },
     "customers": {

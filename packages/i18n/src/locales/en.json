@@ -35,6 +35,7 @@
   },
   "nav": {
     "dashboard": "Dashboard",
+    "drafts": "Drafts",
     "sales": "Sales",
     "products": "Products",
     "categories": "Categories",
@@ -864,6 +865,7 @@
       },
       "estimate": "Estimate — the server confirms the exact total on payment",
       "pay": "Pay",
+      "notePlaceholder": "Note (optional)",
       "paying": "Processing…",
       "locationRequired": "Pick a location before completing the sale.",
       "errors": {
@@ -881,6 +883,65 @@
         "errors": {
           "invalidRange": "Use the format YYYY-MM-DD, with the start date on or before the end date."
         }
+      },
+      "clearConfirm": "Remove every item from the cart?"
+    },
+    "drafts": {
+      "saved": {
+        "title": "Draft saved",
+        "view": "View draft"
+      },
+      "actions": {
+        "saveDraft": "Save draft",
+        "save": "Save",
+        "edit": "Edit",
+        "delete": "Delete"
+      },
+      "deleteConfirm": {
+        "title": "Delete this draft?"
+      },
+      "discardConfirm": {
+        "title": "Discard changes?",
+        "discardLocal": "Discard local changes",
+        "deleteServer": "Delete draft"
+      },
+      "detail": {
+        "title": "Draft",
+        "unavailable": "Unavailable"
+      },
+      "errors": {
+        "notFound": "This draft was already paid or deleted.",
+        "lineUnavailable": "{{name}} is no longer available — edit the draft to remove it."
+      },
+      "filter": {
+        "all": "All",
+        "mine": "Mine"
+      },
+      "list": {
+        "empty": "No drafts yet.",
+        "lineCount_one": "{{count}} item",
+        "lineCount_other": "{{count}} items",
+        "lineCount_few": "{{count}} items",
+        "lineCount_many": "{{count}} items"
+      },
+      "age": {
+        "minutes_one": "{{count}} min ago",
+        "minutes_other": "{{count}} min ago",
+        "minutes_few": "{{count}} min ago",
+        "minutes_many": "{{count}} min ago",
+        "hours_one": "{{count}} hour ago",
+        "hours_other": "{{count}} hours ago",
+        "hours_few": "{{count}} hours ago",
+        "hours_many": "{{count}} hours ago",
+        "days_one": "{{count}} day ago",
+        "days_other": "{{count}} days ago",
+        "days_few": "{{count}} days ago",
+        "days_many": "{{count}} days ago"
+      },
+      "createdBy": {
+        "you": "You",
+        "other": "Other staff",
+        "unknown": "Unknown"
       }
     },
     "customers": {
