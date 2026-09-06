@@ -253,22 +253,31 @@ export type CartAction =
    * a no-op. */
   | { type: "completionAttempted" }
   /** Set by the screen once a `complete` attempt's outcome is no longer
-   * unknown — a *decoded* server response settles it either way; a
-   * success already routes through `completed` below (which clears
-   * everything), so this is dispatched only for a decoded *failure*
-   * (`404` naming a gone location/customer, `409
-   * STOCK_INSUFFICIENT`/`DISCOUNT_EXCEEDS_SUBTOTAL`, `422`, `403`, …).
-   * Resets `completionAttempted` to `false` so `isCartReadOnly` lifts
-   * and `planDraftPay` PATCHes again on the next Pay, letting the
-   * cashier fix whatever the error named — attach a new customer,
-   * pick a new location, remove a bad line — instead of being stuck
-   * read-only forever after one recoverable failure (T14 fix round,
-   * Opus review MAJOR 1). Keeps the same `idempotencyKey`: the
-   * server's `Idempotent` helper only stores a key once its request
-   * *succeeds*, so a key whose only known outcome is a decoded failure
-   * was never stored and is safe to reuse for the corrected retry.
-   * Only an *undecoded* failure (a network drop/timeout — the one case
-   * where the request might already have committed) leaves
+   * unknown — a *decoded* server response settles it, with one
+   * exception: `409 IDEMPOTENCY_KEY_REUSED` is decoded too (an earlier
+   * attempt under this exact key already succeeded), but the screen's
+   * own handling for that code (`idempotencyOutcome` below) doesn't
+   * treat it as cleanly recoverable the way the rest of this comment
+   * describes — it rekeys and still warns (`possiblyRecorded`), since
+   * which attempt actually committed is exactly what's in question.
+   * Dispatched regardless, since leaving `completionAttempted` `true`
+   * would only block PATCHing under a key this same response has
+   * already made obsolete. A success routes through `completed` below
+   * (which clears everything) rather than here, so every other case
+   * this reaches is a genuinely recoverable decoded failure (`404`
+   * naming a gone location/customer, `409 STOCK_INSUFFICIENT`/
+   * `DISCOUNT_EXCEEDS_SUBTOTAL`, `422`, `403`, …). Resets
+   * `completionAttempted` to `false` so `isCartReadOnly` lifts and
+   * `planDraftPay` PATCHes again on the next Pay, letting the cashier
+   * fix whatever the error named — attach a new customer, pick a new
+   * location, remove a bad line — instead of being stuck read-only
+   * forever after one recoverable failure (T14 fix round, Opus review
+   * MAJOR 1). Keeps the same `idempotencyKey`: the server's
+   * `Idempotent` helper only stores a key once its request *succeeds*,
+   * so a key whose only known outcome is a decoded failure was never
+   * stored and is safe to reuse for the corrected retry. Only an
+   * *undecoded* failure (a network drop/timeout — the one case where
+   * the request might already have committed) leaves
    * `completionAttempted` `true`, same as before. Idempotent, same
    * pattern as `completionAttempted` above. */
   | { type: "completionOutcomeKnown" }

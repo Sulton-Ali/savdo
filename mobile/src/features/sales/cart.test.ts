@@ -530,6 +530,27 @@ describe("T14 draft integration", () => {
     expect(next).toBe(state); // same reference — a false-to-false dispatch is a no-op
   });
 
+  it("a recoverable failure's full sequence (loadDraft -> completionAttempted -> completionOutcomeKnown -> markDirty) leaves Pay ready to PATCH again", () => {
+    const loaded = cartReducer(initialCartState(), {
+      type: "loadDraft",
+      draftId: "draft-1",
+      lines: [],
+      discount: null,
+      note: "",
+      idempotencyKey: "key-1",
+    });
+    const attempted = cartReducer(loaded, { type: "completionAttempted" });
+    const known = cartReducer(attempted, { type: "completionOutcomeKnown" });
+    const fixedUp = cartReducer(known, { type: "markDirty" });
+    expect(
+      planDraftPay({
+        draftId: fixedUp.draftId,
+        dirty: fixedUp.dirty,
+        completionAttempted: fixedUp.completionAttempted,
+      }),
+    ).toBe("patchThenComplete");
+  });
+
   it("loadDraft replaces the whole cart with the draft's own state, clean and unattempted", () => {
     const before = addA(initialCartState(), 3);
     const loaded = cartReducer(before, {

@@ -286,6 +286,21 @@ export default function SaleScreen() {
   // key (T4 review CRITICAL) but is just as "possibly recorded" as the
   // reused-key case.
   const [possiblyRecorded, setPossiblyRecorded] = useState(false);
+  // `true` when a loaded draft's own stored location no longer names an
+  // active location (deactivated or deleted since the draft was created)
+  // — a boolean, not a composed message string: on a cold mount
+  // `selectedLocation` can still be `null` at the exact moment this is
+  // set (the location-bootstrap effect below hasn't resolved yet), so
+  // composing the message there would bake in an empty name forever.
+  // Rendered in JSX below instead, which reads `selectedLocation`/
+  // `activeLocations` at *render* time (T14 fix round, Opus review
+  // MAJOR — corrects the previous round's own fix). Cleared wherever the
+  // cart returns to a state this no longer describes: a fresh draft load
+  // (`applyDraftToCart`, whether or not it needs the message again),
+  // `handleClearCart`/`handleDraftGoneDuringPay` (the draft link itself
+  // is gone), `handlePickLocation` (the cashier just fixed it), and a
+  // successful Pay/Save (the form resets to blank either way).
+  const [draftLocationGone, setDraftLocationGone] = useState(false);
   const [completedSale, setCompletedSale] = useState<Sale | null>(null);
   // Set once `Save draft` succeeds (create or update) — a small success
   // view, mirroring `completedSale` above, with a link to the saved draft
@@ -461,6 +476,7 @@ export default function SaleScreen() {
       setGeneralError(null);
       setPossiblyRecorded(false);
       setLineErrors({});
+      setDraftLocationGone(false);
       const draftLocation = activeLocations.find((l) => l.id === draft.locationId);
       if (draftLocation) {
         setSelectedLocation(draftLocation);
@@ -483,13 +499,11 @@ export default function SaleScreen() {
         // location this screen is already showing (the cashier's own
         // remembered/default one) is exactly what the next Pay PATCHes
         // onto the draft before completing it (`planDraftPay`), never the
-        // deactivated one; the message below names it so the cashier can
+        // deactivated one; the JSX below names it so the cashier can
         // change it first if that's not where this sale should book (T14
-        // fix round, Opus review CRITICAL).
+        // fix round, Opus review CRITICAL/MAJOR).
         dispatch({ type: "markDirty" });
-        setGeneralError(
-          t("mobile.sale.errors.draftLocationGone", { location: selectedLocation?.name ?? "" }),
-        );
+        setDraftLocationGone(true);
       }
       setDiscountKind(draft.discount ? draft.discount.type : "none");
       setDraftCustomerId(draft.customerId);
@@ -535,7 +549,6 @@ export default function SaleScreen() {
     draftQuery.data,
     locationHydrated,
     activeLocations,
-    selectedLocation?.name,
     router,
     t,
     cart.lines.length,
@@ -621,6 +634,7 @@ export default function SaleScreen() {
     setSelectedLocation(location);
     void persistLocationId(location.id);
     dispatch({ type: "markDirty" });
+    setDraftLocationGone(false);
   }
 
   /** Attaches/detaches a customer as a deliberate change on this screen —
@@ -670,6 +684,7 @@ export default function SaleScreen() {
     setLineErrors({});
     setGeneralError(null);
     setPossiblyRecorded(false);
+    setDraftLocationGone(false);
     setCustomer(null);
     setDiscountKind("none");
     // The cart is a fresh, unlinked one again — a future "Edit" on this
@@ -837,6 +852,7 @@ export default function SaleScreen() {
     setCustomer(null);
     setDiscountKind("none");
     setLineErrors({});
+    setDraftLocationGone(false);
     // See `handleClearCart`'s own comment (T14 fix round MAJOR 4).
     appliedDraftIdRef.current = null;
   }
@@ -852,6 +868,7 @@ export default function SaleScreen() {
   function handleDraftGoneDuringPay() {
     setGeneralError(t("mobile.drafts.errors.notFound"));
     setPossiblyRecorded(true);
+    setDraftLocationGone(false);
     queryClient.invalidateQueries({ queryKey: draftsKeys.all });
     queryClient.invalidateQueries({ queryKey: ["sales"] });
     dispatch({ type: "unlinkDraft", idempotencyKey: generateIdempotencyKey() });
@@ -1089,6 +1106,7 @@ export default function SaleScreen() {
       setCustomer(null);
       setDiscountKind("none");
       setLineErrors({});
+      setDraftLocationGone(false);
       appliedDraftIdRef.current = null;
     }
 
@@ -1104,6 +1122,7 @@ export default function SaleScreen() {
       handlePatchLegError(error, () => {
         setGeneralError(t("mobile.drafts.errors.notFound"));
         dispatch({ type: "clear" });
+        setDraftLocationGone(false);
         appliedDraftIdRef.current = null;
       });
     }
@@ -1204,6 +1223,28 @@ export default function SaleScreen() {
                 <Text className="text-destructive underline">{t("mobile.sale.list.link")}</Text>
               </Pressable>
             ) : null}
+          </View>
+        ) : null}
+
+        {draftLocationGone ? (
+          <View className="gap-1 rounded-md bg-destructive/10 p-3">
+            <Text className="text-destructive">
+              {t("mobile.sale.errors.draftLocationGone", {
+                // Read at *render* time, never composed once inside the
+                // draft-loading effect (`draftLocationGone`'s own doc
+                // comment) — `selectedLocation` may still be `null` on a
+                // cold mount when the flag is first set, in which case
+                // this falls back to the same default the location-
+                // bootstrap effect above would itself pick (its default,
+                // else its first active location) rather than ever
+                // showing an empty name.
+                location:
+                  selectedLocation?.name ??
+                  activeLocations.find((l) => l.isDefault)?.name ??
+                  activeLocations[0]?.name ??
+                  "",
+              })}
+            </Text>
           </View>
         ) : null}
 
