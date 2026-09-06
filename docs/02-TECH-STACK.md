@@ -77,7 +77,7 @@ pattern; revisit if bundle size becomes a landing performance issue.
 | Item          | Pin      | Notes                                                                                   |
 | ------------- | -------- | --------------------------------------------------------------------------------------- |
 | Expo SDK      | 57.0.19  | React Native 0.86.3, **React 19.2.3**, TypeScript 6.0.3 (Expo's pins, do not raise), Node ≥ 22.13; Android package id `dev.sjalolov.savdo` (D-75) |
-| expo-router   | 57.0.18  | File-based routing; app source lives in `mobile/src/app` (Expo default template)          |
+| expo-router   | 57.0.18  | File-based routing; app source lives in `mobile/src/app` (Expo default template); SDK 57 bundles Stack, Tabs and Drawer (via `expo-router/drawer`, build/layouts/DrawerClient.js) over `react-native-drawer-layout` (D-90 drawer layout) |
 | NativeWind    | v4.2.6   | Tailwind classes in RN. **Requires Tailwind 3.4.x** (peer `>3.3.0`), not Tailwind 4 — mobile pins `tailwindcss@3.4.19`; `react-native-css-interop` is a direct dep so Metro resolves it under pnpm isolation |
 | expo-secure-store | 57.0.3 | Bearer token, server URL and locale storage (D-79, D-78); verified 2026-09-05 |
 | expo-image-picker | 57.0.16 | Product photo take/choose on the quick-edit screen (D-78, Phase 5 T3); SDK 57's own pinned line (`bundledNativeModules.json` `~57.0.16`), release older than 24 h at install time; config plugin (`camera`/`photos` permission strings) in `mobile/app.json` |

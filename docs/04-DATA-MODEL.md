@@ -114,6 +114,12 @@ margin reports; **never returned to cashier or public**), `line_total`.
 **sale_payments** — `sale_id`, `method payment_method` (`cash|card|transfer`),
 `amount numeric(14,2)`. One row per sale in MVP (D-54); the table shape allows splits.
 
+**sale_drafts** — `location_id`, `customer_id null`, `discount_type discount_type null` (`percent|fixed`), `discount_value numeric(14,2) null`, `discount_reason text null`, `note text null`, `created_by`, `created_at`, `updated_at`. PK `uuid v7`. Index `(shop_id, created_at DESC)`. Mutable draft orders: no sale number, no prices stored, completion creates the sale via `sales.Service` in one transaction under `Idempotency-Key` (D-87).
+
+**sale_draft_items** — `sale_draft_id`, `variant_id`, `qty numeric(12,3)`. Prices never stored; reads compute current unit prices server-side by D-67 rule; completion recomputes via existing sale path (D-87).
+
+**Rules (D-87, D-88):** drafts do not move stock and have no availability impact while they exist (D-88). Completion fails with `STOCK_INSUFFICIENT` if a line cannot be fulfilled; the client shows which line and lets the user edit.
+
 **discounts** — promotions beyond per-product promo price: `name`, `kind`
 (`percent|fixed`), `value`, `applies_to` (`sale|category|product`), `target_id`,
 `starts_at`, `ends_at`, `is_active`. Post-MVP (D-60); not created in Phase 4.

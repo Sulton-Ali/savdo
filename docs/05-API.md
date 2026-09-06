@@ -158,7 +158,7 @@ Phase numbers refer to `06-ROADMAP.md`.
 | POST   | `/stock/transfers`              | manager+   |
 | GET    | `/stock/low`                    | manager+   |
 
-### Sales, customers, discounts, reports (Phase 4)
+### Sales, customers, discounts, reports (Phase 4; drafts Phase 5)
 
 | Method | Path                         | Role                 |
 | ------ | ---------------------------- | -------------------- |
@@ -168,10 +168,18 @@ Phase numbers refer to `06-ROADMAP.md`.
 | GET    | `/sales/{id}`                | cashier+             |
 | POST   | `/sales/{id}/void`           | manager+             |
 | POST   | `/sales/{id}/return`         | manager+             |
+| GET    | `/sales/drafts`              | cashier+ (cursor; optional `createdBy`; newest first) |
+| POST   | `/sales/drafts`              | cashier+             |
+| GET    | `/sales/drafts/{id}`         | cashier+             |
+| PATCH  | `/sales/drafts/{id}`         | creator or manager+ (partial update; `items`, when present, replaces the whole line set) |
+| DELETE | `/sales/drafts/{id}`         | creator or manager+ (204) |
+| POST   | `/sales/drafts/{id}/complete` | cashier+ (Idempotency-Key required; body `paymentMethod`; returns completed `Sale` with 201; `409 IDEMPOTENCY_KEY_REUSED` or `STOCK_INSUFFICIENT`) |
 | GET    | `/reports/sales/summary`     | manager+ (cashier: own day) |
 | GET    | `/reports/sales/by-product`  | manager+             |
 
 Low stock: reuse `GET /stock/low` (Phase 3, D-55).
+
+`GET /stock/levels` (Phase 3) now orders newest variant first, then location (D-92).
 
 ### Content and public (Phase 6)
 
