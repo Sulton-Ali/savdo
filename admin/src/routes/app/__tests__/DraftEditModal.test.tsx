@@ -27,6 +27,7 @@ function draftFixture(overrides: Partial<SaleDraft> = {}): SaleDraft {
     id: "d1",
     locationId: "l1",
     customerId: null,
+    customerName: null,
     discount: null,
     discountReason: null,
     note: null,

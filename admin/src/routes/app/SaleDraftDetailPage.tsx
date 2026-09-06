@@ -18,7 +18,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { useAuth } from "../../auth/AuthContext";
-import { fetchCustomer } from "../../customers/api";
 import { ApiError, notifyApiError } from "../../lib/errors";
 import { formatMoneyDisplay } from "../../lib/money";
 import { fetchLocationsPage } from "../../locations/api";
@@ -35,6 +34,8 @@ import { DraftPayModal } from "./sale-draft-detail/DraftPayModal";
  * read-only here — editing them is a separate, not-yet-built task. A
  * `NOT_FOUND` from any action (the draft was completed or deleted by
  * someone else in the meantime) sends the user back to the drafts list.
+ * The attached customer's name (`customerName`) is resolved server-side
+ * (T18) — no separate `GET /customers/{id}` lookup here.
  */
 export function SaleDraftDetailPage({ draftId }: { draftId: string }) {
   const { t } = useTranslation();
@@ -72,12 +73,6 @@ export function SaleDraftDetailPage({ draftId }: { draftId: string }) {
     }
     return map;
   }, [locationsPage]);
-
-  const { data: customer } = useQuery({
-    queryKey: ["customer", draft?.customerId],
-    queryFn: () => fetchCustomer(draft?.customerId as string),
-    enabled: draft?.customerId != null,
-  });
 
   const [payOpen, setPayOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -198,7 +193,7 @@ export function SaleDraftDetailPage({ draftId }: { draftId: string }) {
             {locationNameById.get(draft.locationId) ?? "—"}
           </Descriptions.Item>
           <Descriptions.Item label={t("sales.drafts.detail.fields.customer")}>
-            {draft.customerId ? (customer?.fullName ?? "…") : "—"}
+            {draft.customerName ?? "—"}
           </Descriptions.Item>
           <Descriptions.Item label={t("sales.drafts.detail.fields.createdBy")}>
             {createdByText}
