@@ -49,6 +49,7 @@
     "stockMovements": "Ombor harakatlari",
     "stockLow": "Kam qoldiq",
     "quickSale": "Tezkor sotuv",
+    "salesDrafts": "Qoralamalar",
     "reports": "Hisobotlar"
   },
   "auth": {
@@ -677,6 +678,83 @@
         "sold": "Sotilgan",
         "returned": "Qaytarilgan",
         "qty": "Qaytariladigan miqdor"
+      }
+    },
+    "drafts": {
+      "listTitle": "Qoralamalar",
+      "empty": "Hozircha qoralama yo‘q.",
+      "filters": {
+        "mine": "Faqat mening qoralamalarim"
+      },
+      "columns": {
+        "createdAt": "Yaratilgan",
+        "createdBy": "Kim yaratgan",
+        "customer": "Mijoz",
+        "lines": "Qatorlar",
+        "estimatedTotal": "Taxminiy summa",
+        "note": "Izoh"
+      },
+      "createdByMe": "Siz",
+      "age": {
+        "justNow": "Hozirgina",
+        "minutes_one": "{{count}} daqiqa oldin",
+        "minutes_few": "{{count}} daqiqa oldin",
+        "minutes_many": "{{count}} daqiqa oldin",
+        "minutes_other": "{{count}} daqiqa oldin",
+        "hours_one": "{{count}} soat oldin",
+        "hours_few": "{{count}} soat oldin",
+        "hours_many": "{{count}} soat oldin",
+        "hours_other": "{{count}} soat oldin",
+        "days_one": "{{count}} kun oldin",
+        "days_few": "{{count}} kun oldin",
+        "days_many": "{{count}} kun oldin",
+        "days_other": "{{count}} kun oldin"
+      },
+      "detail": {
+        "title": "Qoralama",
+        "notFound": "Bu qoralama endi mavjud emas.",
+        "items": "Qatorlar",
+        "unavailable": "Mavjud emas",
+        "fields": {
+          "location": "Filial",
+          "customer": "Mijoz",
+          "note": "Izoh",
+          "discount": "Chegirma"
+        },
+        "columns": {
+          "product": "Mahsulot",
+          "variant": "Variant",
+          "qty": "Soni",
+          "unitPrice": "Birlik narxi",
+          "lineTotal": "Qator summasi"
+        },
+        "totals": {
+          "subtotal": "Oraliq summa",
+          "discount": "Chegirma",
+          "total": "Taxminiy jami"
+        }
+      },
+      "pay": {
+        "action": "To‘lash",
+        "title": "Qoralamani yakunlash",
+        "submit": "Sotuvni yakunlash",
+        "success": "Sotuv yakunlandi"
+      },
+      "delete": {
+        "action": "O‘chirish",
+        "confirm": "Bu qoralama o‘chirilsinmi? Bu amalni ortga qaytarib bo‘lmaydi.",
+        "success": "Qoralama o‘chirildi"
+      },
+      "edit": {
+        "action": "Tahrirlash",
+        "title": "Qoralamani tahrirlash",
+        "itemsNotice": "Qatorlarni bu yerda tahrirlab bo‘lmaydi — tarkibini o‘zgartirish uchun qoralamani o‘chirib, yangisini yarating.",
+        "submit": "O‘zgarishlarni saqlash",
+        "success": "Qoralama yangilandi"
+      },
+      "errors": {
+        "lineUnavailable": "Qator endi mavjud emas: {{line}}",
+        "notFound": "Bu qoralama allaqachon yakunlangan yoki o‘chirilgan."
       }
     },
     "errors": {
