@@ -502,6 +502,7 @@
     "presetLabel": "Date range",
     "presets": {
       "today": "Today",
+      "yesterday": "Yesterday",
       "last7Days": "Last 7 days",
       "thisMonth": "This month"
     },
@@ -696,6 +697,7 @@
       "server": "Server address",
       "serverInsecure": "Plain http:// is only allowed for local addresses (127.0.0.1, 10.x, 172.16–31.x, 192.168.x). Use https:// otherwise.",
       "outageEscape": "Change server or log out",
+      "menu": "Menu",
       "tabs": {
         "stock": "Stock"
       }
@@ -788,7 +790,16 @@
       },
       "list": {
         "title": "Today's sales",
-        "empty": "No sales today yet."
+        "empty": "No sales today yet.",
+        "link": "Sales list",
+        "emptyRange": "No sales in this range.",
+        "fields": {
+          "from": "From",
+          "to": "To"
+        },
+        "errors": {
+          "invalidRange": "Use the format YYYY-MM-DD, with the start date on or before the end date."
+        }
       }
     },
     "customers": {
