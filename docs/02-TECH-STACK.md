@@ -77,7 +77,7 @@ pattern; revisit if bundle size becomes a landing performance issue.
 | Item          | Pin      | Notes                                                                                   |
 | ------------- | -------- | --------------------------------------------------------------------------------------- |
 | Expo SDK      | 57.0.19  | React Native 0.86.3, **React 19.2.3**, TypeScript 6.0.3 (Expo's pins, do not raise), Node ≥ 22.13; Android package id `dev.sjalolov.savdo` (D-75) |
-| expo-router   | 57.0.18  | File-based routing; app source lives in `mobile/src/app` (Expo default template)          |
+| expo-router   | 57.0.18  | File-based routing; app source lives in `mobile/src/app` (Expo default template); SDK 57 bundles Stack, Tabs and Drawer (via `expo-router/drawer`, build/layouts/DrawerClient.js) over `react-native-drawer-layout` (D-90 drawer layout) |
 | NativeWind    | v4.2.6   | Tailwind classes in RN. **Requires Tailwind 3.4.x** (peer `>3.3.0`), not Tailwind 4 — mobile pins `tailwindcss@3.4.19`; `react-native-css-interop` is a direct dep so Metro resolves it under pnpm isolation |
 | expo-secure-store | 57.0.3 | Bearer token, server URL and locale storage (D-79, D-78); verified 2026-09-05 |
 | expo-image-picker | 57.0.16 | Product photo take/choose on the quick-edit screen (D-78, Phase 5 T3); SDK 57's own pinned line (`bundledNativeModules.json` `~57.0.16`), release older than 24 h at install time; config plugin (`camera`/`photos` permission strings) in `mobile/app.json` |
@@ -94,7 +94,6 @@ pattern; revisit if bundle size becomes a landing performance issue.
 | Android build | local | `expo prebuild` + Gradle release build on the dev machine, no EAS cloud (D-72); Android SDK + JDK prerequisites in `07-DEVOPS.md`; `expo-secure-store` for the session token |
 | expo-build-properties | 57.0.17 | Official config plugin, config-only (D-82): sets `android.usesCleartextTraffic` so the D-81 local-`http://` case works in the release build; verified 2026-09-05 |
 | @babel/plugin-transform-react-jsx | 7.29.7 | Explicit `mobile` devDependency (D-86): `nativewind/babel` (via `react-native-css-interop`'s babel plugin) references this plugin by string name without declaring it as its own dependency; under pnpm's non-hoisted `node_modules` the Gradle-invoked release JS bundle (`expo export:embed`) can't resolve it unless it's symlinked directly into `mobile/node_modules/@babel/`. Pinned to the exact version already resolved transitively via `babel-preset-expo` — no new supply-chain surface, just makes an existing transitive dependency explicit; verified 2026-09-05 |
-| @react-navigation/drawer | 6.6.11 | Drawer navigator for the D-90 mobile navigation rework: five tab bar items and a side drawer menu (D-90). Compatible with `react-native-gesture-handler ~2.32.0` and `react-native-reanimated 4.5.1` already installed; verified 2026-09-06 |
 | Tests | Vitest (workspace) | Pure, RN-free modules under `mobile/src/lib` and `mobile/src/features/**` (reducers, validators, period/pricing/form helpers; D-85 amended); no jest-expo, no e2e (D-73/D-74) |
 
 ## Infrastructure
