@@ -1013,8 +1013,11 @@ type SaleDraft struct {
 	CreatedAt time.Time `json:"createdAt"`
 
 	// CreatedBy The staff id who created the draft; `null` for a draft with no creator on record, editable/deletable only by `manager+` in that case (D-89). Any staff who may create a sale may complete the draft regardless of `createdBy` (D-96).
-	CreatedBy  nullable.Nullable[openapi_types.UUID] `json:"createdBy"`
-	CustomerId nullable.Nullable[openapi_types.UUID] `json:"customerId"`
+	CreatedBy nullable.Nullable[openapi_types.UUID] `json:"createdBy"`
+
+	// CreatedByName The creating user's display name, resolved server-side (mirrors `StockMovement.createdByName`, avoiding a second lookup by `createdBy`); `null` when `createdBy` is `null` or the user no longer exists.
+	CreatedByName nullable.Nullable[string]             `json:"createdByName"`
+	CustomerId    nullable.Nullable[openapi_types.UUID] `json:"customerId"`
 
 	// Discount `null` when the draft has no manual discount. The OpenAPI 3.1 `anyOf`-with-`null` idiom is used here (rather than the `SaleDiscount` `$ref` alone) so this always-present, possibly-null field matches `Sale`'s own nullable-field convention (`customerId`, `voidedBy`, …) instead of the plain-optional shape `SaleCreate.discount`/ `SaleDraftCreate.discount` use. docs/04-DATA-MODEL.md § 4 / D-52. `value` is a percentage (0..100) when `type: percent`, or a fixed sum (>= 0) when `type: fixed`. docs/05-API.md § Conventions.
 	Discount nullable.Nullable[SaleDiscount] `json:"discount"`

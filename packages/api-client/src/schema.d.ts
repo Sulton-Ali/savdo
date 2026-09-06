@@ -2026,6 +2026,8 @@ export interface components {
              * @description The staff id who created the draft; `null` for a draft with no creator on record, editable/deletable only by `manager+` in that case (D-89). Any staff who may create a sale may complete the draft regardless of `createdBy` (D-96).
              */
             createdBy: string | null;
+            /** @description The creating user's display name, resolved server-side (mirrors `StockMovement.createdByName`, avoiding a second lookup by `createdBy`); `null` when `createdBy` is `null` or the user no longer exists. */
+            createdByName: string | null;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
