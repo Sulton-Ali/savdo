@@ -77,6 +77,11 @@ function SaleRow({
  * (D-63 lets every `cashier+` role see every sale for the whole shop and
  * any day, so there is no permission gate here, unlike the old "today
  * only" scoping this replaces).
+ *
+ * This tab has its own nested Stack (`_layout.tsx`, T12 follow-up) so a row
+ * pushes `/sales/{id}` — its own stack's `[id]` route, not the Quick sale
+ * tab's `/sale/{id}` — giving it a normal native back button and Android
+ * back behaviour back to this list instead of unwinding across tabs.
  */
 export default function SalesListScreen() {
   const { t } = useTranslation();
@@ -206,7 +211,7 @@ export default function SalesListScreen() {
               sale={sale}
               timeZone={timeZone}
               currency={currency}
-              onPress={() => router.push(`/sale/${sale.id}`)}
+              onPress={() => router.push(`/sales/${sale.id}`)}
             />
           )}
         />

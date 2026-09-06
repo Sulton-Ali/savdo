@@ -25,19 +25,19 @@ import { useSession } from "@/lib/session";
  * icon instead of that component's bundled PNG so it matches this header's
  * existing icon style (`Settings` before it, `Menu` now).
  *
- * The "Products" and "Stock" tabs nest their own Stack (`_layout.tsx` in
- * each) for a list -> detail/action push; this outer `<Tabs>` header would
- * otherwise render *in addition to* that inner Stack's own header on every
- * nested screen — `headerShown` is keyed off the currently focused nested
- * route name (`getFocusedRouteNameFromRoute`, re-exported by expo-router 57
- * from its vendored `@react-navigation/core` fork at
- * `expo-router/react-navigation` — confirmed against that package's own
- * `build/react-navigation/{core,native}` sources, not training data: expo-
- * router 57 no longer depends on the external `@react-navigation/*`
- * packages at all) so only each nested Stack's own `index` screen reuses
- * this outer header. "Home" and "Sales list" are flat, single-screen tabs
- * with nothing nested under them, so they always show this outer header —
- * no such gating needed for them.
+ * "Sale", "Sales list", "Products" and "Stock" all nest their own Stack
+ * (`_layout.tsx` in each) for a list -> detail/action push; this outer
+ * `<Tabs>` header would otherwise render *in addition to* that inner
+ * Stack's own header on every nested screen — `headerShown` is keyed off
+ * the currently focused nested route name (`getFocusedRouteNameFromRoute`,
+ * re-exported by expo-router 57 from its vendored `@react-navigation/core`
+ * fork at `expo-router/react-navigation` — confirmed against that
+ * package's own `build/react-navigation/{core,native}` sources, not
+ * training data: expo-router 57 no longer depends on the external
+ * `@react-navigation/*` packages at all) so only each nested Stack's own
+ * `index` screen reuses this outer header. "Home" is the only flat,
+ * single-screen tab with nothing nested under it, so it always shows this
+ * outer header — no such gating needed for it.
  */
 export default function AppTabsLayout() {
   const { t } = useTranslation();
@@ -84,10 +84,11 @@ export default function AppTabsLayout() {
       />
       <Tabs.Screen
         name="sales"
-        options={{
+        options={({ route }) => ({
           title: t("sales.listTitle"),
           tabBarIcon: ({ color, size }) => <Receipt color={color} size={size} />,
-        }}
+          headerShown: (getFocusedRouteNameFromRoute(route) ?? "index") === "index",
+        })}
       />
       <Tabs.Screen
         name="products"
