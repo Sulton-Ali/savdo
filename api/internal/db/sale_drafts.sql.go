@@ -121,8 +121,10 @@ func (q *Queries) DeleteSaleDraftItems(ctx context.Context, arg DeleteSaleDraftI
 }
 
 const getSaleDraft = `-- name: GetSaleDraft :one
-SELECT id, shop_id, location_id, customer_id, discount_type, discount_value, discount_reason, note, created_by, created_at, updated_at FROM sale_drafts
-WHERE shop_id = $1 AND id = $2
+SELECT sd.id, sd.shop_id, sd.location_id, sd.customer_id, sd.discount_type, sd.discount_value, sd.discount_reason, sd.note, sd.created_by, sd.created_at, sd.updated_at, u.full_name AS created_by_name
+FROM sale_drafts sd
+LEFT JOIN users u ON u.id = sd.created_by AND u.shop_id = sd.shop_id
+WHERE sd.shop_id = $1 AND sd.id = $2
 `
 
 type GetSaleDraftParams struct {
@@ -130,9 +132,29 @@ type GetSaleDraftParams struct {
 	ID     uuid.UUID `json:"id"`
 }
 
-func (q *Queries) GetSaleDraft(ctx context.Context, arg GetSaleDraftParams) (SaleDraft, error) {
+type GetSaleDraftRow struct {
+	ID             uuid.UUID      `json:"id"`
+	ShopID         uuid.UUID      `json:"shop_id"`
+	LocationID     uuid.UUID      `json:"location_id"`
+	CustomerID     *uuid.UUID     `json:"customer_id"`
+	DiscountType   *DiscountType  `json:"discount_type"`
+	DiscountValue  pgtype.Numeric `json:"discount_value"`
+	DiscountReason *string        `json:"discount_reason"`
+	Note           *string        `json:"note"`
+	CreatedBy      *uuid.UUID     `json:"created_by"`
+	CreatedAt      time.Time      `json:"created_at"`
+	UpdatedAt      time.Time      `json:"updated_at"`
+	CreatedByName  *string        `json:"created_by_name"`
+}
+
+// LEFT JOIN, not JOIN: created_by is nullable (D-89's "no creator on
+// record" case) and a user row could in principle be gone later — either
+// case still returns the draft, with created_by_name simply NULL, same
+// reasoning as ListMovementsWithCreatedByName (stock.sql). Resolving the
+// name here avoids a second lookup by the admin/mobile client.
+func (q *Queries) GetSaleDraft(ctx context.Context, arg GetSaleDraftParams) (GetSaleDraftRow, error) {
 	row := q.db.QueryRow(ctx, getSaleDraft, arg.ShopID, arg.ID)
-	var i SaleDraft
+	var i GetSaleDraftRow
 	err := row.Scan(
 		&i.ID,
 		&i.ShopID,
@@ -145,6 +167,7 @@ func (q *Queries) GetSaleDraft(ctx context.Context, arg GetSaleDraftParams) (Sal
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CreatedByName,
 	)
 	return i, err
 }
@@ -369,14 +392,16 @@ func (q *Queries) ListSaleDraftItemsForPricing(ctx context.Context, arg ListSale
 }
 
 const listSaleDrafts = `-- name: ListSaleDrafts :many
-SELECT id, shop_id, location_id, customer_id, discount_type, discount_value, discount_reason, note, created_by, created_at, updated_at FROM sale_drafts
-WHERE shop_id = $1
-    AND ($2::uuid IS NULL OR created_by = $2)
+SELECT sd.id, sd.shop_id, sd.location_id, sd.customer_id, sd.discount_type, sd.discount_value, sd.discount_reason, sd.note, sd.created_by, sd.created_at, sd.updated_at, u.full_name AS created_by_name
+FROM sale_drafts sd
+LEFT JOIN users u ON u.id = sd.created_by AND u.shop_id = sd.shop_id
+WHERE sd.shop_id = $1
+    AND ($2::uuid IS NULL OR sd.created_by = $2)
     AND (
         $3::timestamptz IS NULL
-        OR (created_at, id) < ($3::timestamptz, $4::uuid)
+        OR (sd.created_at, sd.id) < ($3::timestamptz, $4::uuid)
     )
-ORDER BY created_at DESC, id DESC
+ORDER BY sd.created_at DESC, sd.id DESC
 LIMIT $5
 `
 
@@ -388,10 +413,29 @@ type ListSaleDraftsParams struct {
 	Limit           int32      `json:"limit"`
 }
 
+type ListSaleDraftsRow struct {
+	ID             uuid.UUID      `json:"id"`
+	ShopID         uuid.UUID      `json:"shop_id"`
+	LocationID     uuid.UUID      `json:"location_id"`
+	CustomerID     *uuid.UUID     `json:"customer_id"`
+	DiscountType   *DiscountType  `json:"discount_type"`
+	DiscountValue  pgtype.Numeric `json:"discount_value"`
+	DiscountReason *string        `json:"discount_reason"`
+	Note           *string        `json:"note"`
+	CreatedBy      *uuid.UUID     `json:"created_by"`
+	CreatedAt      time.Time      `json:"created_at"`
+	UpdatedAt      time.Time      `json:"updated_at"`
+	CreatedByName  *string        `json:"created_by_name"`
+}
+
 // Keyset pagination on (created_at, id), newest first, same convention as
 // ListSalesForStaff/ListPurchases. created_by is an optional exact-match
-// filter (GET /sales/drafts?createdBy=..., § 05-API.md).
-func (q *Queries) ListSaleDrafts(ctx context.Context, arg ListSaleDraftsParams) ([]SaleDraft, error) {
+// filter (GET /sales/drafts?createdBy=..., § 05-API.md). LEFT JOIN users
+// for created_by_name, same one-query-per-page shape
+// ListMovementsWithCreatedByName (stock.sql) and ListSalesForStaff's own
+// cashier_name join already use — a page's worth of names in this same
+// query, never a lookup per row (no N+1).
+func (q *Queries) ListSaleDrafts(ctx context.Context, arg ListSaleDraftsParams) ([]ListSaleDraftsRow, error) {
 	rows, err := q.db.Query(ctx, listSaleDrafts,
 		arg.ShopID,
 		arg.CreatedBy,
@@ -403,9 +447,9 @@ func (q *Queries) ListSaleDrafts(ctx context.Context, arg ListSaleDraftsParams) 
 		return nil, err
 	}
 	defer rows.Close()
-	var items []SaleDraft
+	var items []ListSaleDraftsRow
 	for rows.Next() {
-		var i SaleDraft
+		var i ListSaleDraftsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.ShopID,
@@ -418,6 +462,7 @@ func (q *Queries) ListSaleDrafts(ctx context.Context, arg ListSaleDraftsParams) 
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.CreatedByName,
 		); err != nil {
 			return nil, err
 		}

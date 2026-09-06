@@ -32,10 +32,12 @@ package sales
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/oapi-codegen/nullable"
 	"github.com/shopspring/decimal"
@@ -81,6 +83,28 @@ func canManageDraft(ctx context.Context, createdBy *uuid.UUID) bool {
 	}
 	authCtx, ok := auth.FromContext(ctx)
 	return ok && createdBy != nil && *createdBy == authCtx.UserID
+}
+
+// resolveCreatedByName resolves userID's display name for a single-draft
+// write response (CreateSaleDraftTx/UpdateSaleDraftTx): `RETURNING *` on
+// an INSERT/UPDATE has no join partner, unlike GetSaleDraft/ListSaleDrafts
+// below, which resolve the same field off their own LEFT JOIN instead —
+// mirrors stock.createdByName's own doc comment and behaviour exactly:
+// nil for a nil userID (a draft with no creator on record, D-89) or for a
+// user that no longer exists (contract's own createdByName doc comment)
+// is not an error.
+func resolveCreatedByName(ctx context.Context, q *db.Queries, shopID uuid.UUID, userID *uuid.UUID) (*string, error) {
+	if userID == nil {
+		return nil, nil
+	}
+	user, err := q.GetUserByID(ctx, db.GetUserByIDParams{ShopID: shopID, ID: *userID})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("sales: get created-by user (draft): %w", err)
+	}
+	return &user.FullName, nil
 }
 
 // draftDisplayItem is one draft line priced, labelled and availability-
@@ -234,7 +258,7 @@ func draftDiscountFromRow(discountType *db.DiscountType, discountValue pgtype.Nu
 // DISCOUNT_EXCEEDS_SUBTOTAL, D-57), but a plain read never fails over
 // it, and a PATCH touching neither leaves a stale discount alone
 // (review MINOR).
-func assembleSaleDraft(draft db.SaleDraft, priced []draftDisplayItem) (gen.SaleDraft, error) {
+func assembleSaleDraft(draft db.SaleDraft, priced []draftDisplayItem, createdByName *string) (gen.SaleDraft, error) {
 	items := make([]gen.SaleDraftItem, len(priced))
 	subtotal := decimal.Zero
 	for i, it := range priced {
@@ -268,7 +292,8 @@ func assembleSaleDraft(draft db.SaleDraft, priced []draftDisplayItem) (gen.SaleD
 		Discount: nullableSaleDiscount(discount), DiscountReason: nullableString(draft.DiscountReason), Note: nullableString(draft.Note),
 		Items: items, Subtotal: money.String(subtotal), DiscountAmount: money.String(discountAmount),
 		EstimatedTotal: money.String(estimatedTotal), CreatedBy: nullableUUID(draft.CreatedBy),
-		CreatedAt: draft.CreatedAt, UpdatedAt: draft.UpdatedAt,
+		CreatedByName: nullableString(createdByName),
+		CreatedAt:     draft.CreatedAt, UpdatedAt: draft.UpdatedAt,
 	}, nil
 }
 
@@ -278,12 +303,16 @@ func assembleSaleDraft(draft db.SaleDraft, priced []draftDisplayItem) (gen.SaleD
 // CreateSaleDraftTx, UpdateSaleDraftTx) needs. q is the caller's own
 // *db.Queries — h.svc.q for a plain read (GetSaleDraft) or a qtx still
 // inside the caller's transaction (every write's own response).
-func buildSaleDraftResponse(ctx context.Context, q *db.Queries, shopID uuid.UUID, draft db.SaleDraft, now time.Time, loc *time.Location, locale string, defs []db.ListAttributeDefinitionsRow) (gen.SaleDraft, error) {
+// createdByName is resolved by the caller (GetSaleDraft's own LEFT JOIN
+// row, or resolveCreatedByName for a write's plain `RETURNING *` row) —
+// this function never queries it itself, the same split toGenMovement
+// (stock/convert.go) draws for StockMovement.createdByName.
+func buildSaleDraftResponse(ctx context.Context, q *db.Queries, shopID uuid.UUID, draft db.SaleDraft, createdByName *string, now time.Time, loc *time.Location, locale string, defs []db.ListAttributeDefinitionsRow) (gen.SaleDraft, error) {
 	byDraft, err := priceDraftItemsBatch(ctx, q, shopID, []uuid.UUID{draft.ID}, locale, now, loc, defs)
 	if err != nil {
 		return gen.SaleDraft{}, err
 	}
-	return assembleSaleDraft(draft, byDraft[draft.ID])
+	return assembleSaleDraft(draft, byDraft[draft.ID], createdByName)
 }
 
 // nullableSaleDiscount converts a *gen.SaleDiscount (nil = SQL NULL) to

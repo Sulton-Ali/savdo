@@ -25,8 +25,15 @@ VALUES (sqlc.arg('id'), sqlc.arg('shop_id'), sqlc.arg('sale_draft_id'), sqlc.arg
 RETURNING *;
 
 -- name: GetSaleDraft :one
-SELECT * FROM sale_drafts
-WHERE shop_id = $1 AND id = $2;
+-- LEFT JOIN, not JOIN: created_by is nullable (D-89's "no creator on
+-- record" case) and a user row could in principle be gone later — either
+-- case still returns the draft, with created_by_name simply NULL, same
+-- reasoning as ListMovementsWithCreatedByName (stock.sql). Resolving the
+-- name here avoids a second lookup by the admin/mobile client.
+SELECT sd.*, u.full_name AS created_by_name
+FROM sale_drafts sd
+LEFT JOIN users u ON u.id = sd.created_by AND u.shop_id = sd.shop_id
+WHERE sd.shop_id = $1 AND sd.id = $2;
 
 -- name: GetSaleDraftForUpdate :one
 -- Locks the header row before the complete flow (D-87: completion
@@ -40,15 +47,21 @@ FOR UPDATE;
 -- name: ListSaleDrafts :many
 -- Keyset pagination on (created_at, id), newest first, same convention as
 -- ListSalesForStaff/ListPurchases. created_by is an optional exact-match
--- filter (GET /sales/drafts?createdBy=..., § 05-API.md).
-SELECT * FROM sale_drafts
-WHERE shop_id = sqlc.arg('shop_id')
-    AND (sqlc.narg('created_by')::uuid IS NULL OR created_by = sqlc.narg('created_by'))
+-- filter (GET /sales/drafts?createdBy=..., § 05-API.md). LEFT JOIN users
+-- for created_by_name, same one-query-per-page shape
+-- ListMovementsWithCreatedByName (stock.sql) and ListSalesForStaff's own
+-- cashier_name join already use — a page's worth of names in this same
+-- query, never a lookup per row (no N+1).
+SELECT sd.*, u.full_name AS created_by_name
+FROM sale_drafts sd
+LEFT JOIN users u ON u.id = sd.created_by AND u.shop_id = sd.shop_id
+WHERE sd.shop_id = sqlc.arg('shop_id')
+    AND (sqlc.narg('created_by')::uuid IS NULL OR sd.created_by = sqlc.narg('created_by'))
     AND (
         sqlc.narg('cursor_created_at')::timestamptz IS NULL
-        OR (created_at, id) < (sqlc.narg('cursor_created_at')::timestamptz, sqlc.narg('cursor_id')::uuid)
+        OR (sd.created_at, sd.id) < (sqlc.narg('cursor_created_at')::timestamptz, sqlc.narg('cursor_id')::uuid)
     )
-ORDER BY created_at DESC, id DESC
+ORDER BY sd.created_at DESC, sd.id DESC
 LIMIT sqlc.arg('limit');
 
 -- name: ListSaleDraftItems :many
