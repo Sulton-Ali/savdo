@@ -140,16 +140,6 @@ func errReturnExceedsSold(index int, saleItemID uuid.UUID) *apierr.Error {
 	}
 }
 
-// mapMoveError turns a stock.Move error into the *apierr.Error
-// docs/05-API.md's POST /sales promises: a deadlock (SQLSTATE 40P01,
-// isDeadlock) becomes 409 CONFLICT details.reason: "deadlock" (checked
-// first, same reasoning as stock.mapMoveError's own doc comment).
-// *stock.ErrInsufficient becomes 409 STOCK_INSUFFICIENT with
-// details.{variantId,locationId,available}. Anything else — Move's own
-// apierr.NotFound("variant"/"location") or a wrapped internal error — is
-// already the right shape (or deliberately opaque) and passes through
-// unchanged. Mirrors stock.mapMoveError; duplicated rather than exported
-// cross-package for the same reason isDeadlock is.
 // errDraftLineUnavailable builds a 422 VALIDATION_FAILED naming every
 // unavailable line by its index in the request-equivalent items array
 // (`items[<i>].variantId: invalid`) — apierr.Unprocessable's own
@@ -164,6 +154,16 @@ func errDraftLineUnavailable(fields map[string]string) *apierr.Error {
 	return apierr.Unprocessable(fields)
 }
 
+// mapMoveError turns a stock.Move error into the *apierr.Error
+// docs/05-API.md's POST /sales promises: a deadlock (SQLSTATE 40P01,
+// isDeadlock) becomes 409 CONFLICT details.reason: "deadlock" (checked
+// first, same reasoning as stock.mapMoveError's own doc comment).
+// *stock.ErrInsufficient becomes 409 STOCK_INSUFFICIENT with
+// details.{variantId,locationId,available}. Anything else — Move's own
+// apierr.NotFound("variant"/"location") or a wrapped internal error — is
+// already the right shape (or deliberately opaque) and passes through
+// unchanged. Mirrors stock.mapMoveError; duplicated rather than exported
+// cross-package for the same reason isDeadlock is.
 func mapMoveError(err error) error {
 	if isDeadlock(err) {
 		return errDeadlock
