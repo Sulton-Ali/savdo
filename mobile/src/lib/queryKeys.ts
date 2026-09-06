@@ -111,8 +111,15 @@ export const catalogKeys = {
  * always calls with `{}` (the server ignores anything else, D-55), so its
  * key is stable across refetches for that role; manager+'s period toggle
  * varies it.
+ *
+ * `all` is the bare `["reports"]` prefix, same reasoning as
+ * `purchasesKeys.all` below: every key here is a TanStack partial match of
+ * it, so `features/sales/hooks.ts`'s `useCreateSale` can invalidate every
+ * report (today's summary, by-product, low stock) after a sale without
+ * knowing which `from`/`to` filter each open screen happens to be using.
  */
 export const reportsKeys = {
+  all: ["reports"] as const,
   summary: (filters: { from?: string; to?: string }) => ["reports", "summary", filters] as const,
   byProduct: (filters: { from: string; to: string }) => ["reports", "byProduct", filters] as const,
   lowStock: () => ["reports", "lowStock"] as const,

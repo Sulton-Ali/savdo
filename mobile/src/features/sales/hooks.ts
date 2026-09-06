@@ -1,6 +1,6 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { customersKeys, salesKeys } from "@/lib/queryKeys";
+import { customersKeys, reportsKeys, salesKeys } from "@/lib/queryKeys";
 
 import { createSale, getSale, type ListSalesParams, listSales, type SaleCreate } from "./api";
 
@@ -10,7 +10,11 @@ import { createSale, getSale, type ListSalesParams, listSales, type SaleCreate }
  * (`customersKeys.detail`, the prefix `features/customers/hooks.ts`'s
  * `useCustomerSales` builds its `[...detail(id), "sales"]` key from), so
  * their purchase history (`customers/[id].tsx`) shows the new sale without
- * a manual pull-to-refresh (T4 review nit). */
+ * a manual pull-to-refresh (T4 review nit). Also invalidates every reports
+ * query (`reportsKeys.all`) — a sale changes today's summary and
+ * by-product totals, so without this the home screen's "today" card
+ * (`app/(app)/index.tsx`) kept showing pre-sale numbers until a manual
+ * pull-to-refresh (T11 device-smoke fix). */
 export function useCreateSale() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -18,6 +22,7 @@ export function useCreateSale() {
       createSale(body, idempotencyKey),
     onSuccess: (_sale, variables) => {
       queryClient.invalidateQueries({ queryKey: ["sales"] });
+      queryClient.invalidateQueries({ queryKey: reportsKeys.all });
       if (variables.body.customerId) {
         queryClient.invalidateQueries({
           queryKey: customersKeys.detail(variables.body.customerId),
