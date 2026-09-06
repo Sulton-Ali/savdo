@@ -707,7 +707,7 @@ export interface paths {
         };
         /**
          * List stock levels per variant and location.
-         * @description Any authenticated role (D-40) — cashiers see exact quantities, never cost. Cursor-paginated.
+         * @description Any authenticated role (D-40) — cashiers see exact quantities, never cost. Cursor-paginated, newest variant first, then location (D-92).
          */
         get: operations["listStockLevels"];
         put?: never;
@@ -787,7 +787,7 @@ export interface paths {
         };
         /**
          * List variants at or below their effective low-stock threshold.
-         * @description Variants whose total quantity across all locations is at or below the effective threshold (product override, else the shop default; D-44). Only variants that were stocked at least once on active products and variants are listed (D-50).
+         * @description Variants whose total quantity across all locations is at or below the effective threshold (product override, else the shop default; D-44). Only variants that were stocked at least once on active products and variants are listed (D-50). Cursor-paginated, newest variant first (D-92).
          */
         get: operations["listLowStock"];
         put?: never;

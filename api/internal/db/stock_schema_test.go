@@ -472,11 +472,13 @@ func paginateAllMovements(ctx context.Context, t *testing.T, q *db.Queries, base
 }
 
 // paginateAllLevels walks ListLevels page by page using its
-// (variant_id, location_id) cursor until a short page signals the end.
+// (variant_created_at, variant_id, location_id) cursor (D-92: newest
+// variant first, then location) until a short page signals the end.
 func paginateAllLevels(ctx context.Context, t *testing.T, q *db.Queries, base db.ListLevelsParams, pageSize int32) []db.ListLevelsRow {
 	t.Helper()
 	p := base
 	p.Limit = pageSize
+	p.CursorVariantCreatedAt = nil
 	p.CursorVariantID = nil
 	p.CursorLocationID = nil
 	var all []db.ListLevelsRow
@@ -490,17 +492,19 @@ func paginateAllLevels(ctx context.Context, t *testing.T, q *db.Queries, base db
 			return all
 		}
 		last := page[len(page)-1]
-		vid, lid := last.VariantID, last.LocationID
-		p.CursorVariantID, p.CursorLocationID = &vid, &lid
+		ca, vid, lid := last.VariantCreatedAt, last.VariantID, last.LocationID
+		p.CursorVariantCreatedAt, p.CursorVariantID, p.CursorLocationID = &ca, &vid, &lid
 	}
 }
 
-// paginateAllLow walks ListLow page by page using its variant_id cursor
-// until a short page signals the end.
+// paginateAllLow walks ListLow page by page using its (variant_created_at,
+// variant_id) cursor (D-92: newest variant first) until a short page
+// signals the end.
 func paginateAllLow(ctx context.Context, t *testing.T, q *db.Queries, base db.ListLowParams, pageSize int32) []db.ListLowRow {
 	t.Helper()
 	p := base
 	p.Limit = pageSize
+	p.CursorVariantCreatedAt = nil
 	p.CursorVariantID = nil
 	var all []db.ListLowRow
 	for {
@@ -513,8 +517,8 @@ func paginateAllLow(ctx context.Context, t *testing.T, q *db.Queries, base db.Li
 			return all
 		}
 		last := page[len(page)-1]
-		vid := last.VariantID
-		p.CursorVariantID = &vid
+		ca, vid := last.VariantCreatedAt, last.VariantID
+		p.CursorVariantCreatedAt, p.CursorVariantID = &ca, &vid
 	}
 }
 
