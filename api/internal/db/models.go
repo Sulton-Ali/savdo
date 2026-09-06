@@ -60,6 +60,48 @@ func (ns NullAdjustmentReason) Value() (driver.Value, error) {
 	return string(ns.AdjustmentReason), nil
 }
 
+type DiscountType string
+
+const (
+	DiscountTypePercent DiscountType = "percent"
+	DiscountTypeFixed   DiscountType = "fixed"
+)
+
+func (e *DiscountType) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = DiscountType(s)
+	case string:
+		*e = DiscountType(s)
+	default:
+		return fmt.Errorf("unsupported scan type for DiscountType: %T", src)
+	}
+	return nil
+}
+
+type NullDiscountType struct {
+	DiscountType DiscountType `json:"discount_type"`
+	Valid        bool         `json:"valid"` // Valid is true if DiscountType is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullDiscountType) Scan(value interface{}) error {
+	if value == nil {
+		ns.DiscountType, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.DiscountType.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullDiscountType) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.DiscountType), nil
+}
+
 type LocationKind string
 
 const (
@@ -602,6 +644,30 @@ type Sale struct {
 	VoidedBy       *uuid.UUID     `json:"voided_by"`
 	VoidReason     *string        `json:"void_reason"`
 	CreatedAt      time.Time      `json:"created_at"`
+}
+
+type SaleDraft struct {
+	ID             uuid.UUID      `json:"id"`
+	ShopID         uuid.UUID      `json:"shop_id"`
+	LocationID     uuid.UUID      `json:"location_id"`
+	CustomerID     *uuid.UUID     `json:"customer_id"`
+	DiscountType   *DiscountType  `json:"discount_type"`
+	DiscountValue  pgtype.Numeric `json:"discount_value"`
+	DiscountReason *string        `json:"discount_reason"`
+	Note           *string        `json:"note"`
+	CreatedBy      *uuid.UUID     `json:"created_by"`
+	CreatedAt      time.Time      `json:"created_at"`
+	UpdatedAt      time.Time      `json:"updated_at"`
+}
+
+type SaleDraftItem struct {
+	ID          uuid.UUID      `json:"id"`
+	ShopID      uuid.UUID      `json:"shop_id"`
+	SaleDraftID uuid.UUID      `json:"sale_draft_id"`
+	VariantID   uuid.UUID      `json:"variant_id"`
+	Qty         pgtype.Numeric `json:"qty"`
+	Position    int32          `json:"position"`
+	CreatedAt   time.Time      `json:"created_at"`
 }
 
 type SaleItem struct {

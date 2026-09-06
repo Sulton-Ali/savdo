@@ -2124,6 +2124,257 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /sales/drafts:
+    get:
+      operationId: listSaleDrafts
+      tags: [sales]
+      summary: List the shop's draft sales.
+      description: >
+        Requires `cashier+` — any staff who may create a sale can list
+        every draft for the whole shop, shared across devices (D-87).
+        Cursor-paginated, newest first.
+      parameters:
+        - name: createdBy
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SaleDraftList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      operationId: createSaleDraft
+      tags: [sales]
+      summary: Save a draft sale.
+      description: >
+        Requires `cashier+`. Like `POST /sales`, `items` carries only
+        `variantId`/`qty` — prices are never stored on a draft, only
+        computed at read time (D-67, D-87). No stock movement or
+        availability change while the draft exists (D-88).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaleDraftCreate"
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SaleDraft"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: >
+            `409 DISCOUNT_EXCEEDS_SUBTOTAL` when `discount` is greater
+            than the computed subtotal (D-57).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /sales/drafts/{id}:
+    get:
+      operationId: getSaleDraft
+      tags: [sales]
+      summary: Get a draft sale.
+      description: >
+        Requires `cashier+`. `items[].unitPrice`/`lineTotal`,
+        `subtotal`, `discountAmount` and `estimatedTotal` are computed
+        server-side from the catalogue's current prices at the moment of
+        the read (D-67, D-87) — never stored.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SaleDraft"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: updateSaleDraft
+      tags: [sales]
+      summary: Edit a draft sale.
+      description: >
+        Requires `cashier+`, and either the draft's own creator or
+        `manager+` — a draft whose `createdBy` is `null` may only be
+        edited by `manager+` (D-89). `items`, when present, replaces the
+        whole line set. `customerId`, `discountReason` and `note` are
+        nullable (D-35): explicit `null` clears the field.
+        `discountType`/`discountValue` are nullable as a pair: explicit
+        `null` on either clears the discount entirely — even when the
+        other half of the pair carries a real value in the same
+        request — the same pairing rule `05-API.md`'s promo bullet
+        describes for `promoPrice`/`promoFrom`/`promoTo`; naming only
+        one of the two with a non-null value keeps the other's
+        already-stored value; naming one non-null while nothing is
+        stored for the pair is `400 VALIDATION_FAILED` on the missing
+        half.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaleDraftPatch"
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SaleDraft"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: >
+            `409 DISCOUNT_EXCEEDS_SUBTOTAL` when the resulting discount
+            is greater than the computed subtotal (D-57).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      operationId: deleteSaleDraft
+      tags: [sales]
+      summary: Delete a draft sale.
+      description: >
+        Requires `cashier+`, and either the draft's own creator or
+        `manager+` (D-89's same rule as `PATCH`). Hard delete, no ledger
+        effect — a draft never moved stock (D-88).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Deleted.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /sales/drafts/{id}/complete:
+    post:
+      operationId: completeSaleDraft
+      tags: [sales]
+      summary: Complete a draft sale.
+      description: >
+        Requires `cashier+` — any staff who may create a sale, not only
+        the draft's own creator. Recomputes every line's price and the
+        discount from the catalogue's current state (D-56/D-67), the same
+        way `POST /sales` would from an equivalent body, in the same
+        transaction as the draft's own deletion (D-87); the response is
+        the newly completed, immutable `Sale`, now carrying a sale
+        number the draft never had. Accepts `Idempotency-Key`
+        (docs/05-API.md § Conventions), the same as `POST /sales`: a
+        replay with the same key returns the original result.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaleDraftComplete"
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Sale"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: >
+            `409 STOCK_INSUFFICIENT details.variantId/locationId/available`
+            when a line can no longer be fulfilled (D-88 — the client
+            shows which line and lets the user edit the draft); `409
+            DISCOUNT_EXCEEDS_SUBTOTAL` when the draft's discount is
+            greater than the recomputed subtotal (D-57); `409
+            IDEMPOTENCY_KEY_REUSED` when the same key was already used
+            for a different request; `409 CONFLICT details.reason:
+            "deadlock"` when a concurrent write could not be serialized —
+            safe to retry.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: >
+            `422 VALIDATION_FAILED details.fields` naming
+            `items[<index>].variantId: invalid` when that line's variant
+            or product is inactive or was soft-deleted since the draft
+            was created (`available: false` on a read, D-96) — the
+            request is well-formed, but the draft can no longer be
+            completed as it stands; the client shows which line and
+            lets the user edit the draft (D-88).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /reports/sales/summary:
     get:
       operationId: getSalesSummaryReport
@@ -4376,6 +4627,243 @@ components:
             $ref: "#/components/schemas/SaleReturnItemCreate"
         note:
           type: string
+
+    SaleDraftItem:
+      type: object
+      description: >
+        One line of a draft sale (docs/04-DATA-MODEL.md § 4, D-87).
+        `unitPrice`/`lineTotal` are resolved from the catalogue at read
+        time by the same rule `SaleItem.unitPrice` uses (promo price when
+        active, else the variant's override, else the product's base
+        price — D-67); a changed price or an expired promo since the
+        line was added is reflected immediately, never stale. No
+        `unitCost` — a draft never carries cost, for any role (hard rule
+        5).
+      required:
+        - variantId
+        - productId
+        - productName
+        - variantLabel
+        - qty
+        - unitPrice
+        - lineTotal
+        - available
+      properties:
+        variantId:
+          type: string
+          format: uuid
+        productId:
+          type: string
+          format: uuid
+        productName:
+          type: string
+        variantLabel:
+          type: string
+        qty:
+          $ref: "#/components/schemas/Decimal"
+        unitPrice:
+          $ref: "#/components/schemas/Decimal"
+        lineTotal:
+          $ref: "#/components/schemas/Decimal"
+        available:
+          type: boolean
+          description: >
+            `false` when the line's variant or product has since become
+            inactive or was soft-deleted while the draft was open — the
+            line still renders (`unitPrice`/`lineTotal` reported as
+            `"0.00"`, excluded from `subtotal`) so the draft stays
+            editable, but `POST .../complete` fails with `422
+            VALIDATION_FAILED` naming it if the line is still present at
+            completion time.
+
+    SaleDraftCreate:
+      type: object
+      description: >
+        `items` carries only `variantId` and `qty`, the same as
+        `SaleCreate.items` — no client-supplied price (D-56, D-87).
+      required:
+        - locationId
+        - items
+      properties:
+        locationId:
+          type: string
+          format: uuid
+        customerId:
+          type: string
+          format: uuid
+        items:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/SaleItemCreate"
+        discount:
+          $ref: "#/components/schemas/SaleDiscount"
+        discountReason:
+          type: string
+        note:
+          type: string
+
+    SaleDraftPatch:
+      type: object
+      description: >
+        Partial update — only provided fields change (D-87). `items`,
+        when present, replaces the whole line set. `customerId`,
+        `discountType`, `discountValue`, `discountReason` and `note` are
+        nullable (D-35): explicit `null` clears the field;
+        `discountType`/`discountValue` are cleared together as a pair by
+        an explicit `null` on either one — even when the other half of
+        the pair carries a real value in the same request — the same
+        rule `docs/05-API.md`'s promo bullet describes for
+        `promoPrice`/`promoFrom`/`promoTo`; naming only one of the two
+        with a non-null value keeps the other's already-stored value;
+        naming one non-null while nothing is stored for the pair is
+        `400 VALIDATION_FAILED` on the missing half.
+      properties:
+        locationId:
+          type: string
+          format: uuid
+        items:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/SaleItemCreate"
+        customerId:
+          type: ["string", "null"]
+          format: uuid
+        discountType:
+          type: ["string", "null"]
+          description: >
+            `percent` or `fixed` (docs/04-DATA-MODEL.md § 4); validated
+            server-side, not enforced by JSON Schema.
+        discountValue:
+          type: ["string", "null"]
+          format: decimal
+          pattern: '^-?\d+(\.\d+)?$'
+        discountReason:
+          type: ["string", "null"]
+        note:
+          type: ["string", "null"]
+
+    SaleDraftComplete:
+      type: object
+      required:
+        - paymentMethod
+      properties:
+        paymentMethod:
+          $ref: "#/components/schemas/PaymentMethod"
+
+    SaleDraft:
+      type: object
+      description: >
+        A mutable, shared, unpaid order (D-87..D-89): editable or
+        deletable by its creator or `manager+` until it is completed or
+        deleted, at which point `POST /sales/drafts/{id}/complete`
+        creates the immutable `Sale` `docs/03-ARCHITECTURE.md`'s ADR-014
+        describes. No prices are ever stored — `items`, `subtotal`,
+        `discountAmount` and `estimatedTotal` are computed server-side
+        from the catalogue's current state on every read (D-67); a draft
+        has no sale number, only assigned on completion.
+      required:
+        - id
+        - locationId
+        - customerId
+        - discount
+        - discountReason
+        - note
+        - items
+        - subtotal
+        - discountAmount
+        - estimatedTotal
+        - createdBy
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        locationId:
+          type: string
+          format: uuid
+        customerId:
+          type: ["string", "null"]
+          format: uuid
+        discount:
+          description: >
+            `null` when the draft has no manual discount. The
+            OpenAPI 3.1 `anyOf`-with-`null` idiom is used here (rather
+            than the `SaleDiscount` `$ref` alone) so this always-present,
+            possibly-null field matches `Sale`'s own nullable-field
+            convention (`customerId`, `voidedBy`, …) instead of the
+            plain-optional shape `SaleCreate.discount`/
+            `SaleDraftCreate.discount` use.
+            docs/04-DATA-MODEL.md § 4 / D-52.
+            `value` is a percentage (0..100) when `type: percent`, or a
+            fixed sum (>= 0) when `type: fixed`.
+            docs/05-API.md § Conventions.
+          anyOf:
+            - $ref: "#/components/schemas/SaleDiscount"
+            - type: "null"
+        discountReason:
+          type: ["string", "null"]
+        note:
+          type: ["string", "null"]
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/SaleDraftItem"
+        subtotal:
+          $ref: "#/components/schemas/Decimal"
+          description: >
+            Sum of every `available` line's `lineTotal` — an unavailable
+            line (D-96/§ 04-DATA-MODEL.md § 4) contributes `"0.00"` and
+            is excluded.
+        discountAmount:
+          $ref: "#/components/schemas/Decimal"
+          description: >
+            The manual discount's amount, computed from `discount`
+            against `subtotal` and capped at `subtotal` (D-57) — a
+            discount that exceeded the subtotal after the draft's items
+            changed since it was set is reported capped here rather than
+            failing the read; `PATCH`/`POST` that touch `items` or the
+            discount reject the same case outright (`409
+            DISCOUNT_EXCEEDS_SUBTOTAL`); a `PATCH` touching neither
+            leaves a stale discount alone.
+        estimatedTotal:
+          $ref: "#/components/schemas/Decimal"
+          description: >
+            `subtotal` minus `discountAmount` — an estimate, not
+            authoritative: `POST .../complete` recomputes everything
+            server-side (D-56).
+        createdBy:
+          type: ["string", "null"]
+          format: uuid
+          description: >
+            The staff id who created the draft; `null` for a draft with
+            no creator on record, editable/deletable only by `manager+`
+            in that case (D-89). Any staff who may create a sale may
+            complete the draft regardless of `createdBy` (D-96).
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    SaleDraftList:
+      type: object
+      description: Cursor-paginated envelope for `GET /sales/drafts`.
+      required:
+        - items
+        - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/SaleDraft"
+        nextCursor:
+          type: ["string", "null"]
 
     SalesSummaryReport:
       type: object

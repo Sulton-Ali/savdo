@@ -934,6 +934,78 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/sales/drafts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the shop's draft sales.
+         * @description Requires `cashier+` — any staff who may create a sale can list every draft for the whole shop, shared across devices (D-87). Cursor-paginated, newest first.
+         */
+        get: operations["listSaleDrafts"];
+        put?: never;
+        /**
+         * Save a draft sale.
+         * @description Requires `cashier+`. Like `POST /sales`, `items` carries only `variantId`/`qty` — prices are never stored on a draft, only computed at read time (D-67, D-87). No stock movement or availability change while the draft exists (D-88).
+         */
+        post: operations["createSaleDraft"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sales/drafts/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a draft sale.
+         * @description Requires `cashier+`. `items[].unitPrice`/`lineTotal`, `subtotal`, `discountAmount` and `estimatedTotal` are computed server-side from the catalogue's current prices at the moment of the read (D-67, D-87) — never stored.
+         */
+        get: operations["getSaleDraft"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a draft sale.
+         * @description Requires `cashier+`, and either the draft's own creator or `manager+` (D-89's same rule as `PATCH`). Hard delete, no ledger effect — a draft never moved stock (D-88).
+         */
+        delete: operations["deleteSaleDraft"];
+        options?: never;
+        head?: never;
+        /**
+         * Edit a draft sale.
+         * @description Requires `cashier+`, and either the draft's own creator or `manager+` — a draft whose `createdBy` is `null` may only be edited by `manager+` (D-89). `items`, when present, replaces the whole line set. `customerId`, `discountReason` and `note` are nullable (D-35): explicit `null` clears the field. `discountType`/`discountValue` are nullable as a pair: explicit `null` on either clears the discount entirely — even when the other half of the pair carries a real value in the same request — the same pairing rule `05-API.md`'s promo bullet describes for `promoPrice`/`promoFrom`/`promoTo`; naming only one of the two with a non-null value keeps the other's already-stored value; naming one non-null while nothing is stored for the pair is `400 VALIDATION_FAILED` on the missing half.
+         */
+        patch: operations["updateSaleDraft"];
+        trace?: never;
+    };
+    "/sales/drafts/{id}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Complete a draft sale.
+         * @description Requires `cashier+` — any staff who may create a sale, not only the draft's own creator. Recomputes every line's price and the discount from the catalogue's current state (D-56/D-67), the same way `POST /sales` would from an equivalent body, in the same transaction as the draft's own deletion (D-87); the response is the newly completed, immutable `Sale`, now carrying a sale number the draft never had. Accepts `Idempotency-Key` (docs/05-API.md § Conventions), the same as `POST /sales`: a replay with the same key returns the original result.
+         */
+        post: operations["completeSaleDraft"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/reports/sales/summary": {
         parameters: {
             query?: never;
@@ -1887,6 +1959,82 @@ export interface components {
         SaleReturnCreate: {
             items: components["schemas"]["SaleReturnItemCreate"][];
             note?: string;
+        };
+        /** @description One line of a draft sale (docs/04-DATA-MODEL.md § 4, D-87). `unitPrice`/`lineTotal` are resolved from the catalogue at read time by the same rule `SaleItem.unitPrice` uses (promo price when active, else the variant's override, else the product's base price — D-67); a changed price or an expired promo since the line was added is reflected immediately, never stale. No `unitCost` — a draft never carries cost, for any role (hard rule 5). */
+        SaleDraftItem: {
+            /** Format: uuid */
+            variantId: string;
+            /** Format: uuid */
+            productId: string;
+            productName: string;
+            variantLabel: string;
+            qty: components["schemas"]["Decimal"];
+            unitPrice: components["schemas"]["Decimal"];
+            lineTotal: components["schemas"]["Decimal"];
+            /** @description `false` when the line's variant or product has since become inactive or was soft-deleted while the draft was open — the line still renders (`unitPrice`/`lineTotal` reported as `"0.00"`, excluded from `subtotal`) so the draft stays editable, but `POST .../complete` fails with `422 VALIDATION_FAILED` naming it if the line is still present at completion time. */
+            available: boolean;
+        };
+        /** @description `items` carries only `variantId` and `qty`, the same as `SaleCreate.items` — no client-supplied price (D-56, D-87). */
+        SaleDraftCreate: {
+            /** Format: uuid */
+            locationId: string;
+            /** Format: uuid */
+            customerId?: string;
+            items: components["schemas"]["SaleItemCreate"][];
+            discount?: components["schemas"]["SaleDiscount"];
+            discountReason?: string;
+            note?: string;
+        };
+        /** @description Partial update — only provided fields change (D-87). `items`, when present, replaces the whole line set. `customerId`, `discountType`, `discountValue`, `discountReason` and `note` are nullable (D-35): explicit `null` clears the field; `discountType`/`discountValue` are cleared together as a pair by an explicit `null` on either one — even when the other half of the pair carries a real value in the same request — the same rule `docs/05-API.md`'s promo bullet describes for `promoPrice`/`promoFrom`/`promoTo`; naming only one of the two with a non-null value keeps the other's already-stored value; naming one non-null while nothing is stored for the pair is `400 VALIDATION_FAILED` on the missing half. */
+        SaleDraftPatch: {
+            /** Format: uuid */
+            locationId?: string;
+            items?: components["schemas"]["SaleItemCreate"][];
+            /** Format: uuid */
+            customerId?: string | null;
+            /** @description `percent` or `fixed` (docs/04-DATA-MODEL.md § 4); validated server-side, not enforced by JSON Schema. */
+            discountType?: string | null;
+            /** Format: decimal */
+            discountValue?: string | null;
+            discountReason?: string | null;
+            note?: string | null;
+        };
+        SaleDraftComplete: {
+            paymentMethod: components["schemas"]["PaymentMethod"];
+        };
+        /** @description A mutable, shared, unpaid order (D-87..D-89): editable or deletable by its creator or `manager+` until it is completed or deleted, at which point `POST /sales/drafts/{id}/complete` creates the immutable `Sale` `docs/03-ARCHITECTURE.md`'s ADR-014 describes. No prices are ever stored — `items`, `subtotal`, `discountAmount` and `estimatedTotal` are computed server-side from the catalogue's current state on every read (D-67); a draft has no sale number, only assigned on completion. */
+        SaleDraft: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            locationId: string;
+            /** Format: uuid */
+            customerId: string | null;
+            /** @description `null` when the draft has no manual discount. The OpenAPI 3.1 `anyOf`-with-`null` idiom is used here (rather than the `SaleDiscount` `$ref` alone) so this always-present, possibly-null field matches `Sale`'s own nullable-field convention (`customerId`, `voidedBy`, …) instead of the plain-optional shape `SaleCreate.discount`/ `SaleDraftCreate.discount` use. docs/04-DATA-MODEL.md § 4 / D-52. `value` is a percentage (0..100) when `type: percent`, or a fixed sum (>= 0) when `type: fixed`. docs/05-API.md § Conventions. */
+            discount: components["schemas"]["SaleDiscount"] | null;
+            discountReason: string | null;
+            note: string | null;
+            items: components["schemas"]["SaleDraftItem"][];
+            /** @description Sum of every `available` line's `lineTotal` — an unavailable line (D-96/§ 04-DATA-MODEL.md § 4) contributes `"0.00"` and is excluded. */
+            subtotal: components["schemas"]["Decimal"];
+            /** @description The manual discount's amount, computed from `discount` against `subtotal` and capped at `subtotal` (D-57) — a discount that exceeded the subtotal after the draft's items changed since it was set is reported capped here rather than failing the read; `PATCH`/`POST` that touch `items` or the discount reject the same case outright (`409 DISCOUNT_EXCEEDS_SUBTOTAL`); a `PATCH` touching neither leaves a stale discount alone. */
+            discountAmount: components["schemas"]["Decimal"];
+            /** @description `subtotal` minus `discountAmount` — an estimate, not authoritative: `POST .../complete` recomputes everything server-side (D-56). */
+            estimatedTotal: components["schemas"]["Decimal"];
+            /**
+             * Format: uuid
+             * @description The staff id who created the draft; `null` for a draft with no creator on record, editable/deletable only by `manager+` in that case (D-89). Any staff who may create a sale may complete the draft regardless of `createdBy` (D-96).
+             */
+            createdBy: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        /** @description Cursor-paginated envelope for `GET /sales/drafts`. */
+        SaleDraftList: {
+            items: components["schemas"]["SaleDraft"][];
+            nextCursor: string | null;
         };
         /** @description docs/00-DECISIONS.md D-55. For a cashier, `from`/`to`/`cashierId` are the effective values the server used (today, shop timezone, that cashier), not necessarily what was requested. */
         SalesSummaryReport: {
@@ -3870,6 +4018,209 @@ export interface operations {
             404: components["responses"]["NotFound"];
             /** @description `409 RETURN_EXCEEDS_SOLD details.saleItemId` when a line's returned quantity would exceed sold minus already returned; `409 SALE_ALREADY_VOIDED` when the original sale is voided; `409 SALE_NOT_RETURNABLE` when the target sale is a return (D-66); `409 IDEMPOTENCY_KEY_REUSED` when the same key was already used for a different request; `409 CONFLICT details.reason: "deadlock"` when a concurrent write could not be serialized — safe to retry. */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listSaleDrafts: {
+        parameters: {
+            query?: {
+                createdBy?: string;
+                /** @description Maximum number of items to return. */
+                limit?: components["parameters"]["Limit"];
+                /** @description Opaque cursor from a previous page's `nextCursor`. */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SaleDraftList"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createSaleDraft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaleDraftCreate"];
+            };
+        };
+        responses: {
+            /** @description Created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SaleDraft"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description `409 DISCOUNT_EXCEEDS_SUBTOTAL` when `discount` is greater than the computed subtotal (D-57). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getSaleDraft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SaleDraft"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteSaleDraft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateSaleDraft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaleDraftPatch"];
+            };
+        };
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SaleDraft"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description `409 DISCOUNT_EXCEEDS_SUBTOTAL` when the resulting discount is greater than the computed subtotal (D-57). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    completeSaleDraft: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Client-generated key (docs/05-API.md § Conventions); a replay with the same key returns the original result instead of repeating the operation. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaleDraftComplete"];
+            };
+        };
+        responses: {
+            /** @description Created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Sale"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description `409 STOCK_INSUFFICIENT details.variantId/locationId/available` when a line can no longer be fulfilled (D-88 — the client shows which line and lets the user edit the draft); `409 DISCOUNT_EXCEEDS_SUBTOTAL` when the draft's discount is greater than the recomputed subtotal (D-57); `409 IDEMPOTENCY_KEY_REUSED` when the same key was already used for a different request; `409 CONFLICT details.reason: "deadlock"` when a concurrent write could not be serialized — safe to retry. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `422 VALIDATION_FAILED details.fields` naming `items[<index>].variantId: invalid` when that line's variant or product is inactive or was soft-deleted since the draft was created (`available: false` on a read, D-96) — the request is well-formed, but the draft can no longer be completed as it stands; the client shows which line and lets the user edit the draft (D-88). */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

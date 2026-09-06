@@ -45,6 +45,21 @@ func Validation(fields map[string]string) *Error {
 	}
 }
 
+// Unprocessable builds a 422 VALIDATION_FAILED error with a reason per
+// field, the same `details.fields` shape Validation's 400 uses
+// (docs/05-API.md § Conventions), but for a well-formed request that
+// cannot be processed against the current state rather than a malformed
+// one — e.g. completing a draft sale whose line references a variant
+// that has gone inactive or was soft-deleted since it was added
+// (sales.errDraftLineUnavailable).
+func Unprocessable(fields map[string]string) *Error {
+	return &Error{
+		Status:  http.StatusUnprocessableEntity,
+		Code:    gen.VALIDATIONFAILED,
+		Details: map[string]any{"fields": fields},
+	}
+}
+
 // Unauthenticated builds a 401 UNAUTHENTICATED error.
 func Unauthenticated() *Error {
 	return &Error{Status: http.StatusUnauthorized, Code: gen.UNAUTHENTICATED}

@@ -36,7 +36,10 @@ Base path `/v1`. JSON only. Server: Go, `api/cmd/api`, port 8080 behind Caddy.
   (`STOCK_INSUFFICIENT`, `SALE_ALREADY_VOIDED`, `PURCHASE_ALREADY_RECEIVED`,
   `SALE_VOID_WINDOW_CLOSED`, `SALE_HAS_RETURNS`, `SALE_NOT_VOIDABLE`,
   `SALE_NOT_RETURNABLE`, `RETURN_EXCEEDS_SOLD`,
-  `DISCOUNT_EXCEEDS_SUBTOTAL`, `DUPLICATE_SKU`, …), `429 RATE_LIMITED`, `500
+  `DISCOUNT_EXCEEDS_SUBTOTAL`, `DUPLICATE_SKU`, …), `422 VALIDATION_FAILED`
+  (with `details.fields`) for a well-formed request that cannot be
+  processed against the current state — e.g. `POST /sales/drafts/{id}/complete`
+  naming an unavailable line (D-96) — `429 RATE_LIMITED`, `500
   INTERNAL`. The full enum lives in the spec under `components.schemas.ErrorCode`;
   adding a code means adding it there.
 - **Validation and conflict vocabulary** (O-12): `details.fields` maps field → one of `required`, `invalid`, `too_short`, `too_long`; a uniqueness violation is `409 CONFLICT` with `details.field` naming the field (`username`, `phone`, `name`). Clients translate these words; nothing else is used.
@@ -173,7 +176,7 @@ Phase numbers refer to `06-ROADMAP.md`.
 | GET    | `/sales/drafts/{id}`         | cashier+             |
 | PATCH  | `/sales/drafts/{id}`         | creator or manager+ (partial update; `items`, when present, replaces the whole line set) |
 | DELETE | `/sales/drafts/{id}`         | creator or manager+ (204) |
-| POST   | `/sales/drafts/{id}/complete` | cashier+ (Idempotency-Key required; body `paymentMethod`; returns completed `Sale` with 201; `409 IDEMPOTENCY_KEY_REUSED` or `STOCK_INSUFFICIENT`) |
+| POST   | `/sales/drafts/{id}/complete` | any staff who can create a sale (D-96); Idempotency-Key accepted, same semantics as `POST /sales`; body `paymentMethod`; returns completed `Sale` with 201; `409 IDEMPOTENCY_KEY_REUSED` or `STOCK_INSUFFICIENT`; `422 VALIDATION_FAILED` naming an unavailable line |
 | GET    | `/reports/sales/summary`     | manager+ (cashier: own day) |
 | GET    | `/reports/sales/by-product`  | manager+             |
 

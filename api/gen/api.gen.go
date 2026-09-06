@@ -1008,6 +1008,89 @@ type SaleDiscount struct {
 	Value Decimal `json:"value"`
 }
 
+// SaleDraft A mutable, shared, unpaid order (D-87..D-89): editable or deletable by its creator or `manager+` until it is completed or deleted, at which point `POST /sales/drafts/{id}/complete` creates the immutable `Sale` `docs/03-ARCHITECTURE.md`'s ADR-014 describes. No prices are ever stored — `items`, `subtotal`, `discountAmount` and `estimatedTotal` are computed server-side from the catalogue's current state on every read (D-67); a draft has no sale number, only assigned on completion.
+type SaleDraft struct {
+	CreatedAt time.Time `json:"createdAt"`
+
+	// CreatedBy The staff id who created the draft; `null` for a draft with no creator on record, editable/deletable only by `manager+` in that case (D-89). Any staff who may create a sale may complete the draft regardless of `createdBy` (D-96).
+	CreatedBy  nullable.Nullable[openapi_types.UUID] `json:"createdBy"`
+	CustomerId nullable.Nullable[openapi_types.UUID] `json:"customerId"`
+
+	// Discount `null` when the draft has no manual discount. The OpenAPI 3.1 `anyOf`-with-`null` idiom is used here (rather than the `SaleDiscount` `$ref` alone) so this always-present, possibly-null field matches `Sale`'s own nullable-field convention (`customerId`, `voidedBy`, …) instead of the plain-optional shape `SaleCreate.discount`/ `SaleDraftCreate.discount` use. docs/04-DATA-MODEL.md § 4 / D-52. `value` is a percentage (0..100) when `type: percent`, or a fixed sum (>= 0) when `type: fixed`. docs/05-API.md § Conventions.
+	Discount nullable.Nullable[SaleDiscount] `json:"discount"`
+
+	// DiscountAmount The manual discount's amount, computed from `discount` against `subtotal` and capped at `subtotal` (D-57) — a discount that exceeded the subtotal after the draft's items changed since it was set is reported capped here rather than failing the read; `PATCH`/`POST` that touch `items` or the discount reject the same case outright (`409 DISCOUNT_EXCEEDS_SUBTOTAL`); a `PATCH` touching neither leaves a stale discount alone.
+	DiscountAmount Decimal                   `json:"discountAmount"`
+	DiscountReason nullable.Nullable[string] `json:"discountReason"`
+
+	// EstimatedTotal `subtotal` minus `discountAmount` — an estimate, not authoritative: `POST .../complete` recomputes everything server-side (D-56).
+	EstimatedTotal Decimal                   `json:"estimatedTotal"`
+	Id             openapi_types.UUID        `json:"id"`
+	Items          []SaleDraftItem           `json:"items"`
+	LocationId     openapi_types.UUID        `json:"locationId"`
+	Note           nullable.Nullable[string] `json:"note"`
+
+	// Subtotal Sum of every `available` line's `lineTotal` — an unavailable line (D-96/§ 04-DATA-MODEL.md § 4) contributes `"0.00"` and is excluded.
+	Subtotal  Decimal   `json:"subtotal"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// SaleDraftComplete defines model for SaleDraftComplete.
+type SaleDraftComplete struct {
+	// PaymentMethod docs/04-DATA-MODEL.md § 4 (D-54).
+	PaymentMethod PaymentMethod `json:"paymentMethod"`
+}
+
+// SaleDraftCreate `items` carries only `variantId` and `qty`, the same as `SaleCreate.items` — no client-supplied price (D-56, D-87).
+type SaleDraftCreate struct {
+	CustomerId *openapi_types.UUID `json:"customerId,omitempty"`
+
+	// Discount A manual per-sale discount (D-52). `value` is a percentage (0..100) when `type: percent`, or a fixed sum (>= 0, in shop currency) when `type: fixed`; either way it is capped at the computed subtotal — `409 DISCOUNT_EXCEEDS_SUBTOTAL` otherwise (D-57). Validated server-side; not enforceable by JSON Schema since `Decimal` is a string.
+	Discount       *SaleDiscount      `json:"discount,omitempty"`
+	DiscountReason *string            `json:"discountReason,omitempty"`
+	Items          []SaleItemCreate   `json:"items"`
+	LocationId     openapi_types.UUID `json:"locationId"`
+	Note           *string            `json:"note,omitempty"`
+}
+
+// SaleDraftItem One line of a draft sale (docs/04-DATA-MODEL.md § 4, D-87). `unitPrice`/`lineTotal` are resolved from the catalogue at read time by the same rule `SaleItem.unitPrice` uses (promo price when active, else the variant's override, else the product's base price — D-67); a changed price or an expired promo since the line was added is reflected immediately, never stale. No `unitCost` — a draft never carries cost, for any role (hard rule 5).
+type SaleDraftItem struct {
+	// Available `false` when the line's variant or product has since become inactive or was soft-deleted while the draft was open — the line still renders (`unitPrice`/`lineTotal` reported as `"0.00"`, excluded from `subtotal`) so the draft stays editable, but `POST .../complete` fails with `422 VALIDATION_FAILED` naming it if the line is still present at completion time.
+	Available bool `json:"available"`
+
+	// LineTotal money and quantities as decimal strings (ADR-007)
+	LineTotal   Decimal            `json:"lineTotal"`
+	ProductId   openapi_types.UUID `json:"productId"`
+	ProductName string             `json:"productName"`
+
+	// Qty money and quantities as decimal strings (ADR-007)
+	Qty Decimal `json:"qty"`
+
+	// UnitPrice money and quantities as decimal strings (ADR-007)
+	UnitPrice    Decimal            `json:"unitPrice"`
+	VariantId    openapi_types.UUID `json:"variantId"`
+	VariantLabel string             `json:"variantLabel"`
+}
+
+// SaleDraftList Cursor-paginated envelope for `GET /sales/drafts`.
+type SaleDraftList struct {
+	Items      []SaleDraft               `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"nextCursor"`
+}
+
+// SaleDraftPatch Partial update — only provided fields change (D-87). `items`, when present, replaces the whole line set. `customerId`, `discountType`, `discountValue`, `discountReason` and `note` are nullable (D-35): explicit `null` clears the field; `discountType`/`discountValue` are cleared together as a pair by an explicit `null` on either one — even when the other half of the pair carries a real value in the same request — the same rule `docs/05-API.md`'s promo bullet describes for `promoPrice`/`promoFrom`/`promoTo`; naming only one of the two with a non-null value keeps the other's already-stored value; naming one non-null while nothing is stored for the pair is `400 VALIDATION_FAILED` on the missing half.
+type SaleDraftPatch struct {
+	CustomerId     nullable.Nullable[openapi_types.UUID] `json:"customerId,omitempty"`
+	DiscountReason nullable.Nullable[string]             `json:"discountReason,omitempty"`
+
+	// DiscountType `percent` or `fixed` (docs/04-DATA-MODEL.md § 4); validated server-side, not enforced by JSON Schema.
+	DiscountType  nullable.Nullable[string] `json:"discountType,omitempty"`
+	DiscountValue nullable.Nullable[string] `json:"discountValue,omitempty"`
+	Items         *[]SaleItemCreate         `json:"items,omitempty"`
+	LocationId    *openapi_types.UUID       `json:"locationId,omitempty"`
+	Note          nullable.Nullable[string] `json:"note,omitempty"`
+}
+
 // SaleItem One line of a sale or return (docs/04-DATA-MODEL.md § 4). `productName` is resolved in the caller's `Accept-Language` (same `requested -> uz -> any` fallback as `Product.name`, ADR-012, and the same resolution `PurchaseItem.productName` uses); `variantLabel` follows the same rule as `PurchaseItem.variantLabel`. `unitCost` is present only for a caller with the `cost.read` permission — absent (not null) for a cashier (D-63, ADR-010).
 type SaleItem struct {
 	Id openapi_types.UUID `json:"id"`
@@ -1682,6 +1765,23 @@ type CreateSaleParams struct {
 	IdempotencyKey *IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
+// ListSaleDraftsParams defines parameters for ListSaleDrafts.
+type ListSaleDraftsParams struct {
+	CreatedBy *openapi_types.UUID `form:"createdBy,omitempty" json:"createdBy,omitempty"`
+
+	// Limit Maximum number of items to return.
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque cursor from a previous page's `nextCursor`.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// CompleteSaleDraftParams defines parameters for CompleteSaleDraft.
+type CompleteSaleDraftParams struct {
+	// IdempotencyKey Client-generated key (docs/05-API.md § Conventions); a replay with the same key returns the original result instead of repeating the operation.
+	IdempotencyKey *IdempotencyKey `json:"Idempotency-Key,omitempty"`
+}
+
 // CreateSaleReturnParams defines parameters for CreateSaleReturn.
 type CreateSaleReturnParams struct {
 	// IdempotencyKey Client-generated key (docs/05-API.md § Conventions); a replay with the same key returns the original result instead of repeating the operation.
@@ -1808,6 +1908,15 @@ type UpdatePurchaseJSONRequestBody = PurchasePatch
 
 // CreateSaleJSONRequestBody defines body for CreateSale for application/json ContentType.
 type CreateSaleJSONRequestBody = SaleCreate
+
+// CreateSaleDraftJSONRequestBody defines body for CreateSaleDraft for application/json ContentType.
+type CreateSaleDraftJSONRequestBody = SaleDraftCreate
+
+// UpdateSaleDraftJSONRequestBody defines body for UpdateSaleDraft for application/json ContentType.
+type UpdateSaleDraftJSONRequestBody = SaleDraftPatch
+
+// CompleteSaleDraftJSONRequestBody defines body for CompleteSaleDraft for application/json ContentType.
+type CompleteSaleDraftJSONRequestBody = SaleDraftComplete
 
 // CreateSaleReturnJSONRequestBody defines body for CreateSaleReturn for application/json ContentType.
 type CreateSaleReturnJSONRequestBody = SaleReturnCreate
@@ -1979,6 +2088,24 @@ type ServerInterface interface {
 	// CreateSale Complete a quick sale.
 	// (POST /sales)
 	CreateSale(w http.ResponseWriter, r *http.Request, params CreateSaleParams)
+	// ListSaleDrafts List the shop's draft sales.
+	// (GET /sales/drafts)
+	ListSaleDrafts(w http.ResponseWriter, r *http.Request, params ListSaleDraftsParams)
+	// CreateSaleDraft Save a draft sale.
+	// (POST /sales/drafts)
+	CreateSaleDraft(w http.ResponseWriter, r *http.Request)
+	// DeleteSaleDraft Delete a draft sale.
+	// (DELETE /sales/drafts/{id})
+	DeleteSaleDraft(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
+	// GetSaleDraft Get a draft sale.
+	// (GET /sales/drafts/{id})
+	GetSaleDraft(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
+	// UpdateSaleDraft Edit a draft sale.
+	// (PATCH /sales/drafts/{id})
+	UpdateSaleDraft(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
+	// CompleteSaleDraft Complete a draft sale.
+	// (POST /sales/drafts/{id}/complete)
+	CompleteSaleDraft(w http.ResponseWriter, r *http.Request, id openapi_types.UUID, params CompleteSaleDraftParams)
 	// GetSale Get a sale.
 	// (GET /sales/{id})
 	GetSale(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
@@ -3515,6 +3642,207 @@ func (siw *ServerInterfaceWrapper) CreateSale(w http.ResponseWriter, r *http.Req
 	handler.ServeHTTP(w, r)
 }
 
+// ListSaleDrafts operation middleware
+func (siw *ServerInterfaceWrapper) ListSaleDrafts(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListSaleDraftsParams
+
+	// ------------- Optional query parameter "createdBy" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "createdBy", r.URL.Query(), &params.CreatedBy, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "createdBy"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "createdBy", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListSaleDrafts(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateSaleDraft operation middleware
+func (siw *ServerInterfaceWrapper) CreateSaleDraft(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateSaleDraft(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteSaleDraft operation middleware
+func (siw *ServerInterfaceWrapper) DeleteSaleDraft(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteSaleDraft(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetSaleDraft operation middleware
+func (siw *ServerInterfaceWrapper) GetSaleDraft(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetSaleDraft(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateSaleDraft operation middleware
+func (siw *ServerInterfaceWrapper) UpdateSaleDraft(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateSaleDraft(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CompleteSaleDraft operation middleware
+func (siw *ServerInterfaceWrapper) CompleteSaleDraft(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CompleteSaleDraftParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey IdempotencyKey
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
+			return
+		}
+
+		params.IdempotencyKey = &IdempotencyKey
+
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CompleteSaleDraft(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetSale operation middleware
 func (siw *ServerInterfaceWrapper) GetSale(w http.ResponseWriter, r *http.Request) {
 
@@ -4456,6 +4784,12 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/sales/{id}", wrapper.GetSale)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/sales/{id}/void", wrapper.VoidSale)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/sales/{id}/return", wrapper.CreateSaleReturn)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/sales/drafts", wrapper.ListSaleDrafts)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/sales/drafts", wrapper.CreateSaleDraft)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/sales/drafts/{id}", wrapper.DeleteSaleDraft)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/sales/drafts/{id}", wrapper.GetSaleDraft)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/sales/drafts/{id}", wrapper.UpdateSaleDraft)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/sales/drafts/{id}/complete", wrapper.CompleteSaleDraft)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/reports/sales/summary", wrapper.GetSalesSummaryReport)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/reports/sales/by-product", wrapper.ListSalesByProduct)
 
@@ -7357,6 +7691,471 @@ func (response CreateSale409JSONResponse) VisitCreateSaleResponse(w http.Respons
 	return err
 }
 
+type ListSaleDraftsRequestObject struct {
+	Params ListSaleDraftsParams
+}
+
+type ListSaleDraftsResponseObject interface {
+	VisitListSaleDraftsResponse(w http.ResponseWriter) error
+}
+
+type ListSaleDrafts200JSONResponse SaleDraftList
+
+func (response ListSaleDrafts200JSONResponse) VisitListSaleDraftsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSaleDrafts401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListSaleDrafts401JSONResponse) VisitListSaleDraftsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSaleDrafts403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListSaleDrafts403JSONResponse) VisitListSaleDraftsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSaleDraftRequestObject struct {
+	Body *CreateSaleDraftJSONRequestBody
+}
+
+type CreateSaleDraftResponseObject interface {
+	VisitCreateSaleDraftResponse(w http.ResponseWriter) error
+}
+
+type CreateSaleDraft201JSONResponse SaleDraft
+
+func (response CreateSaleDraft201JSONResponse) VisitCreateSaleDraftResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSaleDraft400JSONResponse struct{ ValidationFailedJSONResponse }
+
+func (response CreateSaleDraft400JSONResponse) VisitCreateSaleDraftResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSaleDraft401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CreateSaleDraft401JSONResponse) VisitCreateSaleDraftResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSaleDraft403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response CreateSaleDraft403JSONResponse) VisitCreateSaleDraftResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSaleDraft404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CreateSaleDraft404JSONResponse) VisitCreateSaleDraftResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateSaleDraft409JSONResponse Error
+
+func (response CreateSaleDraft409JSONResponse) VisitCreateSaleDraftResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteSaleDraftRequestObject struct {
+	Id openapi_types.UUID `json:"id"`
+}
+
+type DeleteSaleDraftResponseObject interface {
+	VisitDeleteSaleDraftResponse(w http.ResponseWriter) error
+}
+
+type DeleteSaleDraft204Response struct {
+}
+
+func (response DeleteSaleDraft204Response) VisitDeleteSaleDraftResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteSaleDraft401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response DeleteSaleDraft401JSONResponse) VisitDeleteSaleDraftResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteSaleDraft403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response DeleteSaleDraft403JSONResponse) VisitDeleteSaleDraftResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteSaleDraft404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeleteSaleDraft404JSONResponse) VisitDeleteSaleDraftResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSaleDraftRequestObject struct {
+	Id openapi_types.UUID `json:"id"`
+}
+
+type GetSaleDraftResponseObject interface {
+	VisitGetSaleDraftResponse(w http.ResponseWriter) error
+}
+
+type GetSaleDraft200JSONResponse SaleDraft
+
+func (response GetSaleDraft200JSONResponse) VisitGetSaleDraftResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSaleDraft401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response GetSaleDraft401JSONResponse) VisitGetSaleDraftResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSaleDraft403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetSaleDraft403JSONResponse) VisitGetSaleDraftResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSaleDraft404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetSaleDraft404JSONResponse) VisitGetSaleDraftResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateSaleDraftRequestObject struct {
+	Id   openapi_types.UUID `json:"id"`
+	Body *UpdateSaleDraftJSONRequestBody
+}
+
+type UpdateSaleDraftResponseObject interface {
+	VisitUpdateSaleDraftResponse(w http.ResponseWriter) error
+}
+
+type UpdateSaleDraft200JSONResponse SaleDraft
+
+func (response UpdateSaleDraft200JSONResponse) VisitUpdateSaleDraftResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateSaleDraft400JSONResponse struct{ ValidationFailedJSONResponse }
+
+func (response UpdateSaleDraft400JSONResponse) VisitUpdateSaleDraftResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateSaleDraft401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response UpdateSaleDraft401JSONResponse) VisitUpdateSaleDraftResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateSaleDraft403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response UpdateSaleDraft403JSONResponse) VisitUpdateSaleDraftResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateSaleDraft404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response UpdateSaleDraft404JSONResponse) VisitUpdateSaleDraftResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateSaleDraft409JSONResponse Error
+
+func (response UpdateSaleDraft409JSONResponse) VisitUpdateSaleDraftResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteSaleDraftRequestObject struct {
+	Id     openapi_types.UUID `json:"id"`
+	Params CompleteSaleDraftParams
+	Body   *CompleteSaleDraftJSONRequestBody
+}
+
+type CompleteSaleDraftResponseObject interface {
+	VisitCompleteSaleDraftResponse(w http.ResponseWriter) error
+}
+
+type CompleteSaleDraft201JSONResponse Sale
+
+func (response CompleteSaleDraft201JSONResponse) VisitCompleteSaleDraftResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteSaleDraft400JSONResponse struct{ ValidationFailedJSONResponse }
+
+func (response CompleteSaleDraft400JSONResponse) VisitCompleteSaleDraftResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteSaleDraft401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CompleteSaleDraft401JSONResponse) VisitCompleteSaleDraftResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteSaleDraft403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response CompleteSaleDraft403JSONResponse) VisitCompleteSaleDraftResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteSaleDraft404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CompleteSaleDraft404JSONResponse) VisitCompleteSaleDraftResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteSaleDraft409JSONResponse Error
+
+func (response CompleteSaleDraft409JSONResponse) VisitCompleteSaleDraftResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompleteSaleDraft422JSONResponse Error
+
+func (response CompleteSaleDraft422JSONResponse) VisitCompleteSaleDraftResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetSaleRequestObject struct {
 	Id openapi_types.UUID `json:"id"`
 }
@@ -8988,6 +9787,24 @@ type StrictServerInterface interface {
 	// CreateSale Complete a quick sale.
 	// (POST /sales)
 	CreateSale(ctx context.Context, request CreateSaleRequestObject) (CreateSaleResponseObject, error)
+	// ListSaleDrafts List the shop's draft sales.
+	// (GET /sales/drafts)
+	ListSaleDrafts(ctx context.Context, request ListSaleDraftsRequestObject) (ListSaleDraftsResponseObject, error)
+	// CreateSaleDraft Save a draft sale.
+	// (POST /sales/drafts)
+	CreateSaleDraft(ctx context.Context, request CreateSaleDraftRequestObject) (CreateSaleDraftResponseObject, error)
+	// DeleteSaleDraft Delete a draft sale.
+	// (DELETE /sales/drafts/{id})
+	DeleteSaleDraft(ctx context.Context, request DeleteSaleDraftRequestObject) (DeleteSaleDraftResponseObject, error)
+	// GetSaleDraft Get a draft sale.
+	// (GET /sales/drafts/{id})
+	GetSaleDraft(ctx context.Context, request GetSaleDraftRequestObject) (GetSaleDraftResponseObject, error)
+	// UpdateSaleDraft Edit a draft sale.
+	// (PATCH /sales/drafts/{id})
+	UpdateSaleDraft(ctx context.Context, request UpdateSaleDraftRequestObject) (UpdateSaleDraftResponseObject, error)
+	// CompleteSaleDraft Complete a draft sale.
+	// (POST /sales/drafts/{id}/complete)
+	CompleteSaleDraft(ctx context.Context, request CompleteSaleDraftRequestObject) (CompleteSaleDraftResponseObject, error)
 	// GetSale Get a sale.
 	// (GET /sales/{id})
 	GetSale(ctx context.Context, request GetSaleRequestObject) (GetSaleResponseObject, error)
@@ -10368,6 +11185,182 @@ func (sh *strictHandler) CreateSale(w http.ResponseWriter, r *http.Request, para
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(CreateSaleResponseObject); ok {
 		if err := validResponse.VisitCreateSaleResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListSaleDrafts operation middleware
+func (sh *strictHandler) ListSaleDrafts(w http.ResponseWriter, r *http.Request, params ListSaleDraftsParams) {
+	var request ListSaleDraftsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListSaleDrafts(ctx, request.(ListSaleDraftsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListSaleDrafts")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListSaleDraftsResponseObject); ok {
+		if err := validResponse.VisitListSaleDraftsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateSaleDraft operation middleware
+func (sh *strictHandler) CreateSaleDraft(w http.ResponseWriter, r *http.Request) {
+	var request CreateSaleDraftRequestObject
+
+	var body CreateSaleDraftJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateSaleDraft(ctx, request.(CreateSaleDraftRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateSaleDraft")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateSaleDraftResponseObject); ok {
+		if err := validResponse.VisitCreateSaleDraftResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteSaleDraft operation middleware
+func (sh *strictHandler) DeleteSaleDraft(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	var request DeleteSaleDraftRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteSaleDraft(ctx, request.(DeleteSaleDraftRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteSaleDraft")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteSaleDraftResponseObject); ok {
+		if err := validResponse.VisitDeleteSaleDraftResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetSaleDraft operation middleware
+func (sh *strictHandler) GetSaleDraft(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	var request GetSaleDraftRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetSaleDraft(ctx, request.(GetSaleDraftRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetSaleDraft")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetSaleDraftResponseObject); ok {
+		if err := validResponse.VisitGetSaleDraftResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateSaleDraft operation middleware
+func (sh *strictHandler) UpdateSaleDraft(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	var request UpdateSaleDraftRequestObject
+
+	request.Id = id
+
+	var body UpdateSaleDraftJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateSaleDraft(ctx, request.(UpdateSaleDraftRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateSaleDraft")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateSaleDraftResponseObject); ok {
+		if err := validResponse.VisitUpdateSaleDraftResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CompleteSaleDraft operation middleware
+func (sh *strictHandler) CompleteSaleDraft(w http.ResponseWriter, r *http.Request, id openapi_types.UUID, params CompleteSaleDraftParams) {
+	var request CompleteSaleDraftRequestObject
+
+	request.Id = id
+	request.Params = params
+
+	var body CompleteSaleDraftJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CompleteSaleDraft(ctx, request.(CompleteSaleDraftRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CompleteSaleDraft")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CompleteSaleDraftResponseObject); ok {
+		if err := validResponse.VisitCompleteSaleDraftResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
