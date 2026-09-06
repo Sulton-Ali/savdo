@@ -199,6 +199,19 @@ describe("SaleDraftDetailPage", () => {
     expect(screen.getAllByText("100,000").length).toBeGreaterThanOrEqual(2);
   });
 
+  it("appends the discount reason to the discount field", async () => {
+    renderPage(
+      draftFixture({
+        discount: { type: "percent", value: "10.00" },
+        discountReason: "loyal customer",
+      }),
+      "someone-else",
+      ["sales.void"],
+    );
+
+    expect(await screen.findByText("Percent 10.00% — loyal customer")).toBeTruthy();
+  });
+
   it("tags an unavailable line and excludes it visually from the price columns", async () => {
     renderPage(
       draftFixture({
