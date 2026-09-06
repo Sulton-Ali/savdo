@@ -252,6 +252,26 @@ export type CartAction =
    * reasoning). Idempotent — dispatching it again once already `true` is
    * a no-op. */
   | { type: "completionAttempted" }
+  /** Set by the screen once a `complete` attempt's outcome is no longer
+   * unknown — a *decoded* server response settles it either way; a
+   * success already routes through `completed` below (which clears
+   * everything), so this is dispatched only for a decoded *failure*
+   * (`404` naming a gone location/customer, `409
+   * STOCK_INSUFFICIENT`/`DISCOUNT_EXCEEDS_SUBTOTAL`, `422`, `403`, …).
+   * Resets `completionAttempted` to `false` so `isCartReadOnly` lifts
+   * and `planDraftPay` PATCHes again on the next Pay, letting the
+   * cashier fix whatever the error named — attach a new customer,
+   * pick a new location, remove a bad line — instead of being stuck
+   * read-only forever after one recoverable failure (T14 fix round,
+   * Opus review MAJOR 1). Keeps the same `idempotencyKey`: the
+   * server's `Idempotent` helper only stores a key once its request
+   * *succeeds*, so a key whose only known outcome is a decoded failure
+   * was never stored and is safe to reuse for the corrected retry.
+   * Only an *undecoded* failure (a network drop/timeout — the one case
+   * where the request might already have committed) leaves
+   * `completionAttempted` `true`, same as before. Idempotent, same
+   * pattern as `completionAttempted` above. */
+  | { type: "completionOutcomeKnown" }
   /** Detaches the cart from a draft that is now confirmed gone (`404
    * NOT_FOUND` on either leg of Pay, not naming an unavailable variant —
    * `nextAfterDraftPayError`'s `"draftGone"`) without discarding the
@@ -573,6 +593,8 @@ export function cartReducer(state: CartState, action: CartAction): CartState {
       return { ...state, dirty: true };
     case "completionAttempted":
       return state.completionAttempted ? state : { ...state, completionAttempted: true };
+    case "completionOutcomeKnown":
+      return state.completionAttempted ? { ...state, completionAttempted: false } : state;
     case "unlinkDraft":
       return {
         ...state,
@@ -937,25 +959,26 @@ export function nextAfterDraftPayError(input: DraftPayErrorInput): DraftPayError
 }
 
 /**
- * Once a `POST .../complete` attempt has been sent for the loaded draft
- * (`CartState.completionAttempted`), the cart becomes read-only in the
- * UI — lines, qty, discount, customer, note and location controls all
- * disabled; only Pay (a same-key retry) and Clear/Unlink stay active
- * (T14 fix round, Opus review CRITICAL). Before this, an edit made while
- * the first attempt's outcome was still unknown was silently never sent
- * to the server: `planDraftPay` never PATCHes again once
- * `completionAttempted` is `true` (its own doc comment has the full
- * reasoning — a PATCH after an attempt that might have already committed
- * could race with, or paper over, a `complete` that already succeeded),
- * so the cashier's own further edits looked accepted in the UI but were
- * simply discarded on the next Pay/Save (the matching MINOR this same
- * fix round closes). Making the cart read-only instead makes that
- * impossible: there is nothing left to silently lose. A thin, named
- * wrapper around `CartState.completionAttempted` — not a new field of
- * its own — so `sale/index.tsx` reads intent rather than a raw flag, and
- * so this one-line rule is pinned in Vitest without needing a full
- * `SaleScreen` render (D-85: only pure, RN-free logic is Vitest-testable
- * here).
+ * The cart is read-only in the UI — lines, qty, discount, customer,
+ * note, location and payment-method controls all disabled; only Pay (a
+ * same-key retry) and Clear/Unlink stay active — for exactly as long as
+ * a sent `complete` attempt's outcome stays unknown (T14 fix round,
+ * Opus review CRITICAL, MAJOR 1): `completionAttempted` sets this the
+ * moment `complete` is sent, and `completionOutcomeKnown` lifts it again
+ * the moment a *decoded* response settles the question one way or the
+ * other (its own doc comment has the full reasoning) — only an
+ * undecoded network failure leaves it `true`, since that is the one
+ * outcome a retry can't safely assume either way. Before
+ * `completionOutcomeKnown` existed, an edit made after ANY complete
+ * failure (not only an ambiguous one) was silently never sent to the
+ * server: `planDraftPay` never PATCHes again once `completionAttempted`
+ * is `true` (its own doc comment), so a cashier stuck on a genuinely
+ * fixable error (a gone customer, say) had no way back into an editable
+ * cart short of abandoning the draft. A thin, named wrapper around
+ * `CartState.completionAttempted` — not a new field of its own — so
+ * `sale/index.tsx` reads intent rather than a raw flag, and so this
+ * one-line rule is pinned in Vitest without needing a full `SaleScreen`
+ * render (D-85: only pure, RN-free logic is Vitest-testable here).
  */
 export function isCartReadOnly(cart: CartState): boolean {
   return cart.completionAttempted;

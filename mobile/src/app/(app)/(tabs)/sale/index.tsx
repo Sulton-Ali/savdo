@@ -455,20 +455,15 @@ export default function SaleScreen() {
       // device smoke).
       setCompletedSale(null);
       setSavedDraft(null);
+      // A stale error/line-error from whatever this screen was doing
+      // before "Edit" landed here must not linger over the freshly
+      // loaded draft's own form (T14 fix round, Opus review MINOR).
+      setGeneralError(null);
+      setPossiblyRecorded(false);
+      setLineErrors({});
       const draftLocation = activeLocations.find((l) => l.id === draft.locationId);
       if (draftLocation) {
         setSelectedLocation(draftLocation);
-      } else {
-        // The draft's own stored location has since been deactivated or
-        // deleted — never silently keep whatever location this screen
-        // happened to have selected before (its own cashier's remembered
-        // default, say): `null` blocks Pay/Save via `formInvalid`'s
-        // existing check until the cashier deliberately picks one, which
-        // (via `handlePickLocation`'s own `markDirty`) is exactly what
-        // this draft needs PATCHed onto it before it can complete (T14
-        // fix round, Opus review MINOR 4).
-        setSelectedLocation(null);
-        setGeneralError(t("mobile.sale.errors.draftLocationGone"));
       }
       dispatch({
         type: "loadDraft",
@@ -478,6 +473,24 @@ export default function SaleScreen() {
         note: draft.note ?? "",
         idempotencyKey: generateIdempotencyKey(),
       });
+      if (!draftLocation) {
+        // The draft's own stored location has since been deactivated or
+        // deleted — never fall back to `null` (the location-bootstrap
+        // effect above would just silently re-select its own default the
+        // very next render anyway, `selectedLocation`'s own doc comment):
+        // dispatch `markDirty` right here instead — after `loadDraft`
+        // above, which would otherwise overwrite it — so *whatever*
+        // location this screen is already showing (the cashier's own
+        // remembered/default one) is exactly what the next Pay PATCHes
+        // onto the draft before completing it (`planDraftPay`), never the
+        // deactivated one; the message below names it so the cashier can
+        // change it first if that's not where this sale should book (T14
+        // fix round, Opus review CRITICAL).
+        dispatch({ type: "markDirty" });
+        setGeneralError(
+          t("mobile.sale.errors.draftLocationGone", { location: selectedLocation?.name ?? "" }),
+        );
+      }
       setDiscountKind(draft.discount ? draft.discount.type : "none");
       setDraftCustomerId(draft.customerId);
     }
@@ -490,7 +503,24 @@ export default function SaleScreen() {
     // same as before.
     if (cart.lines.length > 0 && !cart.draftId) {
       Alert.alert(t("mobile.drafts.replaceCartConfirm.title"), undefined, [
-        { text: t("common.cancel"), style: "cancel" },
+        {
+          text: t("common.cancel"),
+          style: "cancel",
+          // Only the URL param clears on Cancel — `appliedDraftIdRef`
+          // stays untouched, unlike the branch that actually applies the
+          // draft (`applyDraftToCart`'s own comment). Clearing the param
+          // (rather than leaving it) is what lets a *later* "Edit" tap on
+          // this same draft re-trigger this effect at all: `draftIdParam`
+          // needs a real value change (`undefined` -> the id again) to
+          // re-run, since pushing the exact same id it already holds
+          // wouldn't look like a change to this effect's own dependency
+          // array. Clearing it also means an unrelated edit made to this
+          // cart right after Cancel (adding a line, say) does not
+          // re-trigger this same prompt — the effect's very first guard
+          // (`!draftIdParam`) now returns before ever reaching it (T14 fix
+          // round, Opus review MAJOR 3).
+          onPress: () => router.setParams({ draftId: undefined }),
+        },
         {
           text: t("mobile.drafts.replaceCartConfirm.replace"),
           style: "destructive",
@@ -505,6 +535,7 @@ export default function SaleScreen() {
     draftQuery.data,
     locationHydrated,
     activeLocations,
+    selectedLocation?.name,
     router,
     t,
     cart.lines.length,
@@ -905,6 +936,18 @@ export default function SaleScreen() {
   function handleCompleteLegError(error: unknown, isRetry: boolean) {
     const code = error instanceof SalesApiError ? error.code : undefined;
     const details = error instanceof SalesApiError ? error.details : undefined;
+    // A decoded server response — success or failure — is the server's
+    // own final answer, never an unknown outcome: lift the read-only
+    // state right away so the cashier can fix whatever the error named
+    // (a gone customer/location, a bad line, an over-large discount, …)
+    // and Pay again, which will PATCH the fix in before completing
+    // (`planDraftPay`, once whichever fix-up below marks the cart dirty)
+    // — T14 fix round, Opus review MAJOR 1. Only an *undecoded* network
+    // failure (`code === undefined`) leaves `completionAttempted` `true`,
+    // since that request's outcome genuinely isn't known yet.
+    if (code !== undefined) {
+      dispatch({ type: "completionOutcomeKnown" });
+    }
     const action = nextAfterDraftPayError({
       leg: "complete",
       code,
@@ -1397,6 +1440,13 @@ export default function SaleScreen() {
               <Button
                 key={method}
                 size="sm"
+                // Changing the payment method mid-read-only would change
+                // the body a same-key `complete` retry sends — the exact
+                // "same request under the same key" the idempotent replay
+                // (`sendDraftComplete`) relies on to safely resolve an
+                // attempt whose outcome is unknown (T14 fix round, Opus
+                // review MINOR).
+                disabled={readOnly}
                 className="h-auto min-h-9 flex-1 py-2"
                 variant={paymentMethod === method ? "default" : "outline"}
                 onPress={() => setPaymentMethod(method)}

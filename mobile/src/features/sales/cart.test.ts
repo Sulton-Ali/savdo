@@ -504,6 +504,32 @@ describe("T14 draft integration", () => {
     expect(twice).toBe(once); // same reference — a true-to-true dispatch is a no-op
   });
 
+  it("completionOutcomeKnown clears completionAttempted, re-enabling editing, without touching anything else", () => {
+    const attempted = cartReducer(
+      cartReducer(addA(initialCartState(), 1), {
+        type: "loadDraft",
+        draftId: "draft-1",
+        lines: [],
+        discount: null,
+        note: "",
+        idempotencyKey: "key-1",
+      }),
+      { type: "completionAttempted" },
+    );
+    const known = cartReducer(attempted, { type: "completionOutcomeKnown" });
+    expect(known.completionAttempted).toBe(false);
+    expect(known.draftId).toBe(attempted.draftId);
+    expect(known.dirty).toBe(attempted.dirty);
+    expect(known.lines).toEqual(attempted.lines);
+    expect(known.idempotencyKey).toBe(attempted.idempotencyKey);
+  });
+
+  it("completionOutcomeKnown is a no-op when nothing was attempted", () => {
+    const state = initialCartState();
+    const next = cartReducer(state, { type: "completionOutcomeKnown" });
+    expect(next).toBe(state); // same reference — a false-to-false dispatch is a no-op
+  });
+
   it("loadDraft replaces the whole cart with the draft's own state, clean and unattempted", () => {
     const before = addA(initialCartState(), 3);
     const loaded = cartReducer(before, {
@@ -821,6 +847,12 @@ describe("isCartReadOnly", () => {
     const attempted = cartReducer(initialCartState(), { type: "completionAttempted" });
     const unlinked = cartReducer(attempted, { type: "unlinkDraft", idempotencyKey: "k2" });
     expect(isCartReadOnly(unlinked)).toBe(false);
+  });
+
+  it("is false again once the outcome is known (a decoded, recoverable failure)", () => {
+    const attempted = cartReducer(initialCartState(), { type: "completionAttempted" });
+    const known = cartReducer(attempted, { type: "completionOutcomeKnown" });
+    expect(isCartReadOnly(known)).toBe(false);
   });
 });
 
