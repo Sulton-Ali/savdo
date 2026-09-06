@@ -7,6 +7,7 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -85,7 +86,7 @@ type DeleteSaleDraftParams struct {
 }
 
 // Hard delete (D-89: drafts are hard-deleted, no ledger effect). The
-// ON DELETE CASCADE on sale_draft_items.draft_id (0017_sale_drafts.sql)
+// ON DELETE CASCADE on sale_draft_items.sale_draft_id (0017_sale_drafts.sql)
 // removes its lines in the same statement; DeleteSaleDraftItems above
 // exists only for the PATCH replace-items path, not for this delete.
 func (q *Queries) DeleteSaleDraft(ctx context.Context, arg DeleteSaleDraftParams) (int64, error) {
@@ -98,12 +99,12 @@ func (q *Queries) DeleteSaleDraft(ctx context.Context, arg DeleteSaleDraftParams
 
 const deleteSaleDraftItems = `-- name: DeleteSaleDraftItems :execrows
 DELETE FROM sale_draft_items
-WHERE shop_id = $1 AND draft_id = $2
+WHERE shop_id = $1 AND sale_draft_id = $2
 `
 
 type DeleteSaleDraftItemsParams struct {
-	ShopID  uuid.UUID `json:"shop_id"`
-	DraftID uuid.UUID `json:"draft_id"`
+	ShopID      uuid.UUID `json:"shop_id"`
+	SaleDraftID uuid.UUID `json:"sale_draft_id"`
 }
 
 // Join rows, hard-deleted (§ 04-DATA-MODEL.md rule 7); used by the
@@ -112,7 +113,7 @@ type DeleteSaleDraftItemsParams struct {
 // DeletePurchaseItems there is no status guard here — a draft has no
 // status, it is editable until it is completed or deleted.
 func (q *Queries) DeleteSaleDraftItems(ctx context.Context, arg DeleteSaleDraftItemsParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteSaleDraftItems, arg.ShopID, arg.DraftID)
+	result, err := q.db.Exec(ctx, deleteSaleDraftItems, arg.ShopID, arg.SaleDraftID)
 	if err != nil {
 		return 0, err
 	}
@@ -183,18 +184,18 @@ func (q *Queries) GetSaleDraftForUpdate(ctx context.Context, arg GetSaleDraftFor
 }
 
 const insertSaleDraftItem = `-- name: InsertSaleDraftItem :one
-INSERT INTO sale_draft_items (id, shop_id, draft_id, variant_id, qty, position)
+INSERT INTO sale_draft_items (id, shop_id, sale_draft_id, variant_id, qty, position)
 VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, shop_id, draft_id, variant_id, qty, position, created_at
+RETURNING id, shop_id, sale_draft_id, variant_id, qty, position, created_at
 `
 
 type InsertSaleDraftItemParams struct {
-	ID        uuid.UUID      `json:"id"`
-	ShopID    uuid.UUID      `json:"shop_id"`
-	DraftID   uuid.UUID      `json:"draft_id"`
-	VariantID uuid.UUID      `json:"variant_id"`
-	Qty       pgtype.Numeric `json:"qty"`
-	Position  int32          `json:"position"`
+	ID          uuid.UUID      `json:"id"`
+	ShopID      uuid.UUID      `json:"shop_id"`
+	SaleDraftID uuid.UUID      `json:"sale_draft_id"`
+	VariantID   uuid.UUID      `json:"variant_id"`
+	Qty         pgtype.Numeric `json:"qty"`
+	Position    int32          `json:"position"`
 }
 
 // One line. No price/cost column (D-87) — qty and position only; the
@@ -203,7 +204,7 @@ func (q *Queries) InsertSaleDraftItem(ctx context.Context, arg InsertSaleDraftIt
 	row := q.db.QueryRow(ctx, insertSaleDraftItem,
 		arg.ID,
 		arg.ShopID,
-		arg.DraftID,
+		arg.SaleDraftID,
 		arg.VariantID,
 		arg.Qty,
 		arg.Position,
@@ -212,7 +213,7 @@ func (q *Queries) InsertSaleDraftItem(ctx context.Context, arg InsertSaleDraftIt
 	err := row.Scan(
 		&i.ID,
 		&i.ShopID,
-		&i.DraftID,
+		&i.SaleDraftID,
 		&i.VariantID,
 		&i.Qty,
 		&i.Position,
@@ -222,21 +223,21 @@ func (q *Queries) InsertSaleDraftItem(ctx context.Context, arg InsertSaleDraftIt
 }
 
 const listSaleDraftItems = `-- name: ListSaleDraftItems :many
-SELECT id, shop_id, draft_id, variant_id, qty, position, created_at FROM sale_draft_items
-WHERE shop_id = $1 AND draft_id = $2
+SELECT id, shop_id, sale_draft_id, variant_id, qty, position, created_at FROM sale_draft_items
+WHERE shop_id = $1 AND sale_draft_id = $2
 ORDER BY position, id
 `
 
 type ListSaleDraftItemsParams struct {
-	ShopID  uuid.UUID `json:"shop_id"`
-	DraftID uuid.UUID `json:"draft_id"`
+	ShopID      uuid.UUID `json:"shop_id"`
+	SaleDraftID uuid.UUID `json:"sale_draft_id"`
 }
 
 // Ordered by position (line order), `, id` tiebreaker for determinism if
 // two lines ever share a position (same reasoning as
 // ListPurchaseItems/ListVariantsForStaff's own tiebreakers).
 func (q *Queries) ListSaleDraftItems(ctx context.Context, arg ListSaleDraftItemsParams) ([]SaleDraftItem, error) {
-	rows, err := q.db.Query(ctx, listSaleDraftItems, arg.ShopID, arg.DraftID)
+	rows, err := q.db.Query(ctx, listSaleDraftItems, arg.ShopID, arg.SaleDraftID)
 	if err != nil {
 		return nil, err
 	}
@@ -247,11 +248,115 @@ func (q *Queries) ListSaleDraftItems(ctx context.Context, arg ListSaleDraftItems
 		if err := rows.Scan(
 			&i.ID,
 			&i.ShopID,
-			&i.DraftID,
+			&i.SaleDraftID,
 			&i.VariantID,
 			&i.Qty,
 			&i.Position,
 			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSaleDraftItemsForPricing = `-- name: ListSaleDraftItemsForPricing :many
+SELECT
+    sdi.sale_draft_id, sdi.id, sdi.variant_id, sdi.qty, sdi.position,
+    pv.sku AS variant_sku, pv.attributes AS variant_attributes, pv.price_override,
+    (pv.is_active AND pv.deleted_at IS NULL) AS variant_available,
+    p.id AS product_id,
+    (p.is_active AND p.deleted_at IS NULL) AS product_available,
+    p.base_price, p.promo_price, p.promo_from, p.promo_to,
+    COALESCE(t.name, '') AS product_name
+FROM sale_draft_items sdi
+JOIN product_variants pv ON pv.id = sdi.variant_id AND pv.shop_id = sdi.shop_id
+JOIN products p ON p.id = pv.product_id AND p.shop_id = sdi.shop_id
+LEFT JOIN LATERAL (
+    SELECT pt.name
+    FROM product_translations pt
+    WHERE pt.product_id = p.id
+    ORDER BY
+        CASE
+            WHEN pt.locale = $1 THEN 0
+            WHEN pt.locale = 'uz' THEN 1
+            ELSE 2
+        END
+    LIMIT 1
+) t ON true
+WHERE sdi.shop_id = $2 AND sdi.sale_draft_id = ANY($3::uuid[])
+ORDER BY sdi.sale_draft_id, sdi.position, sdi.id
+`
+
+type ListSaleDraftItemsForPricingParams struct {
+	Locale       string      `json:"locale"`
+	ShopID       uuid.UUID   `json:"shop_id"`
+	SaleDraftIds []uuid.UUID `json:"sale_draft_ids"`
+}
+
+type ListSaleDraftItemsForPricingRow struct {
+	SaleDraftID       uuid.UUID       `json:"sale_draft_id"`
+	ID                uuid.UUID       `json:"id"`
+	VariantID         uuid.UUID       `json:"variant_id"`
+	Qty               pgtype.Numeric  `json:"qty"`
+	Position          int32           `json:"position"`
+	VariantSku        *string         `json:"variant_sku"`
+	VariantAttributes json.RawMessage `json:"variant_attributes"`
+	PriceOverride     pgtype.Numeric  `json:"price_override"`
+	VariantAvailable  *bool           `json:"variant_available"`
+	ProductID         uuid.UUID       `json:"product_id"`
+	ProductAvailable  *bool           `json:"product_available"`
+	BasePrice         pgtype.Numeric  `json:"base_price"`
+	PromoPrice        pgtype.Numeric  `json:"promo_price"`
+	PromoFrom         *time.Time      `json:"promo_from"`
+	PromoTo           *time.Time      `json:"promo_to"`
+	ProductName       string          `json:"product_name"`
+}
+
+// Batched replacement for a per-line GetVariantForCashier +
+// GetProductForCashier round trip (review MAJOR: N+1 in ListSaleDrafts):
+// one query prices every line of every draft named in sale_draft_ids at
+// once, the same ANY($ids) batching ListCoverImagesForProducts already
+// uses for D-83. Cost-free (product_variants/products columns only, no
+// cost_price/cost_override) — a draft never exposes cost to any role
+// (§ 04-DATA-MODEL.md rule 8). Plain (not LEFT) JOINs are safe here: the
+// NOT NULL FK on both product_variants.id and products.id blocks a hard
+// delete while a draft line still references them (rule 7), so a row
+// always resolves even after a soft delete — variant_available/
+// product_available surface that state (deleted_at IS NULL AND
+// is_active) instead of a missing row, so the service can render the
+// line with available: false rather than erroring (review CRITICAL:
+// priceDraftItems must not 500 on an inactive/soft-deleted line).
+func (q *Queries) ListSaleDraftItemsForPricing(ctx context.Context, arg ListSaleDraftItemsForPricingParams) ([]ListSaleDraftItemsForPricingRow, error) {
+	rows, err := q.db.Query(ctx, listSaleDraftItemsForPricing, arg.Locale, arg.ShopID, arg.SaleDraftIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSaleDraftItemsForPricingRow
+	for rows.Next() {
+		var i ListSaleDraftItemsForPricingRow
+		if err := rows.Scan(
+			&i.SaleDraftID,
+			&i.ID,
+			&i.VariantID,
+			&i.Qty,
+			&i.Position,
+			&i.VariantSku,
+			&i.VariantAttributes,
+			&i.PriceOverride,
+			&i.VariantAvailable,
+			&i.ProductID,
+			&i.ProductAvailable,
+			&i.BasePrice,
+			&i.PromoPrice,
+			&i.PromoFrom,
+			&i.PromoTo,
+			&i.ProductName,
 		); err != nil {
 			return nil, err
 		}

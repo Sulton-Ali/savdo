@@ -661,13 +661,13 @@ type SaleDraft struct {
 }
 
 type SaleDraftItem struct {
-	ID        uuid.UUID      `json:"id"`
-	ShopID    uuid.UUID      `json:"shop_id"`
-	DraftID   uuid.UUID      `json:"draft_id"`
-	VariantID uuid.UUID      `json:"variant_id"`
-	Qty       pgtype.Numeric `json:"qty"`
-	Position  int32          `json:"position"`
-	CreatedAt time.Time      `json:"created_at"`
+	ID          uuid.UUID      `json:"id"`
+	ShopID      uuid.UUID      `json:"shop_id"`
+	SaleDraftID uuid.UUID      `json:"sale_draft_id"`
+	VariantID   uuid.UUID      `json:"variant_id"`
+	Qty         pgtype.Numeric `json:"qty"`
+	Position    int32          `json:"position"`
+	CreatedAt   time.Time      `json:"created_at"`
 }
 
 type SaleItem struct {

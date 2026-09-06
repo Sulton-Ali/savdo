@@ -54,26 +54,32 @@ CREATE INDEX sale_drafts_shop_id_created_at_idx ON sale_drafts (shop_id, created
 -- hard-deleted this way. No price or cost column (D-87): prices are
 -- computed at read time and frozen only on completion, in sale_items.
 CREATE TABLE sale_draft_items (
-    id          uuid PRIMARY KEY,
-    shop_id     uuid NOT NULL REFERENCES shops (id),
-    draft_id    uuid NOT NULL REFERENCES sale_drafts (id) ON DELETE CASCADE,
+    id            uuid PRIMARY KEY,
+    shop_id       uuid NOT NULL REFERENCES shops (id),
+    -- Named sale_draft_id, not draft_id (docs/04-DATA-MODEL.md § 4's own
+    -- "sale_draft_items — sale_draft_id, ..." column list — the doc is
+    -- the spec; this migration is still unmerged, so the column follows
+    -- it rather than the other way around) — mirrors the
+    -- table-name-prefixed FK convention every other join column in this
+    -- schema already uses (sale_items.sale_id, purchase_items.purchase_id).
+    sale_draft_id uuid NOT NULL REFERENCES sale_drafts (id) ON DELETE CASCADE,
     -- No cascade off product_variants (§ 04-DATA-MODEL.md rule 7): a
     -- variant referenced by a draft line can never be hard-deleted,
     -- same as sale_items.variant_id/purchase_items.variant_id.
-    variant_id  uuid NOT NULL REFERENCES product_variants (id),
-    qty         numeric(12,3) NOT NULL,
+    variant_id    uuid NOT NULL REFERENCES product_variants (id),
+    qty           numeric(12,3) NOT NULL,
     -- Display order within the draft, service-assigned (0-based or
     -- 1-based, the service's choice) so PATCH .../drafts/{id} replacing
     -- `items` reproduces the client's line order on the next read.
-    position    integer NOT NULL,
-    created_at  timestamptz NOT NULL DEFAULT now(),
+    position      integer NOT NULL,
+    created_at    timestamptz NOT NULL DEFAULT now(),
     CHECK (qty > 0)
 );
 
 CREATE INDEX sale_draft_items_shop_id_idx ON sale_draft_items (shop_id);
 CREATE INDEX sale_draft_items_variant_id_idx ON sale_draft_items (variant_id);
 -- ListSaleDraftItems' own lookup and ordering (by draft, by position).
-CREATE INDEX sale_draft_items_draft_id_position_idx ON sale_draft_items (draft_id, position);
+CREATE INDEX sale_draft_items_sale_draft_id_position_idx ON sale_draft_items (sale_draft_id, position);
 
 -- +goose Down
 DROP TABLE sale_draft_items;
