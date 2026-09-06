@@ -699,6 +699,8 @@
       "outageEscape": "Serverni almashtirish yoki chiqish",
       "menu": "Menyu",
       "tabs": {
+        "home": "Asosiy",
+        "quickSale": "Tezkor sotuv",
         "stock": "Qoldiq"
       }
     },

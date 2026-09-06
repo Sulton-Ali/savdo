@@ -699,6 +699,8 @@
       "outageEscape": "Change server or log out",
       "menu": "Menu",
       "tabs": {
+        "home": "Home",
+        "quickSale": "Quick sale",
         "stock": "Stock"
       }
     },

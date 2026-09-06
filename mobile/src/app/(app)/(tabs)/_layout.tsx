@@ -68,14 +68,21 @@ export default function AppTabsLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: t("nav.dashboard"),
+          // A mobile-only, shorter tab label — `nav.dashboard` ("Boshqaruv
+          // paneli"/"Панель управления") is fine for the admin web sidebar
+          // and this screen's own header, but truncates in the narrow tab
+          // bar (review nit).
+          title: t("mobile.shell.tabs.home"),
           tabBarIcon: ({ color, size }) => <Home color={color} size={size} />,
         }}
       />
       <Tabs.Screen
         name="sale"
         options={({ route }) => ({
-          title: t("nav.quickSale"),
+          // `nav.quickSale` ("Быстрая продажа" in Russian) truncates in the
+          // tab bar — same reason "index" below uses its own mobile-only
+          // key instead of `nav.dashboard` (review nit).
+          title: t("mobile.shell.tabs.quickSale"),
           tabBarIcon: ({ color, size }) => <ShoppingCart color={color} size={size} />,
           // Same rule as "products"/"stock" below: only the nested Stack's
           // initial "index" route reuses this outer header.
