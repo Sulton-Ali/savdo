@@ -5,6 +5,7 @@ import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   KeyboardAvoidingView,
   Modal,
@@ -24,7 +25,7 @@ import { useDebouncedValue, useLocations } from "@/features/catalog/hooks";
 import { resolveEffectivePrice } from "@/features/catalog/pricing";
 import { VariantPicker } from "@/features/catalog/VariantPicker";
 import type { Customer } from "@/features/customers/api";
-import { useCustomersSearch } from "@/features/customers/hooks";
+import { useCustomer, useCustomersSearch } from "@/features/customers/hooks";
 import {
   type PaymentMethod,
   type Sale,
@@ -32,6 +33,11 @@ import {
   SalesApiError,
 } from "@/features/sales/api";
 import {
+  buildDraftCreateBody,
+  buildDraftPatchBody,
+  cartDiscountFromDraft,
+  cartLinesFromDraftItems,
+  cartLinesToSaleItems,
   cartReducer,
   type DiscountKind,
   estimateCartTotals,
@@ -39,11 +45,20 @@ import {
   idempotencyOutcome,
   initialCartState,
   isValidDiscountValue,
-  isZeroDecimalString,
   multiplyMoneyByQty,
   qtyExceedsAvailable,
+  resolveSubmitDiscount,
+  resolveSubmitDiscountReason,
 } from "@/features/sales/cart";
-import { useCreateSale } from "@/features/sales/hooks";
+import { parseUnavailableLineIndexes } from "@/features/sales/drafts";
+import {
+  useCompleteSaleDraft,
+  useCreateSale,
+  useCreateSaleDraft,
+  useDeleteSaleDraft,
+  useDraft,
+  useUpdateSaleDraft,
+} from "@/features/sales/hooks";
 import { persistLocationId, readStoredLocationId } from "@/features/sales/locationStorage";
 import { formatMoney } from "@/lib/money";
 import { useSession } from "@/lib/session";
@@ -246,6 +261,7 @@ export default function SaleScreen() {
     attachCustomerId?: string;
     attachCustomerName?: string;
     attachCustomerPhone?: string;
+    draftId?: string;
   }>();
 
   const [cart, dispatch] = useReducer(cartReducer, undefined, initialCartState);
@@ -264,6 +280,10 @@ export default function SaleScreen() {
   // reused-key case.
   const [possiblyRecorded, setPossiblyRecorded] = useState(false);
   const [completedSale, setCompletedSale] = useState<Sale | null>(null);
+  // Set once `Save draft` succeeds (create or update) — a small success
+  // view, mirroring `completedSale` above, with a link to the saved draft
+  // instead of a sale number/total (T14 deliverable 1).
+  const [savedDraft, setSavedDraft] = useState<{ id: string } | null>(null);
 
   const {
     data: locations,
@@ -354,6 +374,71 @@ export default function SaleScreen() {
     });
   }, [params.attachCustomerId, params.attachCustomerName, params.attachCustomerPhone, router]);
 
+  // Edit a draft (T14): `drafts/[id].tsx`'s "Edit" pushes here with
+  // `?draftId=`. Waits for both the draft itself (`GET
+  // /sales/drafts/{id}`) and the shop's locations to have loaded — the
+  // latter so `draft.locationId` can be resolved to an actual `Location`
+  // the location picker knows about — then replaces the whole cart via
+  // `loadDraft` and applies the draft's location/customer/discount-kind
+  // onto this screen's own local state the same way the cart doesn't own
+  // any of those three. Applied at most once per draft id (mirrors the
+  // `attachCustomerId` effect above); the remembered-location bootstrap
+  // effect above may have already set a *default* `selectedLocation` by
+  // the time this runs — this deliberately overrides it with the draft's
+  // own location regardless, without persisting it as the new remembered
+  // default (editing someone else's draft must not change what a
+  // cashier's own next fresh sale defaults to).
+  const draftIdParam = params.draftId;
+  const draftQuery = useDraft(draftIdParam);
+  const appliedDraftIdRef = useRef<string | null>(null);
+  const [draftCustomerId, setDraftCustomerId] = useState<string | null>(null);
+  const draftCustomerQuery = useCustomer(draftCustomerId ?? undefined);
+  useEffect(() => {
+    if (!draftIdParam || draftIdParam === appliedDraftIdRef.current) {
+      return;
+    }
+    if (!draftQuery.data || !locationHydrated || activeLocations.length === 0) {
+      return;
+    }
+    const draft = draftQuery.data;
+    appliedDraftIdRef.current = draftIdParam;
+    // This tab's screen instance stays mounted across a tab switch (T12/
+    // D-90), so a still-showing success view from an earlier Pay/Save on
+    // this same screen (`completedSale`/`savedDraft`) would otherwise sit
+    // in front of the form this effect is about to fill — clear both so
+    // "Edit" always lands on the loaded draft, not a stale confirmation
+    // screen (found live during this task's own device smoke).
+    setCompletedSale(null);
+    setSavedDraft(null);
+    const draftLocation = activeLocations.find((l) => l.id === draft.locationId);
+    if (draftLocation) {
+      setSelectedLocation(draftLocation);
+    }
+    dispatch({
+      type: "loadDraft",
+      draftId: draft.id,
+      lines: cartLinesFromDraftItems(draft.items),
+      discount: cartDiscountFromDraft(draft.discount, draft.discountReason),
+      note: draft.note ?? "",
+      idempotencyKey: generateIdempotencyKey(),
+    });
+    setDiscountKind(draft.discount ? draft.discount.type : "none");
+    setDraftCustomerId(draft.customerId);
+    router.setParams({ draftId: undefined });
+  }, [draftIdParam, draftQuery.data, locationHydrated, activeLocations, router]);
+
+  // `SaleDraft.customerId` is only an id — this resolves it to a display
+  // name/phone for the customer row, same as `attachCustomerId` above.
+  useEffect(() => {
+    if (draftCustomerQuery.data) {
+      setCustomer({
+        id: draftCustomerQuery.data.id,
+        fullName: draftCustomerQuery.data.fullName,
+        phone: draftCustomerQuery.data.phone,
+      });
+    }
+  }, [draftCustomerQuery.data]);
+
   const discountValueInvalid =
     discountKind !== "none" &&
     cart.discount != null &&
@@ -398,6 +483,10 @@ export default function SaleScreen() {
   }
 
   const createSale = useCreateSale();
+  const createDraft = useCreateSaleDraft();
+  const updateDraft = useUpdateSaleDraft();
+  const deleteDraft = useDeleteSaleDraft();
+  const completeDraft = useCompleteSaleDraft();
 
   function handlePickLocation(location: Location) {
     setSelectedLocation(location);
@@ -462,99 +551,255 @@ export default function SaleScreen() {
     setPickerOpen(false);
   }
 
-  function handlePay() {
-    setGeneralError(null);
-    setPossiblyRecorded(false);
+  /** Shared by `handlePay` and `handleSaveDraft`: the location/cart-empty/
+   * discount-format checks every submit needs before building a body,
+   * `true` (and an error already set) when the form isn't ready. */
+  function formInvalid(): boolean {
     if (!selectedLocation) {
       setGeneralError(t("mobile.sale.locationRequired"));
-      return;
+      return true;
     }
     if (cart.lines.length === 0) {
       setGeneralError(t("sales.items.required"));
-      return;
+      return true;
     }
     if (discountValueInvalid) {
       setGeneralError(t("errors.field.invalid"));
+      return true;
+    }
+    return false;
+  }
+
+  /** Maps a `POST .../complete` error the same way for both the plain
+   * "Pay" flow and the "editing a loaded draft" Pay flow below — the
+   * error shapes are identical (`docs/05-API.md`'s complete row) even
+   * though one call is `POST /sales` and the other is `POST
+   * /sales/drafts/{id}/complete`. */
+  function handlePaymentError(error: unknown) {
+    if (error instanceof SalesApiError) {
+      if (error.code === "STOCK_INSUFFICIENT") {
+        const details = error.details as StockInsufficientDetails | undefined;
+        if (details?.variantId) {
+          setLineErrors((prev) => ({
+            ...prev,
+            [details.variantId as string]: t("sales.errors.stockInsufficient", {
+              available: details.available ?? "0",
+            }),
+          }));
+          return;
+        }
+      }
+      if (error.code === "VALIDATION_FAILED") {
+        // Only reachable completing a loaded draft (D-88: a line has gone
+        // unavailable since it was added) — `items[<i>].variantId` names
+        // an index into the body just sent, which is `cart.lines` in the
+        // same order (`cartLinesToSaleItems`), so it maps straight back to
+        // that line's `variantId`.
+        const fields = (error.details as { fields?: Record<string, string> } | undefined)?.fields;
+        const indexes = parseUnavailableLineIndexes(fields);
+        if (indexes.length > 0) {
+          setLineErrors((prev) => {
+            const next = { ...prev };
+            for (const index of indexes) {
+              const line = cart.lines[index];
+              if (line) {
+                next[line.variantId] = t("mobile.drafts.errors.lineUnavailable", {
+                  name: line.productName,
+                });
+              }
+            }
+            return next;
+          });
+          return;
+        }
+      }
+      if (error.code === "DISCOUNT_EXCEEDS_SUBTOTAL") {
+        setGeneralError(t("sales.errors.discountExceedsSubtotal"));
+        return;
+      }
+    }
+    // `idempotencyOutcome` takes the error's `code` when it was a
+    // decoded server response, else `undefined` — a network drop or
+    // a timeout never got as far as one, so its outcome is just as
+    // unknown as `IDEMPOTENCY_KEY_REUSED`'s (`possiblyRecorded`
+    // covers both), but only `IDEMPOTENCY_KEY_REUSED` actually
+    // proves the *current* key was already spent, so only that case
+    // mints a new one (T4 review CRITICAL: rekeying on an undecoded
+    // error would let a cashier's natural retry of the same cart
+    // create a second, real sale under a fresh key if the original
+    // request had actually reached the server and committed —
+    // `features/sales/cart.ts`'s own doc comments have the full
+    // reasoning).
+    const code = error instanceof SalesApiError ? error.code : undefined;
+    if (idempotencyOutcome(code) === "rekey") {
+      dispatch({ type: "rekey", idempotencyKey: generateIdempotencyKey() });
+      setGeneralError(t("sales.errors.idempotencyKeyReused"));
+      setPossiblyRecorded(true);
+      return;
+    }
+    if (!(error instanceof SalesApiError)) {
+      setGeneralError(t("mobile.sale.errors.networkUnknown"));
+      setPossiblyRecorded(true);
+      return;
+    }
+    setGeneralError(t("errors.generic"));
+  }
+
+  function handlePaymentSuccess(sale: Sale) {
+    setCompletedSale(sale);
+    dispatch({ type: "completed" });
+    setCustomer(null);
+    setDiscountKind("none");
+    setLineErrors({});
+  }
+
+  function handlePay() {
+    setGeneralError(null);
+    setPossiblyRecorded(false);
+    if (formInvalid() || !selectedLocation) {
       return;
     }
 
-    const hasDiscount =
-      discountKind !== "none" &&
-      cart.discount != null &&
-      cart.discount.value.trim() !== "" &&
-      isValidDiscountValue(discountKind, cart.discount.value) &&
-      !isZeroDecimalString(cart.discount.value);
+    // Editing a loaded draft (T14/D-87): Pay first replaces the draft's
+    // server-side state with whatever this screen currently shows
+    // (`buildDraftPatchBody`, same body `handleSaveDraft` would send),
+    // then completes it — so a qty/discount/customer change made on this
+    // screen before tapping Pay is never silently lost, and the draft
+    // itself is deleted server-side by the same completion (D-87)
+    // regardless of whether the patch changed anything. The `PATCH` has no
+    // `Idempotency-Key` of its own (not in the contract; a duplicate PATCH
+    // is naturally idempotent, it just re-replaces the same state) — only
+    // `.../complete` carries `cart.idempotencyKey`, exactly the semantics
+    // `createSale` already uses.
+    if (cart.draftId) {
+      const draftId = cart.draftId;
+      const patchBody = buildDraftPatchBody(cart, selectedLocation.id, customer?.id ?? null);
+      updateDraft.mutate(
+        { id: draftId, body: patchBody },
+        {
+          onSuccess: () => {
+            completeDraft.mutate(
+              { id: draftId, body: { paymentMethod }, idempotencyKey: cart.idempotencyKey },
+              { onSuccess: handlePaymentSuccess, onError: handlePaymentError },
+            );
+          },
+          onError: handlePaymentError,
+        },
+      );
+      return;
+    }
 
     const body: SaleCreate = {
       locationId: selectedLocation.id,
-      items: cart.lines.map((line) => ({ variantId: line.variantId, qty: String(line.qty) })),
+      items: cartLinesToSaleItems(cart.lines),
       payment: { method: paymentMethod },
       ...(customer ? { customerId: customer.id } : {}),
-      ...(hasDiscount && cart.discount
-        ? { discount: { type: cart.discount.kind, value: cart.discount.value.trim() } }
-        : {}),
-      ...(hasDiscount && cart.discount?.reason.trim()
-        ? { discountReason: cart.discount.reason.trim() }
-        : {}),
+      ...(() => {
+        const discount = resolveSubmitDiscount(cart.discount);
+        return discount ? { discount } : {};
+      })(),
+      ...(() => {
+        const discountReason = resolveSubmitDiscountReason(cart.discount);
+        return discountReason ? { discountReason } : {};
+      })(),
+      ...(cart.note.trim() ? { note: cart.note.trim() } : {}),
     };
 
     createSale.mutate(
       { body, idempotencyKey: cart.idempotencyKey },
-      {
-        onSuccess: (sale) => {
-          setCompletedSale(sale);
-          dispatch({ type: "completed" });
-          setCustomer(null);
-          setDiscountKind("none");
-          setLineErrors({});
-        },
-        onError: (error) => {
-          if (error instanceof SalesApiError) {
-            if (error.code === "STOCK_INSUFFICIENT") {
-              const details = error.details as StockInsufficientDetails | undefined;
-              if (details?.variantId) {
-                setLineErrors((prev) => ({
-                  ...prev,
-                  [details.variantId as string]: t("sales.errors.stockInsufficient", {
-                    available: details.available ?? "0",
-                  }),
-                }));
-                return;
-              }
-            }
-            if (error.code === "DISCOUNT_EXCEEDS_SUBTOTAL") {
-              setGeneralError(t("sales.errors.discountExceedsSubtotal"));
-              return;
-            }
-          }
-          // `idempotencyOutcome` takes the error's `code` when it was a
-          // decoded server response, else `undefined` — a network drop or
-          // a timeout never got as far as one, so its outcome is just as
-          // unknown as `IDEMPOTENCY_KEY_REUSED`'s (`possiblyRecorded`
-          // covers both), but only `IDEMPOTENCY_KEY_REUSED` actually
-          // proves the *current* key was already spent, so only that case
-          // mints a new one (T4 review CRITICAL: rekeying on an undecoded
-          // error would let a cashier's natural retry of the same cart
-          // create a second, real sale under a fresh key if the original
-          // request had actually reached the server and committed —
-          // `features/sales/cart.ts`'s own doc comments have the full
-          // reasoning).
-          const code = error instanceof SalesApiError ? error.code : undefined;
-          if (idempotencyOutcome(code) === "rekey") {
-            dispatch({ type: "rekey", idempotencyKey: generateIdempotencyKey() });
-            setGeneralError(t("sales.errors.idempotencyKeyReused"));
-            setPossiblyRecorded(true);
-            return;
-          }
-          if (!(error instanceof SalesApiError)) {
-            setGeneralError(t("mobile.sale.errors.networkUnknown"));
-            setPossiblyRecorded(true);
-            return;
-          }
-          setGeneralError(t("errors.generic"));
-        },
-      },
+      { onSuccess: handlePaymentSuccess, onError: handlePaymentError },
     );
+  }
+
+  /** `Save draft` (T14 deliverable 1): creates a new draft, or — while
+   * editing a loaded one (`cart.draftId` set) — replaces its server-side
+   * state via `PATCH`. Either way the cart clears afterwards and
+   * `savedDraft` shows a small success view with a link to it, mirroring
+   * `completedSale`'s Pay confirmation. */
+  function handleSaveDraft() {
+    setGeneralError(null);
+    setPossiblyRecorded(false);
+    if (formInvalid() || !selectedLocation) {
+      return;
+    }
+
+    function onSaved(draft: { id: string }) {
+      setSavedDraft({ id: draft.id });
+      dispatch({ type: "completed" });
+      setCustomer(null);
+      setDiscountKind("none");
+      setLineErrors({});
+    }
+
+    function onSaveError(error: unknown) {
+      if (error instanceof SalesApiError) {
+        if (error.code === "DISCOUNT_EXCEEDS_SUBTOTAL") {
+          setGeneralError(t("sales.errors.discountExceedsSubtotal"));
+          return;
+        }
+        if (error.code === "FORBIDDEN") {
+          setGeneralError(t("errors.forbidden"));
+          return;
+        }
+        if (error.code === "NOT_FOUND") {
+          // The draft being edited was completed/deleted elsewhere in the
+          // meantime — nothing left to PATCH; drop the link to it and let
+          // the cashier save a brand-new draft instead.
+          setGeneralError(t("mobile.drafts.errors.notFound"));
+          dispatch({ type: "clear" });
+          return;
+        }
+      }
+      setGeneralError(t("errors.generic"));
+    }
+
+    if (cart.draftId) {
+      const body = buildDraftPatchBody(cart, selectedLocation.id, customer?.id ?? null);
+      updateDraft.mutate({ id: cart.draftId, body }, { onSuccess: onSaved, onError: onSaveError });
+      return;
+    }
+
+    const body = buildDraftCreateBody(cart, selectedLocation.id, customer?.id ?? null);
+    createDraft.mutate(body, { onSuccess: onSaved, onError: onSaveError });
+  }
+
+  /** `Delete` (T14 deliverable 1): clears the cart, confirmed first. While
+   * editing a loaded draft (`cart.draftId` set), asks whether to delete
+   * the draft on the server too or only discard this screen's local
+   * changes (this task's own brief) — either way the local cart clears. */
+  function handleDeletePress() {
+    if (cart.draftId) {
+      const draftId = cart.draftId;
+      Alert.alert(t("mobile.drafts.discardConfirm.title"), undefined, [
+        { text: t("common.cancel"), style: "cancel" },
+        {
+          text: t("mobile.drafts.discardConfirm.discardLocal"),
+          onPress: handleClearCart,
+        },
+        {
+          text: t("mobile.drafts.discardConfirm.deleteServer"),
+          style: "destructive",
+          onPress: () => {
+            deleteDraft.mutate(draftId, {
+              onSuccess: handleClearCart,
+              onError: (error) => {
+                if (error instanceof SalesApiError && error.code === "NOT_FOUND") {
+                  // Already gone — the local cart still needs clearing.
+                  handleClearCart();
+                  return;
+                }
+                setGeneralError(t("errors.generic"));
+              },
+            });
+          },
+        },
+      ]);
+      return;
+    }
+    Alert.alert(t("sales.cart.clear"), t("mobile.sale.clearConfirm"), [
+      { text: t("common.cancel"), style: "cancel" },
+      { text: t("mobile.drafts.actions.delete"), style: "destructive", onPress: handleClearCart },
+    ]);
   }
 
   if (completedSale) {
@@ -566,6 +811,20 @@ export default function SaleScreen() {
           {t("sales.success.total", { total: formatMoney(completedSale.total, currency) })}
         </Text>
         <Button size="lg" onPress={() => setCompletedSale(null)}>
+          <Text>{t("sales.success.newSale")}</Text>
+        </Button>
+      </View>
+    );
+  }
+
+  if (savedDraft) {
+    return (
+      <View className="flex-1 items-center justify-center gap-4 bg-background p-6">
+        <Text variant="h3">{t("mobile.drafts.saved.title")}</Text>
+        <Button size="lg" onPress={() => router.push(`/drafts/${savedDraft.id}`)}>
+          <Text>{t("mobile.drafts.saved.view")}</Text>
+        </Button>
+        <Button size="lg" variant="outline" onPress={() => setSavedDraft(null)}>
           <Text>{t("sales.success.newSale")}</Text>
         </Button>
       </View>
@@ -796,23 +1055,30 @@ export default function SaleScreen() {
           </View>
         </View>
 
+        <View className="gap-2">
+          <Text variant="small">{t("sales.fields.note")}</Text>
+          <Input
+            placeholder={t("mobile.sale.notePlaceholder")}
+            value={cart.note}
+            onChangeText={(note) => dispatch({ type: "setNote", note })}
+          />
+        </View>
+
         <Pressable accessibilityRole="button" onPress={() => router.push("/sales")}>
           <Text className="text-center text-primary">{t("mobile.sale.list.link")}</Text>
         </Pressable>
-
-        {cart.lines.length > 0 ? (
-          <Pressable accessibilityRole="button" onPress={handleClearCart}>
-            <Text className="text-center text-destructive">{t("sales.cart.clear")}</Text>
-          </Pressable>
-        ) : null}
       </ScrollView>
 
       <View
-        className="border-border border-t bg-background px-4 pt-4"
+        className="gap-2 border-border border-t bg-background px-4 pt-4"
         style={{ paddingBottom: Math.max(insets.bottom, 16) }}
       >
-        <Button size="lg" disabled={createSale.isPending} onPress={handlePay}>
-          {createSale.isPending ? (
+        <Button
+          size="lg"
+          disabled={createSale.isPending || completeDraft.isPending}
+          onPress={handlePay}
+        >
+          {createSale.isPending || completeDraft.isPending ? (
             <>
               <ActivityIndicator color={tokens.color.surface} />
               <Text>{t("mobile.sale.paying")}</Text>
@@ -821,6 +1087,30 @@ export default function SaleScreen() {
             <Text>{t("mobile.sale.pay")}</Text>
           )}
         </Button>
+        {cart.lines.length > 0 ? (
+          <View className="flex-row gap-2">
+            <Button
+              variant="outline"
+              className="flex-1"
+              disabled={createDraft.isPending || updateDraft.isPending}
+              onPress={handleSaveDraft}
+            >
+              <Text>
+                {cart.draftId
+                  ? t("mobile.drafts.actions.save")
+                  : t("mobile.drafts.actions.saveDraft")}
+              </Text>
+            </Button>
+            <Button
+              variant="destructive"
+              className="flex-1"
+              disabled={deleteDraft.isPending}
+              onPress={handleDeletePress}
+            >
+              <Text>{t("mobile.drafts.actions.delete")}</Text>
+            </Button>
+          </View>
+        ) : null}
       </View>
 
       <LocationPickerModal
