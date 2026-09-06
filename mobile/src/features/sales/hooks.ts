@@ -17,6 +17,7 @@ import {
   type SaleDraftComplete,
   type SaleDraftCreate,
   type SaleDraftPatch,
+  SalesApiError,
   updateSaleDraft,
 } from "./api";
 
@@ -79,12 +80,22 @@ export function useDrafts(params: ListSaleDraftsParams) {
   });
 }
 
-/** A single draft (`GET /sales/drafts/{id}`), read-only. */
+/** A single draft (`GET /sales/drafts/{id}`), read-only. A `404 NOT_FOUND`
+ * means someone else already completed or deleted this exact draft — a
+ * real, non-retriable outcome both callers (`drafts/[id].tsx`, `sale/
+ * index.tsx`'s "load a draft into the cart" effect) already show their own
+ * "already paid or deleted" message for, so retrying it three times over
+ * (the default) only delayed that message and spammed the API with
+ * requests bound to 404 again (found live during T14's own device smoke).
+ * Anything else (offline, a 5xx, a flaky proxy) still gets the default
+ * bounded retry, same reasoning as `lib/session.ts`'s `meQueryOptions`. */
 export function useDraft(id: string | undefined) {
   return useQuery({
     queryKey: draftsKeys.detail(id ?? ""),
     queryFn: () => getSaleDraft(id as string),
     enabled: id != null,
+    retry: (failureCount, error) =>
+      !(error instanceof SalesApiError && error.code === "NOT_FOUND") && failureCount < 3,
   });
 }
 
