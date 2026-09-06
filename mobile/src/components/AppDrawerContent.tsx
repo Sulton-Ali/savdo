@@ -2,7 +2,14 @@ import { tokens } from "@savdo/ui-tokens";
 import { router } from "expo-router";
 import type { DrawerContentComponentProps } from "expo-router/drawer";
 import { DrawerContentScrollView } from "expo-router/drawer";
-import { AlertTriangle, Settings, SlidersHorizontal, Truck, Users } from "lucide-react-native";
+import {
+  AlertTriangle,
+  ClipboardList,
+  Settings,
+  SlidersHorizontal,
+  Truck,
+  Users,
+} from "lucide-react-native";
 import type { ComponentType } from "react";
 import { useTranslation } from "react-i18next";
 import { Pressable, View } from "react-native";
@@ -44,11 +51,8 @@ function DrawerRow({ label, Icon, onPress }: DrawerRowProps) {
  * still visible, back button returns to the Stock tab's levels page.
  * "Customers" is a genuine drawer-level sibling of the `(tabs)` group
  * (`(app)/customers/`, unchanged from Phase 5 T4) since it's no longer one
- * of the five bottom tabs.
- *
- * No "Drafts" row here by design — that arrives with the draft-sales task
- * (phase-5/t13-sale-drafts), which will add one more `DrawerRow` to the
- * array below.
+ * of the five bottom tabs. "Drafts" (T14/D-87..D-90) is the same kind of
+ * sibling (`(app)/drafts/`) and sits first per D-90's row order.
  */
 export function AppDrawerContent(
   props: DrawerContentComponentProps & { onOpenSettings: () => void },
@@ -75,6 +79,7 @@ export function AppDrawerContent(
         </Text>
       </View>
 
+      <DrawerRow label={t("nav.drafts")} Icon={ClipboardList} onPress={() => go("/drafts")} />
       <DrawerRow label={t("nav.customers")} Icon={Users} onPress={() => go("/customers")} />
 
       {canWriteStock && (

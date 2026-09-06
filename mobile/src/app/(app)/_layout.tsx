@@ -11,7 +11,8 @@ import { SettingsSheet } from "@/components/SettingsSheet";
  * (`expo-router/drawer`, bundled with expo-router 57 — D-94, no new
  * dependency) wrapping the bottom-tabs group (`(tabs)/_layout.tsx`) plus
  * the Customers stack (`customers/_layout.tsx`, unchanged from Phase 5 T4)
- * as its two screens. `headerShown: false` here delegates every header to
+ * and the Drafts stack (`drafts/_layout.tsx`, T14) as its three screens.
+ * `headerShown: false` here delegates every header to
  * whichever nested navigator is actually showing (`(tabs)/_layout.tsx`
  * already renders its own header with a menu button that opens *this*
  * drawer, plus each Stack's own native header on a pushed screen) — the
@@ -37,6 +38,7 @@ export default function AppDrawerLayout() {
         )}
       >
         <Drawer.Screen name="(tabs)" options={{ title: t("app.name") }} />
+        <Drawer.Screen name="drafts" options={{ title: t("nav.drafts") }} />
         <Drawer.Screen name="customers" options={{ title: t("nav.customers") }} />
       </Drawer>
       <SettingsSheet visible={settingsOpen} onClose={() => setSettingsOpen(false)} />

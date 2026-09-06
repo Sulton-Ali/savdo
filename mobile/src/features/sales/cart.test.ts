@@ -1,17 +1,28 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildDraftCreateBody,
+  buildDraftPatchBody,
   type CartState,
+  cartDiscountFromDraft,
+  cartLinesFromDraftItems,
+  cartLinesToSaleItems,
   cartReducer,
+  entityOf,
   estimateCartTotals,
   generateIdempotencyKey,
   idempotencyOutcome,
   initialCartState,
+  isCartReadOnly,
   isValidDiscountValue,
   isZeroDecimalString,
   multiplyMoneyByQty,
+  nextAfterDraftPayError,
   percentOfMoney,
+  planDraftPay,
   qtyExceedsAvailable,
+  resolveSubmitDiscount,
+  resolveSubmitDiscountReason,
   subtractMoney,
   sumMoney,
 } from "./cart";
@@ -77,6 +88,7 @@ describe("addItem", () => {
         unitPrice: "10000.00",
         availableQty: "5.000",
         qty: 1,
+        available: true,
       },
     ]);
   });
@@ -421,4 +433,514 @@ describe("estimateCartTotals", () => {
       total: "0.00",
     });
   });
+});
+
+describe("T14 draft integration", () => {
+  it("initialCartState starts with an empty note, no draftId, clean and unattempted", () => {
+    const state = initialCartState();
+    expect(state.note).toBe("");
+    expect(state.draftId).toBeNull();
+    expect(state.dirty).toBe(false);
+    expect(state.completionAttempted).toBe(false);
+  });
+
+  it("setNote updates the note, marks dirty, without touching anything else", () => {
+    const state = addA(initialCartState(), 1);
+    const next = cartReducer(state, { type: "setNote", note: "Deliver by 6pm" });
+    expect(next.note).toBe("Deliver by 6pm");
+    expect(next.lines).toEqual(state.lines);
+    expect(next.idempotencyKey).toBe(state.idempotencyKey);
+    expect(next.dirty).toBe(true);
+  });
+
+  it("addItem/incrementQty/decrementQty/setQty/removeItem/setDiscount all mark dirty", () => {
+    const draftLine = {
+      variantId: "v9",
+      label: "Variant Z",
+      productName: "Product Z",
+      unitPrice: "7000.00",
+      availableQty: "999999.000",
+      qty: 2,
+      available: true,
+    };
+    const clean = cartReducer(initialCartState(), {
+      type: "loadDraft",
+      draftId: "draft-1",
+      lines: [draftLine],
+      discount: null,
+      note: "",
+      idempotencyKey: "key-1",
+    });
+    expect(clean.dirty).toBe(false);
+
+    expect(cartReducer(clean, { type: "incrementQty", variantId: "v9" }).dirty).toBe(true);
+    expect(cartReducer(clean, { type: "decrementQty", variantId: "v9" }).dirty).toBe(true);
+    expect(cartReducer(clean, { type: "setQty", variantId: "v9", qty: 5 }).dirty).toBe(true);
+    expect(cartReducer(clean, { type: "removeItem", variantId: "v9" }).dirty).toBe(true);
+    expect(
+      cartReducer(clean, {
+        type: "setDiscount",
+        discount: { kind: "fixed", value: "1", reason: "" },
+      }).dirty,
+    ).toBe(true);
+    expect(
+      addA(clean, 1, "key-2").dirty, // addItem
+    ).toBe(true);
+  });
+
+  it("markDirty sets dirty without touching anything else", () => {
+    const state = initialCartState();
+    const next = cartReducer(state, { type: "markDirty" });
+    expect(next.dirty).toBe(true);
+    expect(next.lines).toEqual(state.lines);
+    expect(next.idempotencyKey).toBe(state.idempotencyKey);
+  });
+
+  it("completionAttempted sets the flag and is idempotent", () => {
+    const state = initialCartState();
+    const once = cartReducer(state, { type: "completionAttempted" });
+    expect(once.completionAttempted).toBe(true);
+    const twice = cartReducer(once, { type: "completionAttempted" });
+    expect(twice).toBe(once); // same reference — a true-to-true dispatch is a no-op
+  });
+
+  it("completionOutcomeKnown clears completionAttempted, re-enabling editing, without touching anything else", () => {
+    const attempted = cartReducer(
+      cartReducer(addA(initialCartState(), 1), {
+        type: "loadDraft",
+        draftId: "draft-1",
+        lines: [],
+        discount: null,
+        note: "",
+        idempotencyKey: "key-1",
+      }),
+      { type: "completionAttempted" },
+    );
+    const known = cartReducer(attempted, { type: "completionOutcomeKnown" });
+    expect(known.completionAttempted).toBe(false);
+    expect(known.draftId).toBe(attempted.draftId);
+    expect(known.dirty).toBe(attempted.dirty);
+    expect(known.lines).toEqual(attempted.lines);
+    expect(known.idempotencyKey).toBe(attempted.idempotencyKey);
+  });
+
+  it("completionOutcomeKnown is a no-op when nothing was attempted", () => {
+    const state = initialCartState();
+    const next = cartReducer(state, { type: "completionOutcomeKnown" });
+    expect(next).toBe(state); // same reference — a false-to-false dispatch is a no-op
+  });
+
+  it("a recoverable failure's full sequence (loadDraft -> completionAttempted -> completionOutcomeKnown -> markDirty) leaves Pay ready to PATCH again", () => {
+    const loaded = cartReducer(initialCartState(), {
+      type: "loadDraft",
+      draftId: "draft-1",
+      lines: [],
+      discount: null,
+      note: "",
+      idempotencyKey: "key-1",
+    });
+    const attempted = cartReducer(loaded, { type: "completionAttempted" });
+    const known = cartReducer(attempted, { type: "completionOutcomeKnown" });
+    const fixedUp = cartReducer(known, { type: "markDirty" });
+    expect(
+      planDraftPay({
+        draftId: fixedUp.draftId,
+        dirty: fixedUp.dirty,
+        completionAttempted: fixedUp.completionAttempted,
+      }),
+    ).toBe("patchThenComplete");
+  });
+
+  it("loadDraft replaces the whole cart with the draft's own state, clean and unattempted", () => {
+    const before = addA(initialCartState(), 3);
+    const loaded = cartReducer(before, {
+      type: "loadDraft",
+      draftId: "draft-1",
+      lines: [
+        {
+          variantId: "v9",
+          label: "Variant Z",
+          productName: "Product Z",
+          unitPrice: "7000.00",
+          availableQty: "999999.000",
+          qty: 2,
+          available: true,
+        },
+      ],
+      discount: { kind: "fixed", value: "1000.00", reason: "loyalty" },
+      note: "from draft",
+      idempotencyKey: "key-from-draft",
+    });
+    expect(loaded).toEqual({
+      lines: [
+        {
+          variantId: "v9",
+          label: "Variant Z",
+          productName: "Product Z",
+          unitPrice: "7000.00",
+          availableQty: "999999.000",
+          qty: 2,
+          available: true,
+        },
+      ],
+      discount: { kind: "fixed", value: "1000.00", reason: "loyalty" },
+      note: "from draft",
+      draftId: "draft-1",
+      dirty: false,
+      completionAttempted: false,
+      idempotencyKey: "key-from-draft",
+    });
+  });
+
+  it("clear resets draftId/note/dirty/completionAttempted back to a fresh cart", () => {
+    const loaded = cartReducer(
+      cartReducer(initialCartState(), {
+        type: "loadDraft",
+        draftId: "draft-1",
+        lines: [],
+        discount: null,
+        note: "from draft",
+        idempotencyKey: "key-from-draft",
+      }),
+      { type: "completionAttempted" },
+    );
+    const cleared = cartReducer(loaded, { type: "clear" });
+    expect(cleared.draftId).toBeNull();
+    expect(cleared.note).toBe("");
+    expect(cleared.dirty).toBe(false);
+    expect(cleared.completionAttempted).toBe(false);
+  });
+
+  it("completed resets draftId/note/dirty/completionAttempted back to a fresh cart", () => {
+    const loaded = cartReducer(
+      cartReducer(initialCartState(), {
+        type: "loadDraft",
+        draftId: "draft-1",
+        lines: [],
+        discount: null,
+        note: "from draft",
+        idempotencyKey: "key-from-draft",
+      }),
+      { type: "completionAttempted" },
+    );
+    const completed = cartReducer(loaded, { type: "completed" });
+    expect(completed.draftId).toBeNull();
+    expect(completed.note).toBe("");
+    expect(completed.dirty).toBe(false);
+    expect(completed.completionAttempted).toBe(false);
+  });
+
+  it("unlinkDraft drops draftId and resets dirty/completionAttempted but keeps lines/discount/note", () => {
+    const loaded = cartReducer(
+      cartReducer(initialCartState(), {
+        type: "loadDraft",
+        draftId: "draft-1",
+        lines: [
+          {
+            variantId: "v9",
+            label: "Variant Z",
+            productName: "Product Z",
+            unitPrice: "7000.00",
+            availableQty: "999999.000",
+            qty: 2,
+            available: true,
+          },
+        ],
+        discount: { kind: "fixed", value: "500", reason: "" },
+        note: "keep me",
+        idempotencyKey: "key-from-draft",
+      }),
+      { type: "completionAttempted" },
+    );
+    const unlinked = cartReducer(loaded, { type: "unlinkDraft", idempotencyKey: "fresh-key" });
+    expect(unlinked.draftId).toBeNull();
+    expect(unlinked.dirty).toBe(false);
+    expect(unlinked.completionAttempted).toBe(false);
+    expect(unlinked.idempotencyKey).toBe("fresh-key");
+    expect(unlinked.lines).toEqual(loaded.lines);
+    expect(unlinked.discount).toEqual(loaded.discount);
+    expect(unlinked.note).toBe("keep me");
+  });
+});
+
+describe("cartLinesFromDraftItems / cartDiscountFromDraft", () => {
+  it("maps a SaleDraftItem to a CartLine, truncating a fractional qty to a whole unit (never rounding up)", () => {
+    const lines = cartLinesFromDraftItems([
+      {
+        variantId: "v1",
+        productId: "p1",
+        productName: "Shirt",
+        variantLabel: "M / Blue",
+        qty: "2.900",
+        unitPrice: "15000.00",
+        lineTotal: "39000.00",
+        available: true,
+      },
+    ]);
+    expect(lines).toEqual([
+      {
+        variantId: "v1",
+        label: "M / Blue",
+        productName: "Shirt",
+        unitPrice: "15000.00",
+        availableQty: "999999.000",
+        qty: 2,
+        available: true,
+      },
+    ]);
+  });
+
+  it("never truncates a line's qty down to 0", () => {
+    const lines = cartLinesFromDraftItems([
+      {
+        variantId: "v1",
+        productId: "p1",
+        productName: "Shirt",
+        variantLabel: "M / Blue",
+        qty: "0.200",
+        unitPrice: "0.00",
+        lineTotal: "0.00",
+        available: false,
+      },
+    ]);
+    expect(lines[0]?.qty).toBe(1);
+    expect(lines[0]?.available).toBe(false);
+  });
+
+  it("maps a null draft discount to null", () => {
+    expect(cartDiscountFromDraft(null, null)).toBeNull();
+  });
+
+  it("maps a draft discount and its separate reason", () => {
+    expect(cartDiscountFromDraft({ type: "percent", value: "15" }, "regular")).toEqual({
+      kind: "percent",
+      value: "15",
+      reason: "regular",
+    });
+  });
+
+  it("defaults the reason to an empty string when the draft has none", () => {
+    expect(cartDiscountFromDraft({ type: "fixed", value: "2000" }, null)).toEqual({
+      kind: "fixed",
+      value: "2000",
+      reason: "",
+    });
+  });
+});
+
+describe("resolveSubmitDiscount / resolveSubmitDiscountReason", () => {
+  it("is undefined for no discount", () => {
+    expect(resolveSubmitDiscount(null)).toBeUndefined();
+    expect(resolveSubmitDiscountReason(null)).toBeUndefined();
+  });
+
+  it("is undefined for an invalid discount value", () => {
+    const discount = { kind: "percent" as const, value: "150", reason: "" };
+    expect(resolveSubmitDiscount(discount)).toBeUndefined();
+  });
+
+  it("is undefined for a zero discount value", () => {
+    const discount = { kind: "fixed" as const, value: "0", reason: "" };
+    expect(resolveSubmitDiscount(discount)).toBeUndefined();
+  });
+
+  it("resolves a real discount, trimmed", () => {
+    const discount = { kind: "percent" as const, value: " 10 ", reason: "" };
+    expect(resolveSubmitDiscount(discount)).toEqual({ type: "percent", value: "10" });
+  });
+
+  it("omits the reason when blank even for an active discount", () => {
+    const discount = { kind: "percent" as const, value: "10", reason: "   " };
+    expect(resolveSubmitDiscount(discount)).toEqual({ type: "percent", value: "10" });
+    expect(resolveSubmitDiscountReason(discount)).toBeUndefined();
+  });
+
+  it("trims and returns a non-blank reason", () => {
+    const discount = { kind: "percent" as const, value: "10", reason: " loyalty " };
+    expect(resolveSubmitDiscountReason(discount)).toBe("loyalty");
+  });
+});
+
+describe("cartLinesToSaleItems", () => {
+  it("maps lines to variantId/qty only, never a price", () => {
+    const state = addB(addA(initialCartState(), 2), 1);
+    expect(cartLinesToSaleItems(state.lines)).toEqual([
+      { variantId: "a", qty: "2" },
+      { variantId: "b", qty: "1" },
+    ]);
+  });
+});
+
+describe("buildDraftCreateBody / buildDraftPatchBody", () => {
+  it("builds a minimal create body with no customer/discount/note", () => {
+    const state = addA(initialCartState(), 2);
+    expect(buildDraftCreateBody(state, "loc-1", null)).toEqual({
+      locationId: "loc-1",
+      items: [{ variantId: "a", qty: "2" }],
+    });
+  });
+
+  it("builds a full create body with customer, discount, reason and note", () => {
+    let state = addA(initialCartState(), 2);
+    state = cartReducer(state, {
+      type: "setDiscount",
+      discount: { kind: "percent", value: "10", reason: "loyalty" },
+    });
+    state = cartReducer(state, { type: "setNote", note: "  Gift wrap  " });
+    expect(buildDraftCreateBody(state, "loc-1", "cust-1")).toEqual({
+      locationId: "loc-1",
+      items: [{ variantId: "a", qty: "2" }],
+      customerId: "cust-1",
+      discount: { type: "percent", value: "10" },
+      discountReason: "loyalty",
+      note: "Gift wrap",
+    });
+  });
+
+  it("builds a patch body that explicitly clears customer/discount/note when absent", () => {
+    const state = addA(initialCartState(), 1);
+    expect(buildDraftPatchBody(state, "loc-1", null)).toEqual({
+      locationId: "loc-1",
+      items: [{ variantId: "a", qty: "1" }],
+      customerId: null,
+      discountType: null,
+      discountValue: null,
+      discountReason: null,
+      note: null,
+    });
+  });
+
+  it("builds a patch body carrying an active discount and note", () => {
+    let state = addA(initialCartState(), 1);
+    state = cartReducer(state, {
+      type: "setDiscount",
+      discount: { kind: "fixed", value: "1000", reason: "" },
+    });
+    state = cartReducer(state, { type: "setNote", note: "call before delivery" });
+    expect(buildDraftPatchBody(state, "loc-1", "cust-2")).toEqual({
+      locationId: "loc-1",
+      items: [{ variantId: "a", qty: "1" }],
+      customerId: "cust-2",
+      discountType: "fixed",
+      discountValue: "1000",
+      discountReason: null,
+      note: "call before delivery",
+    });
+  });
+});
+
+describe("planDraftPay", () => {
+  it.each([
+    [false, false, "complete"],
+    [false, true, "complete"],
+    [true, false, "patchThenComplete"],
+    [true, true, "complete"],
+  ] as const)("dirty=%s completionAttempted=%s -> %s", (dirty, completionAttempted, expected) => {
+    expect(planDraftPay({ draftId: "draft-1", dirty, completionAttempted })).toBe(expected);
+  });
+});
+
+describe("isCartReadOnly", () => {
+  it("is false for a fresh cart", () => {
+    expect(isCartReadOnly(initialCartState())).toBe(false);
+  });
+
+  it("is false for a dirty, not-yet-attempted draft", () => {
+    const loaded = cartReducer(addA(initialCartState(), 1), {
+      type: "loadDraft",
+      draftId: "draft-1",
+      lines: [],
+      discount: null,
+      note: "",
+      idempotencyKey: "k",
+    });
+    expect(isCartReadOnly(loaded)).toBe(false);
+  });
+
+  it("is true the moment completionAttempted is set, even if the cart is edited again after", () => {
+    const attempted = cartReducer(initialCartState(), { type: "completionAttempted" });
+    expect(isCartReadOnly(attempted)).toBe(true);
+    const editedAfter = cartReducer(attempted, { type: "markDirty" });
+    expect(isCartReadOnly(editedAfter)).toBe(true);
+  });
+
+  it("is false again once the draft is unlinked (confirmed gone)", () => {
+    const attempted = cartReducer(initialCartState(), { type: "completionAttempted" });
+    const unlinked = cartReducer(attempted, { type: "unlinkDraft", idempotencyKey: "k2" });
+    expect(isCartReadOnly(unlinked)).toBe(false);
+  });
+
+  it("is false again once the outcome is known (a decoded, recoverable failure)", () => {
+    const attempted = cartReducer(initialCartState(), { type: "completionAttempted" });
+    const known = cartReducer(attempted, { type: "completionOutcomeKnown" });
+    expect(isCartReadOnly(known)).toBe(false);
+  });
+});
+
+describe("entityOf", () => {
+  it("recognizes 'draft'", () => {
+    expect(entityOf({ entity: "draft" })).toBe("draft");
+  });
+
+  it("recognizes 'variant'", () => {
+    expect(entityOf({ entity: "variant" })).toBe("variant");
+  });
+
+  it("recognizes 'location'", () => {
+    expect(entityOf({ entity: "location" })).toBe("location");
+  });
+
+  it("recognizes 'customer'", () => {
+    expect(entityOf({ entity: "customer" })).toBe("customer");
+  });
+
+  it("falls back to 'other' for an entity value this app has no specific handling for", () => {
+    expect(entityOf({ entity: "sale" })).toBe("other");
+  });
+
+  it("falls back to 'other' for undefined details", () => {
+    expect(entityOf(undefined)).toBe("other");
+  });
+
+  it("falls back to 'other' for details with no entity field", () => {
+    expect(entityOf({ fields: { items: "invalid" } })).toBe("other");
+  });
+});
+
+describe("nextAfterDraftPayError", () => {
+  it.each([
+    ["NOT_FOUND" as const, "variant" as const, "lineVariantGone"],
+    ["NOT_FOUND" as const, "location" as const, "locationGone"],
+    ["NOT_FOUND" as const, "customer" as const, "customerGone"],
+    ["NOT_FOUND" as const, "draft" as const, "draftGone"],
+    ["NOT_FOUND" as const, "other" as const, "draftGone"],
+    ["FORBIDDEN" as const, "other" as const, "forbiddenToEditDraft"],
+    [undefined, "other" as const, "patchNetworkSafe"],
+    ["VALIDATION_FAILED" as const, "other" as const, "patchGenericError"],
+    ["DISCOUNT_EXCEEDS_SUBTOTAL" as const, "other" as const, "patchGenericError"],
+  ] as const)("patch leg: code=%s entity=%s -> %s", (code, entity, expected) => {
+    expect(nextAfterDraftPayError({ leg: "patch", code, entity, isRetry: false })).toBe(expected);
+  });
+
+  it.each([
+    ["NOT_FOUND" as const, "variant" as const, false, "lineVariantGone"],
+    ["NOT_FOUND" as const, "location" as const, false, "locationGone"],
+    ["NOT_FOUND" as const, "customer" as const, false, "customerGone"],
+    ["NOT_FOUND" as const, "draft" as const, false, "draftGone"],
+    ["NOT_FOUND" as const, "other" as const, false, "draftGone"],
+    // A decoded 404 never replays, on either leg — `isRetry` is ignored
+    // once `code` is `NOT_FOUND` (T14 fix round, Opus review MAJOR 2).
+    ["NOT_FOUND" as const, "draft" as const, true, "draftGone"],
+    [undefined, "other" as const, false, "retryCompleteSameKey"],
+    [undefined, "other" as const, true, "completeNetworkAmbiguous"],
+    ["STOCK_INSUFFICIENT" as const, "other" as const, false, "useIdempotencyOutcome"],
+    ["VALIDATION_FAILED" as const, "other" as const, false, "useIdempotencyOutcome"],
+    ["DISCOUNT_EXCEEDS_SUBTOTAL" as const, "other" as const, false, "useIdempotencyOutcome"],
+    ["IDEMPOTENCY_KEY_REUSED" as const, "other" as const, false, "useIdempotencyOutcome"],
+  ] as const)(
+    "complete leg: code=%s entity=%s isRetry=%s -> %s",
+    (code, entity, isRetry, expected) => {
+      expect(nextAfterDraftPayError({ leg: "complete", code, entity, isRetry })).toBe(expected);
+    },
+  );
 });

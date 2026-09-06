@@ -35,6 +35,7 @@
   },
   "nav": {
     "dashboard": "Dashboard",
+    "drafts": "Drafts",
     "sales": "Sales",
     "products": "Products",
     "categories": "Categories",
@@ -864,10 +865,15 @@
       },
       "estimate": "Estimate — the server confirms the exact total on payment",
       "pay": "Pay",
+      "notePlaceholder": "Note (optional)",
       "paying": "Processing…",
       "locationRequired": "Pick a location before completing the sale.",
+      "readOnlyBanner": "A payment was already attempted; edits are disabled. Tap Pay again to finish, or check today's sales.",
       "errors": {
-        "networkUnknown": "Connection lost. The sale may already be recorded: check today's list before paying again."
+        "networkUnknown": "Connection lost. The sale may already be recorded: check today's list before paying again.",
+        "locationGone": "The selected location is no longer available; choose another.",
+        "customerGone": "The attached customer no longer exists.",
+        "draftLocationGone": "This draft's location is no longer available; it will be saved at {{location}}. Change it if needed."
       },
       "list": {
         "title": "Today's sales",
@@ -881,6 +887,70 @@
         "errors": {
           "invalidRange": "Use the format YYYY-MM-DD, with the start date on or before the end date."
         }
+      },
+      "clearConfirm": "Remove every item from the cart?"
+    },
+    "drafts": {
+      "saved": {
+        "title": "Draft saved",
+        "view": "View draft"
+      },
+      "actions": {
+        "saveDraft": "Save draft",
+        "save": "Save",
+        "edit": "Edit",
+        "delete": "Delete"
+      },
+      "deleteConfirm": {
+        "title": "Delete this draft?"
+      },
+      "discardConfirm": {
+        "title": "Discard changes?",
+        "discardLocal": "Discard local changes",
+        "deleteServer": "Delete draft"
+      },
+      "replaceCartConfirm": {
+        "title": "Replace the current cart with this draft? Items you haven't saved will be lost.",
+        "replace": "Replace cart"
+      },
+      "detail": {
+        "title": "Draft",
+        "unavailable": "Unavailable"
+      },
+      "errors": {
+        "notFound": "This draft was already paid or deleted.",
+        "lineUnavailable": "{{name}} is no longer available — edit the draft to remove it.",
+        "forbiddenEdit": "You can't edit this draft — pay it from the Drafts screen, or ask the creator or a manager.",
+        "itemNoLongerAvailable": "One of the items in this draft is no longer available. Remove it from the cart to continue."
+      },
+      "filter": {
+        "all": "All",
+        "mine": "Mine"
+      },
+      "list": {
+        "empty": "No drafts yet.",
+        "lineCount_one": "{{count}} item",
+        "lineCount_other": "{{count}} items",
+        "lineCount_few": "{{count}} items",
+        "lineCount_many": "{{count}} items"
+      },
+      "age": {
+        "minutes_one": "{{count}} min ago",
+        "minutes_other": "{{count}} min ago",
+        "minutes_few": "{{count}} min ago",
+        "minutes_many": "{{count}} min ago",
+        "hours_one": "{{count}} hour ago",
+        "hours_other": "{{count}} hours ago",
+        "hours_few": "{{count}} hours ago",
+        "hours_many": "{{count}} hours ago",
+        "days_one": "{{count}} day ago",
+        "days_other": "{{count}} days ago",
+        "days_few": "{{count}} days ago",
+        "days_many": "{{count}} days ago"
+      },
+      "createdBy": {
+        "you": "You",
+        "unknown": "Unknown"
       }
     },
     "customers": {

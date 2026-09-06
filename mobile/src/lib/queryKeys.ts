@@ -168,3 +168,22 @@ export const customersKeys = {
   list: (filters: { q?: string }) => ["customers", "list", filters] as const,
   detail: (id: string) => ["customers", "detail", id] as const,
 };
+
+/**
+ * Sale drafts query keys (Phase 5 T14, D-87..D-90) — a separate top-level
+ * namespace rather than nested under `salesKeys` (even though both cover
+ * `/sales*` endpoints): `useCreateSale`'s `POST /sales` invalidates the
+ * broad `["sales"]` prefix on every plain sale, which has nothing to do
+ * with drafts, and nesting these here would make that invalidation also
+ * refetch every open drafts list/detail for no reason — same reasoning
+ * `purchasesKeys`/`reportsKeys` already use for their own `all` prefix.
+ * `all` covers list + detail so `useCompleteSaleDraft`/`useDeleteSaleDraft`
+ * (a draft that just stopped existing) and `useCreateSaleDraft`/
+ * `useUpdateSaleDraft` (a draft that changed) can invalidate everything
+ * drafts-related in one call.
+ */
+export const draftsKeys = {
+  all: ["drafts"] as const,
+  list: (filters: { createdBy?: string }) => ["drafts", "list", filters] as const,
+  detail: (id: string) => ["drafts", "detail", id] as const,
+};
