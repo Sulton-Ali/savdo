@@ -44,6 +44,8 @@ func TestLoad(t *testing.T) {
 				AIPriceOutputPerMTok: "10.00",
 				BotUsername:          "savdo_bot",
 				TelegramBotToken:     "123456:fake-token-for-tests",
+				BotMode:              "polling",
+				SiteURL:              "http://localhost:3000",
 			},
 		},
 		{
@@ -95,6 +97,8 @@ func TestLoad(t *testing.T) {
 				AIPriceOutputPerMTok: "10.00",
 				BotUsername:          "savdo_bot",
 				TelegramBotToken:     "123456:fake-token-for-tests",
+				BotMode:              "polling",
+				SiteURL:              "http://localhost:3000",
 			},
 		},
 		{
@@ -133,6 +137,8 @@ func TestLoad(t *testing.T) {
 				AIPriceOutputPerMTok: "10.00",
 				BotUsername:          "savdo_bot",
 				TelegramBotToken:     "123456:fake-token-for-tests",
+				BotMode:              "polling",
+				SiteURL:              "http://localhost:3000",
 			},
 		},
 		{
@@ -191,6 +197,8 @@ func TestLoad(t *testing.T) {
 				AIPriceOutputPerMTok: "10.00",
 				BotUsername:          "savdo_bot",
 				TelegramBotToken:     "123456:fake-token-for-tests",
+				BotMode:              "polling",
+				SiteURL:              "http://localhost:3000",
 			},
 		},
 		{
@@ -278,6 +286,8 @@ func TestLoad(t *testing.T) {
 				AIPriceOutputPerMTok: "10.00",
 				BotUsername:          "",
 				TelegramBotToken:     "",
+				BotMode:              "polling",
+				SiteURL:              "http://localhost:3000",
 			},
 		},
 	}
