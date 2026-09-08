@@ -5,7 +5,7 @@ GOLANGCI_LINT_VERSION := v2.13.2
 GOLANGCI_LINT := api/bin/golangci-lint
 
 .PHONY: verify format-check lint typecheck generate generate-check test guards \
-        verify-go test-go test-ts \
+        verify-go test-go test-ts test-e2e \
         dev-infra dev-infra-down migrate seed api bot apk
 
 ## verify: THE GATE — format, lint, typecheck, generated-code-fresh, tests, guards.
@@ -56,6 +56,11 @@ test-go:
 
 test-ts:
 	pnpm -r --if-present test
+
+## test-e2e: Playwright e2e (NOT part of `verify` — needs the API + DB up, see
+## 07-DEVOPS.md § The gate). Run `make dev-infra && make api` (and seed) first.
+test-e2e:
+	pnpm -r --if-present test:e2e
 
 ## guards: repo-wide grep guard rails (money types, stock writes, secrets, ...).
 guards:

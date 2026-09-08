@@ -10,6 +10,9 @@
       "!api",
       "!packages/api-client/src/schema.d.ts",
       "!web/src/routeTree.gen.ts",
+      "!web/test-results",
+      "!web/playwright-report",
+      "!web/.lighthouse",
       "!.claude",
       "!.mcp.json"
     ]

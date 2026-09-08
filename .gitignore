@@ -45,3 +45,9 @@ mobile/ios/
 
 # Data volumes (local)
 infra/data/
+
+# Playwright (e2e) and its MCP
+web/.lighthouse/
+web/test-results/
+web/playwright-report/
+.playwright-mcp/
