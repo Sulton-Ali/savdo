@@ -17,6 +17,7 @@ import (
 	"github.com/Sulton-Ali/savdo/api/internal/apierr"
 	"github.com/Sulton-Ali/savdo/api/internal/auth"
 	"github.com/Sulton-Ali/savdo/api/internal/catalog"
+	"github.com/Sulton-Ali/savdo/api/internal/content"
 	"github.com/Sulton-Ali/savdo/api/internal/crm"
 	"github.com/Sulton-Ali/savdo/api/internal/media"
 	"github.com/Sulton-Ali/savdo/api/internal/reports"
@@ -60,8 +61,9 @@ import (
 // salesSvc backs GetSale/ListSales via sales.NewHandler (sales.go);
 // CreateSale additionally uses pool directly, the same way
 // ReceivePurchase does, for httpx.Idempotent's Idempotency-Key
-// bookkeeping (sales.go's own doc comment).
-func NewRouter(logger *slog.Logger, pool *pgxpool.Pool, authSvc *auth.Service, shopSvc *shop.Service, mediaSvc *media.Service, devMedia http.Handler, catalogSvc *catalog.Service, stockSvc *stock.Service, crmSvc *crm.Service, reportsSvc *reports.Service, salesSvc *sales.Service) http.Handler {
+// bookkeeping (sales.go's own doc comment). contentSvc backs
+// GetContent/PutContent via content.NewHandler (content.go).
+func NewRouter(logger *slog.Logger, pool *pgxpool.Pool, authSvc *auth.Service, shopSvc *shop.Service, mediaSvc *media.Service, devMedia http.Handler, catalogSvc *catalog.Service, stockSvc *stock.Service, crmSvc *crm.Service, reportsSvc *reports.Service, salesSvc *sales.Service, contentSvc *content.Service) http.Handler {
 	mux := http.NewServeMux()
 
 	strictHandler := gen.NewStrictHandlerWithOptions(
@@ -70,6 +72,7 @@ func NewRouter(logger *slog.Logger, pool *pgxpool.Pool, authSvc *auth.Service, s
 			media: media.NewHandler(mediaSvc), catalog: catalog.NewHandler(catalogSvc),
 			crm: crm.NewHandler(crmSvc), stock: stock.NewHandler(stockSvc),
 			reports: reports.NewHandler(reportsSvc), sales: sales.NewHandler(salesSvc),
+			content: content.NewHandler(contentSvc),
 		},
 		[]gen.StrictMiddlewareFunc{authSvc.Middleware, catalog.AcceptLanguageMiddleware},
 		gen.StrictHTTPServerOptions{

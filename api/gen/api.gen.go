@@ -69,6 +69,69 @@ func (e Availability) Valid() bool {
 	}
 }
 
+// Defines values for ContentHoursDayDay.
+const (
+	Fri ContentHoursDayDay = "fri"
+	Mon ContentHoursDayDay = "mon"
+	Sat ContentHoursDayDay = "sat"
+	Sun ContentHoursDayDay = "sun"
+	Thu ContentHoursDayDay = "thu"
+	Tue ContentHoursDayDay = "tue"
+	Wed ContentHoursDayDay = "wed"
+)
+
+// Valid indicates whether the value is a known member of the ContentHoursDayDay enum.
+func (e ContentHoursDayDay) Valid() bool {
+	switch e {
+	case Fri:
+		return true
+	case Mon:
+		return true
+	case Sat:
+		return true
+	case Sun:
+		return true
+	case Thu:
+		return true
+	case Tue:
+		return true
+	case Wed:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ContentKey.
+const (
+	About    ContentKey = "about"
+	Contacts ContentKey = "contacts"
+	Hero     ContentKey = "hero"
+	Hours    ContentKey = "hours"
+	Seo      ContentKey = "seo"
+	Social   ContentKey = "social"
+)
+
+// Valid indicates whether the value is a known member of the ContentKey enum.
+func (e ContentKey) Valid() bool {
+	switch e {
+	case About:
+		return true
+	case Contacts:
+		return true
+	case Hero:
+		return true
+	case Hours:
+		return true
+	case Seo:
+		return true
+	case Social:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DiscountType.
 const (
 	Fixed   DiscountType = "fixed"
@@ -538,6 +601,116 @@ type CategoryPatch struct {
 
 	// Translations Per-locale name/description (ADR-012), keyed by `Locale`. On create, an entry for the shop's own default locale is required — expressible only as a service-level rule, since the JSON Schema can't know a given shop's `defaultLocale` value. On PATCH, each provided locale entry fully replaces the stored entry for that locale; omitted locales are left unchanged. Response fields outside this object (`name`/`description`/`locale`/ `translationFallback`) are the entity resolved for the caller's `Accept-Language`, fallback order `requested → uz → any`.
 	Translations *Translations `json:"translations,omitempty"`
+}
+
+// ContentAbout O-19 shape for `key: about`. See `ContentHero`'s description for why this is unreferenced by any path.
+type ContentAbout struct {
+	// Body Plain text; paragraphs are separated by blank lines. No HTML (O-19).
+	Body  string  `json:"body"`
+	Title *string `json:"title,omitempty"`
+}
+
+// ContentBlock Response body for `PUT /content/{key}` — the stored block.
+type ContentBlock struct {
+	Data map[string]interface{} `json:"data"`
+
+	// Key One of the six landing content blocks (04-DATA-MODEL.md § 6, D-99).
+	Key ContentKey `json:"key"`
+
+	// Locale A UI/data locale (ADR-012).
+	Locale    Locale              `json:"locale"`
+	UpdatedAt time.Time           `json:"updatedAt"`
+	UpdatedBy *openapi_types.UUID `json:"updatedBy,omitempty"`
+}
+
+// ContentContacts O-19 shape for `key: contacts`. See `ContentHero`'s description for why this is unreferenced by any path.
+type ContentContacts struct {
+	Address string `json:"address"`
+
+	// MapUrl Yandex Maps link; `https` only (validated in Go).
+	MapUrl *string `json:"mapUrl,omitempty"`
+	Phone  string  `json:"phone"`
+}
+
+// ContentHero O-19 shape for `key: hero`. Not referenced by any path directly (`ContentPut.data`/`ContentLocaleBlock.data` are generic — see their description) — generated for `content.Service` to validate and decode against (`skip-prune: true`, `api/oapi-codegen.yaml`).
+type ContentHero struct {
+	ImageMediaId *openapi_types.UUID `json:"imageMediaId,omitempty"`
+	Tagline      *string             `json:"tagline,omitempty"`
+	Title        string              `json:"title"`
+}
+
+// ContentHours O-19/D-107 shape for `key: hours`. See `ContentHero`'s description for why this is unreferenced by any path. `days` must have exactly 7 rows, one per distinct weekday (validated in Go — JSON Schema's `minItems`/`maxItems` catch the count but not the "distinct, all seven" rule).
+type ContentHours struct {
+	Days []ContentHoursDay `json:"days"`
+
+	// Note Free text; the only translated part of this block (D-107).
+	Note *string `json:"note,omitempty"`
+}
+
+// ContentHoursDay One row of `ContentHours.days`.
+type ContentHoursDay struct {
+	// Close `HH:MM`, required when `closed` is false; must be after `open`.
+	Close  *string            `json:"close,omitempty"`
+	Closed bool               `json:"closed"`
+	Day    ContentHoursDayDay `json:"day"`
+
+	// Open `HH:MM`, required when `closed` is false.
+	Open *string `json:"open,omitempty"`
+}
+
+// ContentHoursDayDay defines model for ContentHoursDay.Day.
+type ContentHoursDayDay string
+
+// ContentKey One of the six landing content blocks (04-DATA-MODEL.md § 6, D-99).
+type ContentKey string
+
+// ContentLocaleBlock One locale's saved content for a key.
+type ContentLocaleBlock struct {
+	// Data Raw per-key data, shaped per `ContentKey` (`ContentHero`, `ContentAbout`, `ContentHours`, `ContentContacts`, `ContentSocial` or `ContentSeo`, O-19) — modelled as a generic object here because the discriminator (`key`) is a sibling path parameter, not a field of this object, so a `oneOf` union does not apply; the server validates it against the matching named schema by hand.
+	Data      map[string]interface{} `json:"data"`
+	UpdatedAt time.Time              `json:"updatedAt"`
+
+	// UpdatedBy Absent when the row predates `updated_by` being set (e.g. the demo seed).
+	UpdatedBy *openapi_types.UUID `json:"updatedBy,omitempty"`
+}
+
+// ContentPut Request body for `PUT /content/{key}`.
+type ContentPut struct {
+	// Data Validated server-side against `key`'s O-19 schema; see `ContentLocaleBlock.data`.
+	Data map[string]interface{} `json:"data"`
+
+	// Locale A UI/data locale (ADR-012).
+	Locale Locale `json:"locale"`
+}
+
+// ContentResource Response body for `GET /content/{key}` — every locale saved for that key, no fallback (O-19).
+type ContentResource struct {
+	// Key One of the six landing content blocks (04-DATA-MODEL.md § 6, D-99).
+	Key ContentKey `json:"key"`
+
+	// Locales Each of `uz`/`ru`/`en` is absent when that locale was never saved.
+	Locales struct {
+		// En One locale's saved content for a key.
+		En *ContentLocaleBlock `json:"en,omitempty"`
+
+		// Ru One locale's saved content for a key.
+		Ru *ContentLocaleBlock `json:"ru,omitempty"`
+
+		// Uz One locale's saved content for a key.
+		Uz *ContentLocaleBlock `json:"uz,omitempty"`
+	} `json:"locales"`
+}
+
+// ContentSeo O-19 shape for `key: seo`. See `ContentHero`'s description for why this is unreferenced by any path.
+type ContentSeo struct {
+	Description string `json:"description"`
+	Title       string `json:"title"`
+}
+
+// ContentSocial O-19 shape for `key: social`. See `ContentHero`'s description for why this is unreferenced by any path.
+type ContentSocial struct {
+	Instagram *string `json:"instagram,omitempty"`
+	Telegram  *string `json:"telegram,omitempty"`
 }
 
 // Customer docs/04-DATA-MODEL.md § 5.
@@ -1873,6 +2046,9 @@ type CreateCategoryJSONRequestBody = CategoryCreate
 // UpdateCategoryJSONRequestBody defines body for UpdateCategory for application/json ContentType.
 type UpdateCategoryJSONRequestBody = CategoryPatch
 
+// PutContentJSONRequestBody defines body for PutContent for application/json ContentType.
+type PutContentJSONRequestBody = ContentPut
+
 // CreateCustomerJSONRequestBody defines body for CreateCustomer for application/json ContentType.
 type CreateCustomerJSONRequestBody = CustomerCreate
 
@@ -1998,6 +2174,12 @@ type ServerInterface interface {
 	// UpdateCategory Update a category.
 	// (PATCH /categories/{id})
 	UpdateCategory(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
+	// GetContent Get a content block's saved locales.
+	// (GET /content/{key})
+	GetContent(w http.ResponseWriter, r *http.Request, key ContentKey)
+	// PutContent Save one locale of a content block.
+	// (PUT /content/{key})
+	PutContent(w http.ResponseWriter, r *http.Request, key ContentKey)
 	// ListCustomers List the shop's customers.
 	// (GET /customers)
 	ListCustomers(w http.ResponseWriter, r *http.Request, params ListCustomersParams)
@@ -2473,6 +2655,58 @@ func (siw *ServerInterfaceWrapper) UpdateCategory(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.UpdateCategory(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetContent operation middleware
+func (siw *ServerInterfaceWrapper) GetContent(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "key" -------------
+	var key ContentKey
+
+	err = runtime.BindStyledParameterWithOptions("simple", "key", r.PathValue("key"), &key, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "key", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetContent(w, r, key)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PutContent operation middleware
+func (siw *ServerInterfaceWrapper) PutContent(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "key" -------------
+	var key ContentKey
+
+	err = runtime.BindStyledParameterWithOptions("simple", "key", r.PathValue("key"), &key, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "key", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PutContent(w, r, key)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4798,6 +5032,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/sales/drafts/{id}/complete", wrapper.CompleteSaleDraft)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/reports/sales/summary", wrapper.GetSalesSummaryReport)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/reports/sales/by-product", wrapper.ListSalesByProduct)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/content/{key}", wrapper.GetContent)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/content/{key}", wrapper.PutContent)
 
 	return m
 }
@@ -5555,6 +5791,149 @@ func (response UpdateCategory409JSONResponse) VisitUpdateCategoryResponse(w http
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetContentRequestObject struct {
+	Key ContentKey `json:"key"`
+}
+
+type GetContentResponseObject interface {
+	VisitGetContentResponse(w http.ResponseWriter) error
+}
+
+type GetContent200JSONResponse ContentResource
+
+func (response GetContent200JSONResponse) VisitGetContentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetContent400JSONResponse Error
+
+func (response GetContent400JSONResponse) VisitGetContentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetContent401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response GetContent401JSONResponse) VisitGetContentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetContent403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetContent403JSONResponse) VisitGetContentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutContentRequestObject struct {
+	Key  ContentKey `json:"key"`
+	Body *PutContentJSONRequestBody
+}
+
+type PutContentResponseObject interface {
+	VisitPutContentResponse(w http.ResponseWriter) error
+}
+
+type PutContent200JSONResponse ContentBlock
+
+func (response PutContent200JSONResponse) VisitPutContentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutContent400JSONResponse Error
+
+func (response PutContent400JSONResponse) VisitPutContentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutContent401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response PutContent401JSONResponse) VisitPutContentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutContent403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response PutContent403JSONResponse) VisitPutContentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutContent422JSONResponse Error
+
+func (response PutContent422JSONResponse) VisitPutContentResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(422)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -9697,6 +10076,12 @@ type StrictServerInterface interface {
 	// UpdateCategory Update a category.
 	// (PATCH /categories/{id})
 	UpdateCategory(ctx context.Context, request UpdateCategoryRequestObject) (UpdateCategoryResponseObject, error)
+	// GetContent Get a content block's saved locales.
+	// (GET /content/{key})
+	GetContent(ctx context.Context, request GetContentRequestObject) (GetContentResponseObject, error)
+	// PutContent Save one locale of a content block.
+	// (PUT /content/{key})
+	PutContent(ctx context.Context, request PutContentRequestObject) (PutContentResponseObject, error)
 	// ListCustomers List the shop's customers.
 	// (GET /customers)
 	ListCustomers(ctx context.Context, request ListCustomersRequestObject) (ListCustomersResponseObject, error)
@@ -10272,6 +10657,65 @@ func (sh *strictHandler) UpdateCategory(w http.ResponseWriter, r *http.Request, 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(UpdateCategoryResponseObject); ok {
 		if err := validResponse.VisitUpdateCategoryResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetContent operation middleware
+func (sh *strictHandler) GetContent(w http.ResponseWriter, r *http.Request, key ContentKey) {
+	var request GetContentRequestObject
+
+	request.Key = key
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetContent(ctx, request.(GetContentRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetContent")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetContentResponseObject); ok {
+		if err := validResponse.VisitGetContentResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PutContent operation middleware
+func (sh *strictHandler) PutContent(w http.ResponseWriter, r *http.Request, key ContentKey) {
+	var request PutContentRequestObject
+
+	request.Key = key
+
+	var body PutContentJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PutContent(ctx, request.(PutContentRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PutContent")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PutContentResponseObject); ok {
+		if err := validResponse.VisitPutContentResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

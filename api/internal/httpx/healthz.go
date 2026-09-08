@@ -8,6 +8,7 @@ import (
 	"github.com/Sulton-Ali/savdo/api/gen"
 	"github.com/Sulton-Ali/savdo/api/internal/auth"
 	"github.com/Sulton-Ali/savdo/api/internal/catalog"
+	"github.com/Sulton-Ali/savdo/api/internal/content"
 	"github.com/Sulton-Ali/savdo/api/internal/crm"
 	"github.com/Sulton-Ali/savdo/api/internal/media"
 	"github.com/Sulton-Ali/savdo/api/internal/reports"
@@ -24,11 +25,12 @@ import (
 // operations, media's `/media` operation, catalog's 21 catalogue/
 // product-image operations, crm's five `/suppliers` operations, stock's
 // `/stock/*` and `/purchases*` operations, reports' two
-// `/reports/sales/*` operations and sales' GetSale/ListSales are forwarded
-// to their named *shop.Handler / *media.Handler / *catalog.Handler /
-// *crm.Handler / *stock.Handler / *reports.Handler / *sales.Handler fields
-// (shop.go, media.go, catalog.go, crm.go, stock.go, purchases.go,
-// reports.go, sales.go) — named, not embedded, because every one of these
+// `/reports/sales/*` operations, sales' GetSale/ListSales and content's
+// GetContent/PutContent are forwarded to their named *shop.Handler /
+// *media.Handler / *catalog.Handler / *crm.Handler / *stock.Handler /
+// *reports.Handler / *sales.Handler / *content.Handler fields (shop.go,
+// media.go, catalog.go, crm.go, stock.go, purchases.go, reports.go,
+// sales.go, content.go) — named, not embedded, because every one of these
 // handler types is called "Handler" and an anonymous field's name is its
 // type name, so embedding more than one would collide; GetHealthz/GetReadyz
 // are defined directly on server (below and in readyz.go).
@@ -52,6 +54,7 @@ type server struct {
 	stock   *stock.Handler
 	reports *reports.Handler
 	sales   *sales.Handler
+	content *content.Handler
 }
 
 // GetHealthz reports the process is up. It does not touch the database —

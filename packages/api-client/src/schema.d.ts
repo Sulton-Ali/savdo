@@ -1046,6 +1046,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/content/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a content block's saved locales.
+         * @description Requires `manager+`. Returns every locale saved for `key` (`locales.uz`/`ru`/`en`, each absent when that locale was never saved) — no fallback here (O-19); `GET /public/shop`, a later task, applies the requested → uz fallback (D-104) for the public landing.
+         */
+        get: operations["getContent"];
+        /**
+         * Save one locale of a content block.
+         * @description Requires `manager+`. Upserts `(shop_id, key, locale)`; `data` is validated against `key`'s O-19 shape (`ContentHero`/`About`/ `Hours`/`Contacts`/`Social`/`Seo`) — unknown fields and a missing required field are both `422 VALIDATION_FAILED details.fields`. Saving one locale never touches another (D-104: a block may have only some locales filled).
+         */
+        put: operations["putContent"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2091,6 +2115,106 @@ export interface components {
         SalesByProductList: {
             items: components["schemas"]["SalesByProductRow"][];
             nextCursor: string | null;
+        };
+        /**
+         * @description One of the six landing content blocks (04-DATA-MODEL.md § 6, D-99).
+         * @enum {string}
+         */
+        ContentKey: "hero" | "about" | "hours" | "contacts" | "social" | "seo";
+        /** @description One locale's saved content for a key. */
+        ContentLocaleBlock: {
+            /** @description Raw per-key data, shaped per `ContentKey` (`ContentHero`, `ContentAbout`, `ContentHours`, `ContentContacts`, `ContentSocial` or `ContentSeo`, O-19) — modelled as a generic object here because the discriminator (`key`) is a sibling path parameter, not a field of this object, so a `oneOf` union does not apply; the server validates it against the matching named schema by hand. */
+            data: {
+                [key: string]: unknown;
+            };
+            /** Format: date-time */
+            updatedAt: string;
+            /**
+             * Format: uuid
+             * @description Absent when the row predates `updated_by` being set (e.g. the demo seed).
+             */
+            updatedBy?: string;
+        };
+        /** @description Response body for `GET /content/{key}` — every locale saved for that key, no fallback (O-19). */
+        ContentResource: {
+            key: components["schemas"]["ContentKey"];
+            /** @description Each of `uz`/`ru`/`en` is absent when that locale was never saved. */
+            locales: {
+                uz?: components["schemas"]["ContentLocaleBlock"];
+                ru?: components["schemas"]["ContentLocaleBlock"];
+                en?: components["schemas"]["ContentLocaleBlock"];
+            };
+        };
+        /** @description Request body for `PUT /content/{key}`. */
+        ContentPut: {
+            locale: components["schemas"]["Locale"];
+            /** @description Validated server-side against `key`'s O-19 schema; see `ContentLocaleBlock.data`. */
+            data: {
+                [key: string]: unknown;
+            };
+        };
+        /** @description Response body for `PUT /content/{key}` — the stored block. */
+        ContentBlock: {
+            key: components["schemas"]["ContentKey"];
+            locale: components["schemas"]["Locale"];
+            data: {
+                [key: string]: unknown;
+            };
+            /** Format: date-time */
+            updatedAt: string;
+            /** Format: uuid */
+            updatedBy?: string;
+        };
+        /** @description O-19 shape for `key: hero`. Not referenced by any path directly (`ContentPut.data`/`ContentLocaleBlock.data` are generic — see their description) — generated for `content.Service` to validate and decode against (`skip-prune: true`, `api/oapi-codegen.yaml`). */
+        ContentHero: {
+            title: string;
+            tagline?: string;
+            /** Format: uuid */
+            imageMediaId?: string;
+        };
+        /** @description O-19 shape for `key: about`. See `ContentHero`'s description for why this is unreferenced by any path. */
+        ContentAbout: {
+            title?: string;
+            /** @description Plain text; paragraphs are separated by blank lines. No HTML (O-19). */
+            body: string;
+        };
+        /** @description One row of `ContentHours.days`. */
+        ContentHoursDay: {
+            /** @enum {string} */
+            day: "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
+            closed: boolean;
+            /** @description `HH:MM`, required when `closed` is false. */
+            open?: string;
+            /** @description `HH:MM`, required when `closed` is false; must be after `open`. */
+            close?: string;
+        };
+        /** @description O-19/D-107 shape for `key: hours`. See `ContentHero`'s description for why this is unreferenced by any path. `days` must have exactly 7 rows, one per distinct weekday (validated in Go — JSON Schema's `minItems`/`maxItems` catch the count but not the "distinct, all seven" rule). */
+        ContentHours: {
+            days: components["schemas"]["ContentHoursDay"][];
+            /** @description Free text; the only translated part of this block (D-107). */
+            note?: string;
+        };
+        /** @description O-19 shape for `key: contacts`. See `ContentHero`'s description for why this is unreferenced by any path. */
+        ContentContacts: {
+            phone: string;
+            address: string;
+            /**
+             * Format: uri
+             * @description Yandex Maps link; `https` only (validated in Go).
+             */
+            mapUrl?: string;
+        };
+        /** @description O-19 shape for `key: social`. See `ContentHero`'s description for why this is unreferenced by any path. */
+        ContentSocial: {
+            /** Format: uri */
+            telegram?: string;
+            /** Format: uri */
+            instagram?: string;
+        };
+        /** @description O-19 shape for `key: seo`. See `ContentHero`'s description for why this is unreferenced by any path. */
+        ContentSeo: {
+            title: string;
+            description: string;
         };
     };
     responses: {
@@ -4293,6 +4417,85 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+        };
+    };
+    getContent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: components["schemas"]["ContentKey"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContentResource"];
+                };
+            };
+            /** @description `key` is not one of `ContentKey`'s values. `400 VALIDATION_FAILED details.fields.key: invalid`. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    putContent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: components["schemas"]["ContentKey"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContentPut"];
+            };
+        };
+        responses: {
+            /** @description OK. Returns the stored block. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContentBlock"];
+                };
+            };
+            /** @description `key` is not one of `ContentKey`'s values. `400 VALIDATION_FAILED details.fields.key: invalid`. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            /** @description `422 VALIDATION_FAILED details.fields` naming each field that fails `key`'s schema (O-19) — missing required, unknown field, an invalid `hours.days` set (not exactly 7 distinct `mon`..`sun` values, or `open`/`close` missing or `open` not before `close` on a non-`closed` day), or a `mapUrl` that is not `https`. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/Sulton-Ali/savdo/api/internal/auth"
 	"github.com/Sulton-Ali/savdo/api/internal/catalog"
 	"github.com/Sulton-Ali/savdo/api/internal/config"
+	"github.com/Sulton-Ali/savdo/api/internal/content"
 	"github.com/Sulton-Ali/savdo/api/internal/crm"
 	"github.com/Sulton-Ali/savdo/api/internal/media"
 	"github.com/Sulton-Ali/savdo/api/internal/reports"
@@ -86,6 +87,13 @@ func testSalesService() *sales.Service {
 	return sales.NewService(nil)
 }
 
+// testContentService builds a content.Service safe to wire into NewRouter
+// for tests that never exercise a `/content/*` route — a nil *db.Queries
+// is never dereferenced in that case.
+func testContentService() *content.Service {
+	return content.NewService(nil)
+}
+
 func TestHealthz(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -111,7 +119,7 @@ func TestHealthz(t *testing.T) {
 		},
 	}
 
-	router := NewRouter(testLogger(), nil, testAuthService(), testShopService(), testMediaService(), nil, testCatalogService(), testStockService(), testCrmService(), testReportsService(), testSalesService())
+	router := NewRouter(testLogger(), nil, testAuthService(), testShopService(), testMediaService(), nil, testCatalogService(), testStockService(), testCrmService(), testReportsService(), testSalesService(), testContentService())
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

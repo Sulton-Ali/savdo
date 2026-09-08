@@ -71,6 +71,13 @@ tags:
       which a cashier may also call, scoped to their own current day
       (D-55). `cost`/`margin` are present only for manager+ (ADR-010). Low
       stock reporting reuses `GET /stock/low` (Phase 3, D-55).
+  - name: content
+    description: >
+      Landing page content blocks (Phase 6, D-99). `manager+` reads and
+      writes one key (hero/about/hours/contacts/social/seo) per locale;
+      each key's `data` is validated server-side against its O-19 shape.
+      `GET /public/shop` (a later task) composes these with fallback
+      (D-104) for the public landing.
 
 paths:
   /healthz:
@@ -2472,6 +2479,93 @@ paths:
           $ref: "#/components/responses/Unauthenticated"
         "403":
           $ref: "#/components/responses/Forbidden"
+
+  /content/{key}:
+    get:
+      operationId: getContent
+      tags: [content]
+      summary: Get a content block's saved locales.
+      description: >
+        Requires `manager+`. Returns every locale saved for `key`
+        (`locales.uz`/`ru`/`en`, each absent when that locale was never
+        saved) — no fallback here (O-19); `GET /public/shop`, a later
+        task, applies the requested → uz fallback (D-104) for the public
+        landing.
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/ContentKey"
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentResource"
+        "400":
+          description: "`key` is not one of `ContentKey`'s values. `400 VALIDATION_FAILED details.fields.key: invalid`."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    put:
+      operationId: putContent
+      tags: [content]
+      summary: Save one locale of a content block.
+      description: >
+        Requires `manager+`. Upserts `(shop_id, key, locale)`; `data` is
+        validated against `key`'s O-19 shape (`ContentHero`/`About`/
+        `Hours`/`Contacts`/`Social`/`Seo`) — unknown fields and a missing
+        required field are both `422 VALIDATION_FAILED details.fields`.
+        Saving one locale never touches another (D-104: a block may have
+        only some locales filled).
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/ContentKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ContentPut"
+      responses:
+        "200":
+          description: OK. Returns the stored block.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContentBlock"
+        "400":
+          description: "`key` is not one of `ContentKey`'s values. `400 VALIDATION_FAILED details.fields.key: invalid`."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          description: >
+            `422 VALIDATION_FAILED details.fields` naming each field that
+            fails `key`'s schema (O-19) — missing required, unknown
+            field, an invalid `hours.days` set (not exactly 7 distinct
+            `mon`..`sun` values, or `open`/`close` missing or `open` not
+            before `close` on a non-`closed` day), or a `mapUrl` that is
+            not `https`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
 components:
   securitySchemes:
@@ -5029,6 +5123,228 @@ components:
             $ref: "#/components/schemas/SalesByProductRow"
         nextCursor:
           type: ["string", "null"]
+
+    ContentKey:
+      type: string
+      description: One of the six landing content blocks (04-DATA-MODEL.md § 6, D-99).
+      enum: [hero, about, hours, contacts, social, seo]
+
+    ContentLocaleBlock:
+      type: object
+      description: One locale's saved content for a key.
+      required:
+        - data
+        - updatedAt
+      properties:
+        data:
+          type: object
+          additionalProperties: true
+          description: >
+            Raw per-key data, shaped per `ContentKey` (`ContentHero`,
+            `ContentAbout`, `ContentHours`, `ContentContacts`,
+            `ContentSocial` or `ContentSeo`, O-19) — modelled as a
+            generic object here because the discriminator (`key`) is a
+            sibling path parameter, not a field of this object, so a
+            `oneOf` union does not apply; the server validates it against
+            the matching named schema by hand.
+        updatedAt:
+          type: string
+          format: date-time
+        updatedBy:
+          type: string
+          format: uuid
+          description: Absent when the row predates `updated_by` being set (e.g. the demo seed).
+
+    ContentResource:
+      type: object
+      description: Response body for `GET /content/{key}` — every locale saved for that key, no fallback (O-19).
+      required:
+        - key
+        - locales
+      properties:
+        key:
+          $ref: "#/components/schemas/ContentKey"
+        locales:
+          type: object
+          description: Each of `uz`/`ru`/`en` is absent when that locale was never saved.
+          properties:
+            uz:
+              $ref: "#/components/schemas/ContentLocaleBlock"
+            ru:
+              $ref: "#/components/schemas/ContentLocaleBlock"
+            en:
+              $ref: "#/components/schemas/ContentLocaleBlock"
+
+    ContentPut:
+      type: object
+      description: Request body for `PUT /content/{key}`.
+      required:
+        - locale
+        - data
+      properties:
+        locale:
+          $ref: "#/components/schemas/Locale"
+        data:
+          type: object
+          additionalProperties: true
+          description: Validated server-side against `key`'s O-19 schema; see `ContentLocaleBlock.data`.
+
+    ContentBlock:
+      type: object
+      description: Response body for `PUT /content/{key}` — the stored block.
+      required:
+        - key
+        - locale
+        - data
+        - updatedAt
+      properties:
+        key:
+          $ref: "#/components/schemas/ContentKey"
+        locale:
+          $ref: "#/components/schemas/Locale"
+        data:
+          type: object
+          additionalProperties: true
+        updatedAt:
+          type: string
+          format: date-time
+        updatedBy:
+          type: string
+          format: uuid
+
+    ContentHero:
+      type: object
+      description: >
+        O-19 shape for `key: hero`. Not referenced by any path directly
+        (`ContentPut.data`/`ContentLocaleBlock.data` are generic — see
+        their description) — generated for `content.Service` to validate
+        and decode against (`skip-prune: true`, `api/oapi-codegen.yaml`).
+      additionalProperties: false
+      required:
+        - title
+      properties:
+        title:
+          type: string
+          maxLength: 200
+        tagline:
+          type: string
+          maxLength: 300
+        imageMediaId:
+          type: string
+          format: uuid
+
+    ContentAbout:
+      type: object
+      description: >-
+        O-19 shape for `key: about`. See `ContentHero`'s description for why this is unreferenced by any path.
+      additionalProperties: false
+      required:
+        - body
+      properties:
+        title:
+          type: string
+          maxLength: 200
+        body:
+          type: string
+          maxLength: 5000
+          description: Plain text; paragraphs are separated by blank lines. No HTML (O-19).
+
+    ContentHoursDay:
+      type: object
+      description: One row of `ContentHours.days`.
+      additionalProperties: false
+      required:
+        - day
+        - closed
+      properties:
+        day:
+          type: string
+          enum: [mon, tue, wed, thu, fri, sat, sun]
+        closed:
+          type: boolean
+        open:
+          type: string
+          pattern: '^([01]\d|2[0-3]):[0-5]\d$'
+          description: "`HH:MM`, required when `closed` is false."
+        close:
+          type: string
+          pattern: '^([01]\d|2[0-3]):[0-5]\d$'
+          description: "`HH:MM`, required when `closed` is false; must be after `open`."
+
+    ContentHours:
+      type: object
+      description: >
+        O-19/D-107 shape for `key: hours`. See `ContentHero`'s
+        description for why this is unreferenced by any path. `days`
+        must have exactly 7 rows, one per distinct weekday (validated in
+        Go — JSON Schema's `minItems`/`maxItems` catch the count but not
+        the "distinct, all seven" rule).
+      additionalProperties: false
+      required:
+        - days
+      properties:
+        days:
+          type: array
+          minItems: 7
+          maxItems: 7
+          items:
+            $ref: "#/components/schemas/ContentHoursDay"
+        note:
+          type: string
+          maxLength: 300
+          description: Free text; the only translated part of this block (D-107).
+
+    ContentContacts:
+      type: object
+      description: >-
+        O-19 shape for `key: contacts`. See `ContentHero`'s description for why this is unreferenced by any path.
+      additionalProperties: false
+      required:
+        - phone
+        - address
+      properties:
+        phone:
+          type: string
+          maxLength: 30
+        address:
+          type: string
+          maxLength: 300
+        mapUrl:
+          type: string
+          format: uri
+          maxLength: 500
+          description: Yandex Maps link; `https` only (validated in Go).
+
+    ContentSocial:
+      type: object
+      description: >-
+        O-19 shape for `key: social`. See `ContentHero`'s description for why this is unreferenced by any path.
+      additionalProperties: false
+      properties:
+        telegram:
+          type: string
+          format: uri
+          maxLength: 300
+        instagram:
+          type: string
+          format: uri
+          maxLength: 300
+
+    ContentSeo:
+      type: object
+      description: >-
+        O-19 shape for `key: seo`. See `ContentHero`'s description for why this is unreferenced by any path.
+      additionalProperties: false
+      required:
+        - title
+        - description
+      properties:
+        title:
+          type: string
+          maxLength: 70
+        description:
+          type: string
+          maxLength: 200
 
   parameters:
     Limit:

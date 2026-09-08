@@ -82,7 +82,7 @@ func newAuthTestFixture(t *testing.T, cfgOverrides func(*config.Config)) authTes
 	salesSvc := salesmod.NewService(q)
 
 	return authTestFixture{
-		router:   NewRouter(testLogger(), pool, authSvc, shopSvc, mediaSvc, nil, catalogSvc, stockSvc, crmSvc, testReportsService(), salesSvc),
+		router:   NewRouter(testLogger(), pool, authSvc, shopSvc, mediaSvc, nil, catalogSvc, stockSvc, crmSvc, testReportsService(), salesSvc, testContentService()),
 		shopID:   shop.ID,
 		userID:   user.ID,
 		username: user.Username,
