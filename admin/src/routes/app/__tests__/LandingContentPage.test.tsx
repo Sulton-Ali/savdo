@@ -51,15 +51,20 @@ function mockContentGet(resources: Record<string, unknown>) {
   }) as never);
 }
 
+/** Returns the render result plus the `QueryClient` it was rendered with, so
+ * a test can call `queryClient.invalidateQueries` to simulate the kind of
+ * background refetch `staleTime: 0`/`refetchOnWindowFocus` produce in the
+ * real app. */
 function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  const view = render(
     <QueryClientProvider client={queryClient}>
       <AntApp>
         <LandingContentPage />
       </AntApp>
     </QueryClientProvider>,
   );
+  return { ...view, queryClient };
 }
 
 describe("LandingContentPage", () => {
@@ -96,6 +101,11 @@ describe("LandingContentPage", () => {
     expect(screen.getByText("SEO")).toBeTruthy();
   });
 
+  // Every test below that touches a non-active locale's pane clicks that
+  // tab first — interacting with a hidden (inactive) Tabs pane's DOM
+  // directly reproducibly hangs the jsdom test runner (found while writing
+  // this file's cross-tab test), so always click the tab into view before
+  // querying or firing events inside it.
   it("switching the locale tab shows that locale's saved data", async () => {
     mockContentGet({
       hero: resource("hero", { uz: { title: "Salom" }, ru: { title: "Privet" } }),
@@ -249,6 +259,88 @@ describe("LandingContentPage", () => {
     // Switch to ru: the edit must still be there, untouched by the uz save.
     fireEvent.click(screen.getByRole("tab", { name: "Русский" }));
     expect(await screen.findByDisplayValue("Privet edited")).toBeTruthy();
+  });
+
+  // Re-review MAJOR: `form.isFieldsTouched()` flips true from the card's own
+  // first `setFieldsValue` populate and never goes false again, so it must
+  // not gate a resync — a card the user never edited still has to pick up a
+  // background refetch (`staleTime: 0`/`refetchOnWindowFocus` in the real
+  // app; simulated here via `queryClient.invalidateQueries`).
+  it("resyncs an untouched card when its data is refetched in the background", async () => {
+    mockContentGet({
+      hero: resource("hero", { uz: { title: "Salom" } }),
+      about: resource("about", {}),
+      hours: resource("hours", {}),
+      contacts: resource("contacts", {}),
+      social: resource("social", {}),
+      seo: resource("seo", {}),
+    });
+
+    const { queryClient } = renderPage();
+
+    await screen.findByDisplayValue("Salom");
+
+    mockContentGet({
+      hero: resource("hero", { uz: { title: "Salom updated" } }),
+      about: resource("about", {}),
+      hours: resource("hours", {}),
+      contacts: resource("contacts", {}),
+      social: resource("social", {}),
+      seo: resource("seo", {}),
+    });
+    await queryClient.invalidateQueries({ queryKey: ["content", "hero"] });
+
+    expect(await screen.findByDisplayValue("Salom updated")).toBeTruthy();
+  });
+
+  it("resyncs ru from a later background refetch after ru's own save", async () => {
+    mockContentGet({
+      hero: resource("hero", { uz: { title: "Salom" }, ru: { title: "Privet" } }),
+      about: resource("about", {}),
+      hours: resource("hours", {}),
+      contacts: resource("contacts", {}),
+      social: resource("social", {}),
+      seo: resource("seo", {}),
+    });
+    mockedApi.PUT.mockResolvedValueOnce(
+      jsonResult({
+        key: "hero",
+        locale: "ru",
+        data: { title: "Privet edited" },
+        updatedAt: "2026-01-01T00:00:00Z",
+      }),
+    );
+
+    const { queryClient } = renderPage();
+
+    await screen.findByDisplayValue("Salom");
+    fireEvent.click(screen.getByRole("tab", { name: "Русский" }));
+    const ruTitleInput = await screen.findByDisplayValue("Privet");
+    fireEvent.change(ruTitleInput, { target: { value: "Privet edited" } });
+
+    const ruHeroCard = ruTitleInput.closest(".ant-card") as HTMLElement;
+    fireEvent.click(within(ruHeroCard).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(mockedApi.PUT).toHaveBeenCalledWith("/content/{key}", {
+        params: { path: { key: "hero" } },
+        body: { locale: "ru", data: { title: "Privet edited" } },
+      });
+    });
+    await screen.findByDisplayValue("Privet edited");
+
+    // The save cleared ru's edit flag, so a later refetch must still land.
+    mockContentGet({
+      hero: resource("hero", { uz: { title: "Salom" }, ru: { title: "Privet refetched" } }),
+      about: resource("about", {}),
+      hours: resource("hours", {}),
+      contacts: resource("contacts", {}),
+      social: resource("social", {}),
+      seo: resource("seo", {}),
+    });
+    await queryClient.invalidateQueries({ queryKey: ["content", "hero"] });
+
+    expect(await screen.findByDisplayValue("Privet refetched")).toBeTruthy();
   });
 
   it("hours form renders exactly 7 fixed weekday rows and disables open/close once closed", async () => {

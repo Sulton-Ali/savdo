@@ -63,18 +63,30 @@ export function ContentBlockCard<TValues extends object, TData extends Record<st
   // reasons that have nothing to do with its own locale: a background
   // refetch, or *another* locale's save landing in the same cache entry.
   // Populate unconditionally only on this instance's first successful load;
-  // after that, resync only when the user has not touched this form, so an
+  // after that, resync only when the user has not made an edit since, so an
   // in-progress edit in one locale is never silently overwritten by
   // something happening in another (review MAJOR 2). `locale` itself never
   // changes across one instance's lifetime, so `hasLoadedRef` only needs to
   // track "have we populated at all yet".
+  //
+  // "Has an edit" is tracked with `userEditedRef`, set from the `Form`'s
+  // `onValuesChange` below — fired only by a real field interaction, never
+  // by our own `form.setFieldsValue` calls (`@rc-component/form`'s
+  // `setFieldsValue` never calls the `onValuesChange` callback, only a
+  // field's own trigger does) — unlike `form.isFieldsTouched()`, which a
+  // first review round found *does* flip true from `setFieldsValue` itself
+  // whenever it sets a field away from its unset default, so it can never
+  // go false again and a legitimate untouched resync (e.g. a background
+  // refetch) never lands (review MAJOR, re-review).
   const hasLoadedRef = useRef(false);
+  const userEditedRef = useRef(false);
   useEffect(() => {
     if (isPending) {
       return;
     }
-    if (!hasLoadedRef.current || !form.isFieldsTouched()) {
+    if (!hasLoadedRef.current || !userEditedRef.current) {
       hasLoadedRef.current = true;
+      userEditedRef.current = false;
       form.setFieldsValue(buildInitialValues(resource, locale) as TValues);
     }
   }, [resource, locale, isPending, buildInitialValues, form]);
@@ -101,10 +113,11 @@ export function ContentBlockCard<TValues extends object, TData extends Record<st
         },
       );
       // This locale's own successful save: always resync to the
-      // server-confirmed values, even though the form is "touched" from the
-      // edit just submitted — the guard above only protects against *other*
-      // tabs' pushes, never this tab's own save.
+      // server-confirmed values, even though this form has an edit pending
+      // from the submit that just happened — the guard above only protects
+      // against *other* tabs' pushes, never this tab's own save.
       if (updated) {
+        userEditedRef.current = false;
         form.setFieldsValue(buildInitialValues(updated, locale) as TValues);
       }
       notification.success({ message: t("content.saved") });
@@ -124,6 +137,9 @@ export function ContentBlockCard<TValues extends object, TData extends Record<st
         <Form<TValues>
           form={form}
           layout="vertical"
+          onValuesChange={() => {
+            userEditedRef.current = true;
+          }}
           onFinish={(values) => saveMutation.mutate(values)}
         >
           {hint}
