@@ -261,3 +261,86 @@ SELECT t.* FROM product_translations t
 JOIN products p ON p.id = t.product_id AND p.shop_id = $2
 WHERE t.product_id = $1
 ORDER BY t.locale;
+
+-- Phase 6 public catalogue (docs/06-ROADMAP.md Phase 6, D-99, D-103). Both
+-- queries below join categories (INNER, not LEFT) so "in active categories
+-- only" and the category_slug output fall out of the same join, and a
+-- product with no category or with a soft-deleted/inactive category is
+-- excluded rather than surfaced with a null category. Neither embeds a
+-- cover image: the handler reuses ListCoverImagesForProducts (D-83, same
+-- one-query-per-page pattern ListProducts already uses) against this
+-- query's page of product ids instead of duplicating that selection logic
+-- (flagged cover else first by position) in another LATERAL here.
+-- Translations, variants and images for the product-detail page reuse
+-- ListProductTranslations, ListVariantsForCashier (filtered to is_active
+-- in the handler — its column set already excludes cost_override, the
+-- only thing rule 8 requires a separate query for) and ListProductImages.
+
+-- name: ListPublicProducts :many
+SELECT
+    p.id, p.shop_id, p.category_id, p.unit_id, p.slug, p.sku,
+    p.base_price, p.promo_price, p.promo_from, p.promo_to,
+    p.is_featured, p.created_at,
+    c.slug AS category_slug,
+    COALESCE(t.locale, '') AS locale_used,
+    COALESCE(t.name, '') AS name
+FROM products p
+JOIN categories c ON c.id = p.category_id AND c.shop_id = p.shop_id AND c.deleted_at IS NULL AND c.is_active
+LEFT JOIN LATERAL (
+    SELECT pt.locale, pt.name
+    FROM product_translations pt
+    WHERE pt.product_id = p.id
+    ORDER BY
+        CASE
+            WHEN pt.locale = sqlc.arg('locale') THEN 0
+            WHEN pt.locale = 'uz' THEN 1
+            ELSE 2
+        END
+    LIMIT 1
+) t ON true
+WHERE p.shop_id = sqlc.arg('shop_id')
+    AND p.deleted_at IS NULL
+    AND p.is_active
+    AND (sqlc.narg('category_slug')::text IS NULL OR c.slug = sqlc.narg('category_slug'))
+    AND (sqlc.narg('featured')::bool IS NULL OR p.is_featured = sqlc.narg('featured'))
+    AND (
+        sqlc.narg('q')::text IS NULL
+        OR EXISTS (
+            SELECT 1 FROM product_translations spt
+            WHERE spt.product_id = p.id
+                AND (spt.name ILIKE '%' || sqlc.narg('q') || '%' OR spt.name % sqlc.narg('q'))
+        )
+    )
+    AND (
+        sqlc.narg('cursor_created_at')::timestamptz IS NULL
+        OR (p.created_at, p.id) < (sqlc.narg('cursor_created_at')::timestamptz, sqlc.narg('cursor_id')::uuid)
+    )
+ORDER BY p.created_at DESC, p.id DESC
+LIMIT sqlc.arg('limit');
+
+-- name: GetPublicProductBySlug :one
+SELECT
+    p.id, p.shop_id, p.category_id, p.unit_id, p.slug, p.sku,
+    p.base_price, p.promo_price, p.promo_from, p.promo_to,
+    p.is_featured, p.created_at,
+    c.slug AS category_slug,
+    COALESCE(t.locale, '') AS locale_used,
+    COALESCE(t.name, '') AS name
+FROM products p
+JOIN categories c ON c.id = p.category_id AND c.shop_id = p.shop_id AND c.deleted_at IS NULL AND c.is_active
+LEFT JOIN LATERAL (
+    SELECT pt.locale, pt.name
+    FROM product_translations pt
+    WHERE pt.product_id = p.id
+    ORDER BY
+        CASE
+            WHEN pt.locale = sqlc.arg('locale') THEN 0
+            WHEN pt.locale = 'uz' THEN 1
+            ELSE 2
+        END
+    LIMIT 1
+) t ON true
+WHERE p.shop_id = sqlc.arg('shop_id')
+    AND p.slug = sqlc.arg('slug')
+    AND p.deleted_at IS NULL
+    AND p.is_active;

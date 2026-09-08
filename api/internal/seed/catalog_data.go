@@ -150,6 +150,7 @@ type productSpec struct {
 	descUz, descRu, descEn  string
 	basePrice, costPrice    string
 	promoPrice              string // "" for no promo
+	isFeatured              bool   // D-101: curated manually, a handful of the demo catalogue
 	variants                []variantSpec
 	images                  []imageSpec
 }
@@ -189,7 +190,7 @@ var productSpecs = []productSpec{
 		slug: "men-shirt-classic-white", categorySlug: "men-shirts", sku: "MSH-01",
 		nameUz: "Klassik oq ko‘ylak", nameRu: "Классическая белая рубашка", nameEn: "Classic white shirt",
 		descUz: "Ofis va rasmiy tadbirlar uchun paxta ko‘ylak.", descRu: "Хлопковая рубашка для офиса и торжественных случаев.", descEn: "Cotton shirt for the office and formal occasions.",
-		basePrice: "189000.00", costPrice: "95000.00",
+		basePrice: "189000.00", costPrice: "95000.00", isFeatured: true,
 		variants: buildVariants(sizesXStoXL, []string{cOq, cKok}, 6, map[int]string{0: "199000.00"}, nil),
 		images:   productImages(2, "1f6feb", "Classic White Shirt", true),
 	},
@@ -273,7 +274,7 @@ var productSpecs = []productSpec{
 		slug: "men-jacket-leather", categorySlug: "men-jackets", sku: "MJK-01",
 		nameUz: "Charm kurtka", nameRu: "Кожаная куртка", nameEn: "Leather jacket",
 		descUz: "Haqiqiy charmdan tikilgan qishki kurtka.", descRu: "Куртка из натуральной кожи.", descEn: "Jacket cut from genuine leather.",
-		basePrice: "1290000.00", costPrice: "850000.00",
+		basePrice: "1290000.00", costPrice: "850000.00", isFeatured: true,
 		variants: buildVariants(sizesStoXXL, []string{cQora, cJigar}, 5, map[int]string{0: "1350000.00"}, nil),
 		images:   productImages(4, "24292f", "Leather Jacket", true),
 	},
@@ -315,7 +316,7 @@ var productSpecs = []productSpec{
 		slug: "women-dress-summer", categorySlug: "women-dresses", sku: "WDR-01",
 		nameUz: "Yozgi ko‘ylak", nameRu: "Летнее платье", nameEn: "Summer dress",
 		descUz: "Yengil va salqin yozgi ko‘ylak.", descRu: "Лёгкое и прохладное летнее платье.", descEn: "A light, breezy summer dress.",
-		basePrice: "259000.00", costPrice: "130000.00", promoPrice: "219000.00",
+		basePrice: "259000.00", costPrice: "130000.00", promoPrice: "219000.00", isFeatured: true,
 		variants: buildVariants(sizesXStoXL, []string{cSariq, cPushti}, 6, nil, nil),
 		images:   productImages(3, "bf8700", "Summer Dress", true),
 	},
@@ -399,7 +400,7 @@ var productSpecs = []productSpec{
 		slug: "kids-tshirt", categorySlug: "kids", sku: "KID-01",
 		nameUz: "Bolalar futbolkasi", nameRu: "Детская футболка", nameEn: "Kids t-shirt",
 		descUz: "Yengil paxta futbolka, kundalik kiyish uchun.", descRu: "Лёгкая хлопковая футболка на каждый день.", descEn: "A light cotton t-shirt for everyday play.",
-		basePrice: "89000.00", costPrice: "40000.00",
+		basePrice: "89000.00", costPrice: "40000.00", isFeatured: true,
 		variants: buildVariants(kidsSizes, []string{cQizil, cKok, cSariq}, 6, nil, nil),
 		images:   productImages(2, "cf222e", "Kids T-shirt", true),
 	},

@@ -186,3 +186,49 @@ SELECT count(*) FROM stock_levels WHERE shop_id = $1;
 -- `savdo stock rebuild`'s summary line: how many stock_movements rows the
 -- rebuild's sum was computed from.
 SELECT count(*) FROM stock_movements WHERE shop_id = $1;
+
+-- Phase 6 public availability (D-99, D-103: "in_stock|low|out_of_stock",
+-- never a raw quantity, in the response — that mapping happens in the
+-- service, these queries only sum the ledger-derived levels). Both LEFT
+-- JOIN stock_levels/locations so a variant with no stock_levels row at all
+-- (never moved) still returns one row with qty 0, the same "absent row
+-- means untracked, not necessarily low/out" reasoning ListLow's own doc
+-- comment uses — unlike ListLow, these do not require at least one
+-- stock_levels row to exist, since "does this product/page have any
+-- availability data at all" needs every variant represented, tracked or
+-- not. The threshold returned is the product's own low_stock_threshold
+-- override, else the shop's default (D-44) — there is no per-variant
+-- threshold column.
+
+-- name: SumVariantQtyByProduct :many
+SELECT
+    pv.id AS variant_id,
+    COALESCE(SUM(sl.qty) FILTER (WHERE l.is_active), 0)::numeric(12,3) AS qty,
+    COALESCE(p.low_stock_threshold, s.low_stock_threshold) AS threshold
+FROM product_variants pv
+JOIN products p ON p.id = pv.product_id AND p.shop_id = pv.shop_id
+JOIN shops s ON s.id = pv.shop_id
+LEFT JOIN stock_levels sl ON sl.variant_id = pv.id AND sl.shop_id = pv.shop_id
+LEFT JOIN locations l ON l.id = sl.location_id AND l.shop_id = pv.shop_id
+WHERE pv.shop_id = sqlc.arg('shop_id')
+    AND pv.product_id = sqlc.arg('product_id')
+    AND pv.deleted_at IS NULL
+GROUP BY pv.id, p.low_stock_threshold, s.low_stock_threshold;
+
+-- name: SumVariantQtyForProducts :many
+-- Same as SumVariantQtyByProduct but for a whole page of products in one
+-- query (no N+1), for the public product list's per-line availability.
+SELECT
+    pv.product_id,
+    pv.id AS variant_id,
+    COALESCE(SUM(sl.qty) FILTER (WHERE l.is_active), 0)::numeric(12,3) AS qty,
+    COALESCE(p.low_stock_threshold, s.low_stock_threshold) AS threshold
+FROM product_variants pv
+JOIN products p ON p.id = pv.product_id AND p.shop_id = pv.shop_id
+JOIN shops s ON s.id = pv.shop_id
+LEFT JOIN stock_levels sl ON sl.variant_id = pv.id AND sl.shop_id = pv.shop_id
+LEFT JOIN locations l ON l.id = sl.location_id AND l.shop_id = pv.shop_id
+WHERE pv.shop_id = sqlc.arg('shop_id')
+    AND pv.product_id = ANY(sqlc.arg('product_ids')::uuid[])
+    AND pv.deleted_at IS NULL
+GROUP BY pv.product_id, pv.id, p.low_stock_threshold, s.low_stock_threshold;

@@ -231,6 +231,29 @@ func TestSeedCatalog_seedsARealisticCatalogueIdempotently(t *testing.T) {
 	taggedProduct := findProductBySlug(t, products, taggedProductSlug)
 	assertTaggedImageMatchesSpecVariant(ctx, t, q, shopReport.ShopID, taggedProduct.ID)
 
+	// D-101: featured products are curated manually via is_featured — the
+	// seeded catalogue marks a small, fixed handful so the landing's
+	// featured section (Phase 6) has something to show against a fresh
+	// seed.
+	wantFeaturedSlugs := map[string]bool{
+		"men-shirt-classic-white": true,
+		"men-jacket-leather":      true,
+		"women-dress-summer":      true,
+		"kids-tshirt":             true,
+	}
+	gotFeatured := 0
+	for _, p := range products {
+		if p.IsFeatured {
+			gotFeatured++
+			if !wantFeaturedSlugs[p.Slug] {
+				t.Errorf("product %q is featured but is not in the expected featured set", p.Slug)
+			}
+		}
+	}
+	if gotFeatured != len(wantFeaturedSlugs) {
+		t.Errorf("featured product count = %d, want %d", gotFeatured, len(wantFeaturedSlugs))
+	}
+
 	second, err := seed.Catalog(ctx, q, catalogHandler, mediaSvc, shopReport.ShopID, owner.ID)
 	if err != nil {
 		t.Fatalf("second Catalog() error = %v", err)

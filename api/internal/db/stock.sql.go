@@ -543,6 +543,122 @@ func (q *Queries) SumMovementsForLevel(ctx context.Context, arg SumMovementsForL
 	return qty, err
 }
 
+const sumVariantQtyByProduct = `-- name: SumVariantQtyByProduct :many
+
+SELECT
+    pv.id AS variant_id,
+    COALESCE(SUM(sl.qty) FILTER (WHERE l.is_active), 0)::numeric(12,3) AS qty,
+    COALESCE(p.low_stock_threshold, s.low_stock_threshold) AS threshold
+FROM product_variants pv
+JOIN products p ON p.id = pv.product_id AND p.shop_id = pv.shop_id
+JOIN shops s ON s.id = pv.shop_id
+LEFT JOIN stock_levels sl ON sl.variant_id = pv.id AND sl.shop_id = pv.shop_id
+LEFT JOIN locations l ON l.id = sl.location_id AND l.shop_id = pv.shop_id
+WHERE pv.shop_id = $1
+    AND pv.product_id = $2
+    AND pv.deleted_at IS NULL
+GROUP BY pv.id, p.low_stock_threshold, s.low_stock_threshold
+`
+
+type SumVariantQtyByProductParams struct {
+	ShopID    uuid.UUID `json:"shop_id"`
+	ProductID uuid.UUID `json:"product_id"`
+}
+
+type SumVariantQtyByProductRow struct {
+	VariantID uuid.UUID      `json:"variant_id"`
+	Qty       pgtype.Numeric `json:"qty"`
+	Threshold int32          `json:"threshold"`
+}
+
+// Phase 6 public availability (D-99, D-103: "in_stock|low|out_of_stock",
+// never a raw quantity, in the response — that mapping happens in the
+// service, these queries only sum the ledger-derived levels). Both LEFT
+// JOIN stock_levels/locations so a variant with no stock_levels row at all
+// (never moved) still returns one row with qty 0, the same "absent row
+// means untracked, not necessarily low/out" reasoning ListLow's own doc
+// comment uses — unlike ListLow, these do not require at least one
+// stock_levels row to exist, since "does this product/page have any
+// availability data at all" needs every variant represented, tracked or
+// not. The threshold returned is the product's own low_stock_threshold
+// override, else the shop's default (D-44) — there is no per-variant
+// threshold column.
+func (q *Queries) SumVariantQtyByProduct(ctx context.Context, arg SumVariantQtyByProductParams) ([]SumVariantQtyByProductRow, error) {
+	rows, err := q.db.Query(ctx, sumVariantQtyByProduct, arg.ShopID, arg.ProductID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SumVariantQtyByProductRow
+	for rows.Next() {
+		var i SumVariantQtyByProductRow
+		if err := rows.Scan(&i.VariantID, &i.Qty, &i.Threshold); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const sumVariantQtyForProducts = `-- name: SumVariantQtyForProducts :many
+SELECT
+    pv.product_id,
+    pv.id AS variant_id,
+    COALESCE(SUM(sl.qty) FILTER (WHERE l.is_active), 0)::numeric(12,3) AS qty,
+    COALESCE(p.low_stock_threshold, s.low_stock_threshold) AS threshold
+FROM product_variants pv
+JOIN products p ON p.id = pv.product_id AND p.shop_id = pv.shop_id
+JOIN shops s ON s.id = pv.shop_id
+LEFT JOIN stock_levels sl ON sl.variant_id = pv.id AND sl.shop_id = pv.shop_id
+LEFT JOIN locations l ON l.id = sl.location_id AND l.shop_id = pv.shop_id
+WHERE pv.shop_id = $1
+    AND pv.product_id = ANY($2::uuid[])
+    AND pv.deleted_at IS NULL
+GROUP BY pv.product_id, pv.id, p.low_stock_threshold, s.low_stock_threshold
+`
+
+type SumVariantQtyForProductsParams struct {
+	ShopID     uuid.UUID   `json:"shop_id"`
+	ProductIds []uuid.UUID `json:"product_ids"`
+}
+
+type SumVariantQtyForProductsRow struct {
+	ProductID uuid.UUID      `json:"product_id"`
+	VariantID uuid.UUID      `json:"variant_id"`
+	Qty       pgtype.Numeric `json:"qty"`
+	Threshold int32          `json:"threshold"`
+}
+
+// Same as SumVariantQtyByProduct but for a whole page of products in one
+// query (no N+1), for the public product list's per-line availability.
+func (q *Queries) SumVariantQtyForProducts(ctx context.Context, arg SumVariantQtyForProductsParams) ([]SumVariantQtyForProductsRow, error) {
+	rows, err := q.db.Query(ctx, sumVariantQtyForProducts, arg.ShopID, arg.ProductIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SumVariantQtyForProductsRow
+	for rows.Next() {
+		var i SumVariantQtyForProductsRow
+		if err := rows.Scan(
+			&i.ProductID,
+			&i.VariantID,
+			&i.Qty,
+			&i.Threshold,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const truncateLevelsForShop = `-- name: TruncateLevelsForShop :exec
 DELETE FROM stock_levels WHERE shop_id = $1
 `
