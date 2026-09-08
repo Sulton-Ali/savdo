@@ -49,10 +49,14 @@ function DrawerRow({ label, Icon, onPress }: DrawerRowProps) {
  * `_layout.tsx` Stack (T12 deliverable 2) — pushing to them from here
  * switches to that tab and pushes the target on top of its stack, tab bar
  * still visible, back button returns to the Stock tab's levels page.
- * "Customers" is a genuine drawer-level sibling of the `(tabs)` group
- * (`(app)/customers/`, unchanged from Phase 5 T4) since it's no longer one
- * of the five bottom tabs. "Drafts" (T14/D-87..D-90) is the same kind of
- * sibling (`(app)/drafts/`) and sits first per D-90's row order.
+ * "Customers" and "Drafts" (T14/D-87..D-90) are two more nested Stacks
+ * inside `(tabs)` (`(app)/(tabs)/customers/`, `(app)/(tabs)/drafts/`),
+ * hidden from the tab bar itself (`(tabs)/_layout.tsx`) rather than
+ * top-level `Drawer.Screen`s — pushing to them from here behaves the same
+ * as "Purchases"/"Low stock"/"Adjustment": switches to that hidden tab,
+ * tab bar and header still visible (they were briefly `Drawer.Screen`
+ * siblings in T12, which left them with no shell at all; T21 fixed that by
+ * moving them back inside `(tabs)`).
  */
 export function AppDrawerContent(
   props: DrawerContentComponentProps & { onOpenSettings: () => void },

@@ -10,12 +10,14 @@ import { useSession } from "@/lib/session";
 /**
  * The five most-used bottom tabs (T12/D-90, replacing the earlier six-tab
  * bar that also carried Customers): Home, Quick sale, Sales list, Products,
- * Stock — in that order. Customers, Purchases, Low stock, Adjustment and
- * Settings moved to the drawer this layout is nested inside
- * (`(app)/_layout.tsx`'s `Drawer`, `components/AppDrawerContent.tsx`); this
- * `<Tabs>` no longer renders its own settings button — `headerLeft` opens
- * the parent drawer instead (menu button *and* an edge swipe, both handled
- * by `expo-router/drawer` itself). `navigation.dispatch({type:
+ * Stock — in that order. Purchases, Low stock, Adjustment and Settings
+ * moved to the drawer this layout is nested inside (`(app)/_layout.tsx`'s
+ * `Drawer`, `components/AppDrawerContent.tsx`); Customers and Drafts are
+ * also reached from that drawer but stay nested here as hidden tabs (see
+ * the doc comment further down) rather than leaving `(tabs)` entirely.
+ * This `<Tabs>` no longer renders its own settings button — `headerLeft`
+ * opens the parent drawer instead (menu button *and* an edge swipe, both
+ * handled by `expo-router/drawer` itself). `navigation.dispatch({type:
  * "TOGGLE_DRAWER"})` is the drawer-router action type
  * (`expo-router/build/react-navigation/routers/DrawerRouter.js`) — it
  * bubbles up from this nested `Tabs` navigator to the parent `Drawer` the
@@ -38,6 +40,26 @@ import { useSession } from "@/lib/session";
  * `index` screen reuses this outer header. "Home" is the only flat,
  * single-screen tab with nothing nested under it, so it always shows this
  * outer header — no such gating needed for it.
+ *
+ * "Customers" and "Drafts" (T21, fixing a T12 regression) are two more
+ * nested Stacks here, same shape and same `headerShown` gating as the four
+ * above, but hidden from the tab bar itself since D-90 keeps them out of
+ * the five visible tabs (they're reached from the drawer,
+ * `components/AppDrawerContent.tsx`) — `getFocusedRouteNameFromRoute`
+ * needs the per-tab `route` the options-resolver function receives to read
+ * each hidden tab's own nested Stack state, which is why they can't use
+ * the `href: null` shortcut `Tabs.Screen` otherwise supports for hiding a
+ * tab: that shortcut is only applied by expo-router's `Tabs` wrapper when
+ * `options` is a plain object, not a function (confirmed against the
+ * installed package,
+ * `node_modules/expo-router/build/layouts/TabsClient.js`: `typeof
+ * screen.options !== 'function' && screen.options?.href !== undefined`) —
+ * with a function-form `options` (needed here for the gating) `href` would
+ * silently be ignored and the tab would stay visible. `tabBarItemStyle:
+ * { display: "none" }` plus `tabBarButton: () => null` reproduce exactly
+ * what that shortcut does internally, so the tab is hidden the same way
+ * (not clickable, no bar space) while still being reachable by
+ * `router.push`/`Link`, which don't go through `tabBarButton` at all.
  */
 export default function AppTabsLayout() {
   const { t } = useTranslation();
@@ -110,6 +132,24 @@ export default function AppTabsLayout() {
         options={({ route }) => ({
           title: t("mobile.shell.tabs.stock"),
           tabBarIcon: ({ color, size }) => <Warehouse color={color} size={size} />,
+          headerShown: (getFocusedRouteNameFromRoute(route) ?? "index") === "index",
+        })}
+      />
+      <Tabs.Screen
+        name="drafts"
+        options={({ route }) => ({
+          title: t("nav.drafts"),
+          tabBarItemStyle: { display: "none" },
+          tabBarButton: () => null,
+          headerShown: (getFocusedRouteNameFromRoute(route) ?? "index") === "index",
+        })}
+      />
+      <Tabs.Screen
+        name="customers"
+        options={({ route }) => ({
+          title: t("nav.customers"),
+          tabBarItemStyle: { display: "none" },
+          tabBarButton: () => null,
           headerShown: (getFocusedRouteNameFromRoute(route) ?? "index") === "index",
         })}
       />
