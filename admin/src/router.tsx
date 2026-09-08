@@ -3,6 +3,8 @@ import { createRouter } from "@tanstack/react-router";
 import { queryClient } from "./lib/queryClient";
 import { attributesRoute } from "./routes/app/attributesRoute";
 import { authenticatedRoute } from "./routes/app/authenticatedRoute";
+import { botConversationDetailRoute } from "./routes/app/botConversationDetailRoute";
+import { botConversationsRoute } from "./routes/app/botConversationsRoute";
 import { categoriesRoute } from "./routes/app/categoriesRoute";
 import { customerDetailRoute } from "./routes/app/customerDetailRoute";
 import { customersRoute } from "./routes/app/customersRoute";
@@ -69,6 +71,9 @@ const routeTree = rootRoute.addChildren([
     stockLevelsRoute,
     stockMovementsRoute,
     stockLowRoute,
+    // Phase 7 T6: bot conversations list/detail (owner/manager, `bot.read`).
+    botConversationsRoute,
+    botConversationDetailRoute,
   ]),
 ]);
 

@@ -51,7 +51,8 @@
     "stockLow": "Low stock",
     "quickSale": "Quick sale",
     "salesDrafts": "Sale drafts",
-    "reports": "Reports"
+    "reports": "Reports",
+    "bot": "Bot"
   },
   "auth": {
     "login": {
@@ -826,6 +827,29 @@
     "seo": {
       "title": "Meta title",
       "description": "Meta description"
+    }
+  },
+  "bot": {
+    "listTitle": "Bot conversations",
+    "empty": "No conversations yet.",
+    "columns": {
+      "chat": "Chat",
+      "messageCount": "Messages",
+      "lastMessageAt": "Last message"
+    },
+    "detail": {
+      "title": "Bot conversation",
+      "notFound": "This conversation could not be loaded.",
+      "empty": "No messages yet.",
+      "role": {
+        "user": "Customer",
+        "assistant": "Bot",
+        "tool": "Tool"
+      },
+      "toolCalls": "Tool calls",
+      "tokens": "{{input}}→{{output}} tokens",
+      "latency": "{{ms}} ms",
+      "cost": "${{cost}}"
     }
   },
   "mobile": {
