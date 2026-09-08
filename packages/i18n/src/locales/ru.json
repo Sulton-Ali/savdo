@@ -1025,12 +1025,31 @@
       "description": "Такой страницы не существует или она была перемещена.",
       "homeLink": "На главную"
     },
+    "nav": {
+      "home": "Главная",
+      "catalog": "Каталог",
+      "about": "О нас"
+    },
     "footer": {
-      "rights": "© {{year}} {{shop}}"
+      "rights": "© {{year}} {{shop}}",
+      "hoursClosed": "выходной"
+    },
+    "hero": {
+      "cta": "Смотреть каталог"
+    },
+    "weekdayShort": {
+      "mon": "Пн",
+      "tue": "Вт",
+      "wed": "Ср",
+      "thu": "Чт",
+      "fri": "Пт",
+      "sat": "Сб",
+      "sun": "Вс"
     },
     "home": {
       "categoriesTitle": "Категории",
       "featuredTitle": "Популярные товары",
+      "newProductsTitle": "Новинки",
       "hoursTitle": "Часы работы",
       "contactsTitle": "Контакты"
     },

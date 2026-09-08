@@ -21,10 +21,15 @@ export function ProductCard({
     <Link
       to="/$locale/p/$slug"
       params={{ locale, slug: product.slug }}
-      className="flex flex-col gap-2 rounded-md border border-bg p-2 transition hover:border-primary"
+      className="flex flex-col gap-2 rounded-md border border-bg p-3 shadow-sm transition hover:border-primary hover:shadow-md"
     >
-      <CoverImage image={product.coverImage?.urls} size="card" alt={product.name} />
-      <span className="font-medium text-text">{product.name}</span>
+      <CoverImage
+        image={product.coverImage?.urls}
+        size="card"
+        aspect="portrait"
+        alt={product.name}
+      />
+      <span className="line-clamp-2 font-medium text-text">{product.name}</span>
       <PriceTag price={product.price} currency={currency} />
       <AvailabilityBadge value={product.availability} />
     </Link>

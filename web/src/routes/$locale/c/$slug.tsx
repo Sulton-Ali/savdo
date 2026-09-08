@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 
 import { ProductCard } from "../../../components/ProductCard";
 import { listPublicCategories, listPublicProducts } from "../../../lib/publicApi.functions";
+import { absoluteUrl, asRouteMatchHead, buildSeoHead, chooseOgImage } from "../../../lib/seo";
 
 type PublicProductListItem = components["schemas"]["PublicProductListItem"];
 
@@ -21,9 +22,25 @@ export const Route = createFileRoute("/$locale/c/$slug")({
     }
     return { category, products };
   },
-  head: ({ loaderData }) => ({
-    meta: loaderData ? [{ title: loaderData.category.name }] : [],
-  }),
+  head: ({ match, loaderData }) => {
+    if (!loaderData) {
+      return {};
+    }
+    const { shop, locale, siteUrl } = match.context;
+    const { category } = loaderData;
+    // D-99: category pages have no per-category description or image this
+    // phase, so title/description/image all fall back to the shop's own.
+    const title = `${category.name} — ${shop.name}`;
+    const description = shop.blocks.seo?.description ?? shop.name;
+    const image = chooseOgImage({
+      siteUrl,
+      heroImage: shop.blocks.hero?.image,
+      fallbackUrl: absoluteUrl(siteUrl, "/og-default.png"),
+    });
+    return asRouteMatchHead(
+      buildSeoHead({ siteUrl, locale, path: `/c/${category.slug}`, title, description, image }),
+    );
+  },
   component: CategoryPage,
 });
 
@@ -56,7 +73,9 @@ function CategoryPage() {
     <main className="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-8">
       <h1 className="font-bold text-2xl text-text">{category.name}</h1>
       {items.length === 0 ? (
-        <p className="text-muted">{t("web.category.empty")}</p>
+        <p className="rounded-md border border-bg border-dashed px-4 py-10 text-center text-muted">
+          {t("web.category.empty")}
+        </p>
       ) : (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
           {items.map((product) => (

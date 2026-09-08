@@ -6,22 +6,34 @@ import { AvailabilityBadge } from "../../../components/AvailabilityBadge";
 import { CoverImage } from "../../../components/CoverImage";
 import { PriceTag } from "../../../components/PriceTag";
 import { getPublicProductBySlug } from "../../../lib/publicApi.functions";
+import { absoluteUrl, asRouteMatchHead, buildSeoHead, chooseOgImage } from "../../../lib/seo";
 import { splitParagraphs } from "../../../lib/text";
 
 export const Route = createFileRoute("/$locale/p/$slug")({
   loader: async ({ context: { locale }, params: { slug } }) =>
     getPublicProductBySlug({ data: { locale, slug } }),
-  head: ({ loaderData }) => ({
-    meta: loaderData
-      ? [
-          { title: loaderData.name },
-          {
-            name: "description",
-            content: loaderData.description?.slice(0, 155) ?? loaderData.name,
-          },
-        ]
-      : [],
-  }),
+  head: ({ match, loaderData }) => {
+    if (!loaderData) {
+      return {};
+    }
+    const { shop, locale, siteUrl } = match.context;
+    const product = loaderData;
+    const title = `${product.name} — ${shop.name}`;
+    const description =
+      product.description != null && product.description !== ""
+        ? product.description.slice(0, 155)
+        : (shop.blocks.seo?.description ?? shop.name);
+    // O-18: the product's own cover image, else the shop's hero photo, else the static brand image.
+    const image = chooseOgImage({
+      siteUrl,
+      productImages: product.images,
+      heroImage: shop.blocks.hero?.image,
+      fallbackUrl: absoluteUrl(siteUrl, "/og-default.png"),
+    });
+    return asRouteMatchHead(
+      buildSeoHead({ siteUrl, locale, path: `/p/${product.slug}`, title, description, image }),
+    );
+  },
   component: ProductPage,
 });
 

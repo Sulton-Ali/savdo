@@ -11,7 +11,10 @@
 import { Route as rootRouteImport } from "./routes/__root";
 import { Route as IndexRouteImport } from "./routes/index";
 import { Route as LocaleRouteRouteImport } from "./routes/$locale/route";
+import { Route as RobotsDottxtRouteImport } from "./routes/robots[.]txt";
+import { Route as SitemapDotxmlRouteImport } from "./routes/sitemap[.]xml";
 import { Route as LocaleIndexRouteImport } from "./routes/$locale/index";
+import { Route as LocaleAboutRouteImport } from "./routes/$locale/about";
 import { Route as LocaleCSlugRouteImport } from "./routes/$locale/c/$slug";
 import { Route as LocalePSlugRouteImport } from "./routes/$locale/p/$slug";
 
@@ -25,9 +28,24 @@ const LocaleRouteRoute = LocaleRouteRouteImport.update({
   path: "/$locale",
   getParentRoute: () => rootRouteImport,
 } as any);
+const RobotsDottxtRoute = RobotsDottxtRouteImport.update({
+  id: "/robots.txt",
+  path: "/robots.txt",
+  getParentRoute: () => rootRouteImport,
+} as any);
+const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
+  id: "/sitemap.xml",
+  path: "/sitemap.xml",
+  getParentRoute: () => rootRouteImport,
+} as any);
 const LocaleIndexRoute = LocaleIndexRouteImport.update({
   id: "/",
   path: "/",
+  getParentRoute: () => LocaleRouteRoute,
+} as any);
+const LocaleAboutRoute = LocaleAboutRouteImport.update({
+  id: "/about",
+  path: "/about",
   getParentRoute: () => LocaleRouteRoute,
 } as any);
 const LocaleCSlugRoute = LocaleCSlugRouteImport.update({
@@ -44,12 +62,18 @@ const LocalePSlugRoute = LocalePSlugRouteImport.update({
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute;
   "/$locale": typeof LocaleRouteRouteWithChildren;
+  "/robots.txt": typeof RobotsDottxtRoute;
+  "/sitemap.xml": typeof SitemapDotxmlRoute;
+  "/$locale/about": typeof LocaleAboutRoute;
   "/$locale/": typeof LocaleIndexRoute;
   "/$locale/c/$slug": typeof LocaleCSlugRoute;
   "/$locale/p/$slug": typeof LocalePSlugRoute;
 }
 export interface FileRoutesByTo {
   "/": typeof IndexRoute;
+  "/robots.txt": typeof RobotsDottxtRoute;
+  "/sitemap.xml": typeof SitemapDotxmlRoute;
+  "/$locale/about": typeof LocaleAboutRoute;
   "/$locale": typeof LocaleIndexRoute;
   "/$locale/c/$slug": typeof LocaleCSlugRoute;
   "/$locale/p/$slug": typeof LocalePSlugRoute;
@@ -58,6 +82,9 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport;
   "/": typeof IndexRoute;
   "/$locale": typeof LocaleRouteRouteWithChildren;
+  "/robots.txt": typeof RobotsDottxtRoute;
+  "/sitemap.xml": typeof SitemapDotxmlRoute;
+  "/$locale/about": typeof LocaleAboutRoute;
   "/$locale/": typeof LocaleIndexRoute;
   "/$locale/c/$slug": typeof LocaleCSlugRoute;
   "/$locale/p/$slug": typeof LocalePSlugRoute;
@@ -65,13 +92,30 @@ export interface FileRoutesById {
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath;
   fullPaths:
-    "/" | "/$locale" | "/$locale/" | "/$locale/c/$slug" | "/$locale/p/$slug";
+    | "/"
+    | "/$locale"
+    | "/robots.txt"
+    | "/sitemap.xml"
+    | "/$locale/about"
+    | "/$locale/"
+    | "/$locale/c/$slug"
+    | "/$locale/p/$slug";
   fileRoutesByTo: FileRoutesByTo;
-  to: "/" | "/$locale" | "/$locale/c/$slug" | "/$locale/p/$slug";
+  to:
+    | "/"
+    | "/robots.txt"
+    | "/sitemap.xml"
+    | "/$locale/about"
+    | "/$locale"
+    | "/$locale/c/$slug"
+    | "/$locale/p/$slug";
   id:
     | "__root__"
     | "/"
     | "/$locale"
+    | "/robots.txt"
+    | "/sitemap.xml"
+    | "/$locale/about"
     | "/$locale/"
     | "/$locale/c/$slug"
     | "/$locale/p/$slug";
@@ -80,6 +124,8 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute;
   LocaleRouteRoute: typeof LocaleRouteRouteWithChildren;
+  RobotsDottxtRoute: typeof RobotsDottxtRoute;
+  SitemapDotxmlRoute: typeof SitemapDotxmlRoute;
 }
 
 declare module "@tanstack/react-router" {
@@ -98,11 +144,32 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof LocaleRouteRouteImport;
       parentRoute: typeof rootRouteImport;
     };
+    "/robots.txt": {
+      id: "/robots.txt";
+      path: "/robots.txt";
+      fullPath: "/robots.txt";
+      preLoaderRoute: typeof RobotsDottxtRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/sitemap.xml": {
+      id: "/sitemap.xml";
+      path: "/sitemap.xml";
+      fullPath: "/sitemap.xml";
+      preLoaderRoute: typeof SitemapDotxmlRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
     "/$locale/": {
       id: "/$locale/";
       path: "/";
       fullPath: "/$locale/";
       preLoaderRoute: typeof LocaleIndexRouteImport;
+      parentRoute: typeof LocaleRouteRoute;
+    };
+    "/$locale/about": {
+      id: "/$locale/about";
+      path: "/about";
+      fullPath: "/$locale/about";
+      preLoaderRoute: typeof LocaleAboutRouteImport;
       parentRoute: typeof LocaleRouteRoute;
     };
     "/$locale/c/$slug": {
@@ -123,12 +190,14 @@ declare module "@tanstack/react-router" {
 }
 
 interface LocaleRouteRouteChildren {
+  LocaleAboutRoute: typeof LocaleAboutRoute;
   LocaleIndexRoute: typeof LocaleIndexRoute;
   LocaleCSlugRoute: typeof LocaleCSlugRoute;
   LocalePSlugRoute: typeof LocalePSlugRoute;
 }
 
 const LocaleRouteRouteChildren: LocaleRouteRouteChildren = {
+  LocaleAboutRoute: LocaleAboutRoute,
   LocaleIndexRoute: LocaleIndexRoute,
   LocaleCSlugRoute: LocaleCSlugRoute,
   LocalePSlugRoute: LocalePSlugRoute,
@@ -141,6 +210,8 @@ const LocaleRouteRouteWithChildren = LocaleRouteRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LocaleRouteRoute: LocaleRouteRouteWithChildren,
+  RobotsDottxtRoute: RobotsDottxtRoute,
+  SitemapDotxmlRoute: SitemapDotxmlRoute,
 };
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

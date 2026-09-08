@@ -12,12 +12,20 @@ const TRANSLATION_KEY: Record<Availability, TranslationKey> = {
   out_of_stock: "web.availability.outOfStock",
 };
 
-/** Tailwind classes for the badge, using the `packages/ui-tokens` colours
- * mapped into Tailwind's theme in `styles.css` (success/warning/danger). */
+/**
+ * Badge classes for each value — `.badge-success`/`.badge-warning`/
+ * `.badge-danger` (`styles.css`), not the raw `bg-success/10 text-success`
+ * `packages/ui-tokens` pairing: at badge text size (`text-xs`) that pairing
+ * measures ~2.9:1 contrast, short of WCAG AA's 4.5:1 for normal text. The
+ * badge classes use calibrated light-background/dark-text pairs instead
+ * (deliverable 4 — "badges with accessible colours + text"), scoped to
+ * `web/` only; the shared tokens (buttons, links, icons elsewhere) are
+ * unchanged.
+ */
 const TONE_CLASS: Record<Availability, string> = {
-  in_stock: "bg-success/10 text-success",
-  low: "bg-warning/10 text-warning",
-  out_of_stock: "bg-danger/10 text-danger",
+  in_stock: "badge-success",
+  low: "badge-warning",
+  out_of_stock: "badge-danger",
 };
 
 export function availabilityTranslationKey(value: Availability): TranslationKey {

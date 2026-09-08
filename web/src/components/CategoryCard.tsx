@@ -10,10 +10,10 @@ export function CategoryCard({ category, locale }: { category: PublicCategory; l
     <Link
       to="/$locale/c/$slug"
       params={{ locale, slug: category.slug }}
-      className="flex flex-col gap-1 rounded-md border border-bg p-4 text-center transition hover:border-primary"
+      className="flex flex-col items-center gap-1 rounded-md border border-bg bg-surface px-4 py-6 text-center shadow-sm transition hover:border-primary hover:shadow-md"
     >
       <span className="font-medium text-text">{category.name}</span>
-      <span className="text-muted text-sm">{category.productCount}</span>
+      <span className="text-muted text-xs">{category.productCount}</span>
     </Link>
   );
 }

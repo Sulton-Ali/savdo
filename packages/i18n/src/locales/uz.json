@@ -1025,12 +1025,31 @@
       "description": "Siz qidirayotgan sahifa mavjud emas yoki ko'chirilgan.",
       "homeLink": "Bosh sahifaga"
     },
+    "nav": {
+      "home": "Bosh sahifa",
+      "catalog": "Katalog",
+      "about": "Biz haqimizda"
+    },
     "footer": {
-      "rights": "© {{year}} {{shop}}"
+      "rights": "© {{year}} {{shop}}",
+      "hoursClosed": "dam olish"
+    },
+    "hero": {
+      "cta": "Katalogni ko'rish"
+    },
+    "weekdayShort": {
+      "mon": "Du",
+      "tue": "Se",
+      "wed": "Chor",
+      "thu": "Pay",
+      "fri": "Ju",
+      "sat": "Sh",
+      "sun": "Ya"
     },
     "home": {
       "categoriesTitle": "Kategoriyalar",
       "featuredTitle": "Tavsiya etilgan mahsulotlar",
+      "newProductsTitle": "Yangi mahsulotlar",
       "hoursTitle": "Ish vaqti",
       "contactsTitle": "Aloqa"
     },

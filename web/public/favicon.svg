@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>Savdo</title>
+  <rect width="32" height="32" rx="8" fill="#c2410c"/>
+  <path d="M9 21V11h4.6c2.6 0 4.2 1.4 4.2 3.6 0 1.7-.9 2.9-2.4 3.4l2.8 3h-3l-2.4-2.7h-1v2.7H9zm2.8-4.6h1.6c1.1 0 1.7-.5 1.7-1.4s-.6-1.4-1.7-1.4h-1.6v2.8z" fill="#fff"/>
+</svg>
