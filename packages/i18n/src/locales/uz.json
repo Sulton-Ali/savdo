@@ -1054,7 +1054,8 @@
       "contactsTitle": "Aloqa"
     },
     "category": {
-      "empty": "Bu kategoriyada hali mahsulot yo'q."
+      "empty": "Bu kategoriyada hali mahsulot yo'q.",
+      "breadcrumbAria": "Kategoriya yo'li"
     },
     "product": {
       "variantsTitle": "Variantlar",
