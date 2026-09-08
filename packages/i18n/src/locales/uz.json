@@ -35,7 +35,7 @@
   },
   "nav": {
     "dashboard": "Boshqaruv paneli",
-    "drafts": "Qoralamalar",
+    "drafts": "Sotuv qoralamalari",
     "sales": "Sotuvlar",
     "products": "Mahsulotlar",
     "categories": "Kategoriyalar",
@@ -44,13 +44,13 @@
     "locations": "Filiallar",
     "customers": "Mijozlar",
     "suppliers": "Yetkazib beruvchilar",
-    "purchases": "Xaridlar",
+    "purchases": "Ta‘minot",
     "settings": "Sozlamalar",
     "stockLevels": "Qoldiqlar",
     "stockMovements": "Ombor harakatlari",
     "stockLow": "Kam qoldiq",
     "quickSale": "Tezkor sotuv",
-    "salesDrafts": "Qoralamalar",
+    "salesDrafts": "Sotuv qoralamalari",
     "reports": "Hisobotlar"
   },
   "auth": {
@@ -241,7 +241,7 @@
     }
   },
   "purchases": {
-    "title": "Xaridlar",
+    "title": "Ta‘minot",
     "add": "Yangi xarid",
     "createTitle": "Yangi xarid",
     "editTitle": "Xaridni tahrirlash",
@@ -682,7 +682,7 @@
       }
     },
     "drafts": {
-      "listTitle": "Qoralamalar",
+      "listTitle": "Sotuv qoralamalari",
       "empty": "Hozircha qoralama yo‘q.",
       "filters": {
         "mine": "Faqat mening qoralamalarim"
@@ -835,8 +835,8 @@
       "noLocations": "Filiallar mavjud emas"
     },
     "purchases": {
-      "drafts": "Qoralamalar",
-      "draftsEmpty": "Qoralama xaridlar yo'q",
+      "drafts": "Xarid qoralamalari",
+      "draftsEmpty": "Xarid qoralamalari yo'q",
       "saveAndReceive": "Saqlash va qabul qilish"
     },
     "sale": {
@@ -920,7 +920,7 @@
       "errors": {
         "notFound": "Bu qoralama allaqachon to'langan yoki o'chirilgan.",
         "lineUnavailable": "\"{{name}}\" endi mavjud emas — uni olib tashlash uchun qoralamani tahrirlang.",
-        "forbiddenEdit": "Bu qoralamani tahrirlay olmaysiz — uni Qoralamalar ekranidan to'lang yoki muallif yoki menejerdan so'rang.",
+        "forbiddenEdit": "Bu qoralamani tahrirlay olmaysiz — uni Sotuv qoralamalari ekranidan to'lang yoki muallif yoki menejerdan so'rang.",
         "itemNoLongerAvailable": "Ushbu qoralamadagi tovarlardan biri endi mavjud emas. Davom etish uchun uni savatchadan olib tashlang."
       },
       "filter": {
