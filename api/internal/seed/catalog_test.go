@@ -556,3 +556,112 @@ func TestSeedCatalog_repairsMissingImagesOnAnExistingProduct(t *testing.T) {
 		t.Errorf("third Catalog() = %+v, want a zero report (already repaired, nothing left to do)", third)
 	}
 }
+
+// TestSeedCatalog_repairsFeaturedFlagOnExistingProducts covers the T8
+// follow-up to D-101: a dev database seeded before productSpec.isFeatured
+// existed never got its four featured flags set, because seedProducts
+// only ever applied a spec to a product it created — Catalog() must
+// repair a spec.isFeatured=true product's stored is_featured=false back
+// to true, counted as FeaturedRepaired, while an owner's own manual
+// toggle (a product the spec does not mark featured, but which is
+// featured in the database) must survive untouched. Both toggles here go
+// through catalogHandler.UpdateProduct exactly as the admin form would
+// (D-101), not a raw UPDATE — this pins the same state a real dev
+// database ends up in.
+func TestSeedCatalog_repairsFeaturedFlagOnExistingProducts(t *testing.T) {
+	pool := testdb.New(t)
+	testdb.Truncate(t, pool)
+	ctx := context.Background()
+
+	shopReport, err := seed.Seed(ctx, pool, seed.DefaultShopSlug)
+	if err != nil {
+		t.Fatalf("Seed() error = %v", err)
+	}
+
+	q, catalogHandler, mediaSvc, _ := newCatalogTestDeps(t, pool)
+
+	owner, err := q.GetOwner(ctx, shopReport.ShopID)
+	if err != nil {
+		t.Fatalf("GetOwner() error = %v", err)
+	}
+
+	first, err := seed.Catalog(ctx, q, catalogHandler, mediaSvc, shopReport.ShopID, owner.ID)
+	if err != nil {
+		t.Fatalf("first Catalog() error = %v", err)
+	}
+	if first.FeaturedRepaired != 0 {
+		t.Fatalf("first Catalog() FeaturedRepaired = %d, want 0 (nothing to repair on a fresh seed)", first.FeaturedRepaired)
+	}
+
+	products, err := q.ListProductsForStaff(ctx, db.ListProductsForStaffParams{
+		Locale: "uz", ShopID: shopReport.ShopID, IncludeInactive: true, Limit: 1000,
+	})
+	if err != nil {
+		t.Fatalf("ListProductsForStaff() error = %v", err)
+	}
+
+	// A spec-featured product (catalog_data.go marks it isFeatured: true)
+	// whose flag we clear, simulating a pre-T1 database that never got it
+	// set in the first place.
+	specFeatured := findProductBySlug(t, products, taggedProductSlug)
+	if !specFeatured.IsFeatured {
+		t.Fatalf("seeded product %q IsFeatured = false, want true (fixture assumption: it is one of catalog_data.go's featured products)", taggedProductSlug)
+	}
+
+	// A product the spec does NOT mark featured, manually featured here —
+	// standing in for an owner's own toggle in the admin — which a repair
+	// must leave alone.
+	const manuallyFeaturedSlug = "men-shirt-checked"
+	manuallyFeatured := findProductBySlug(t, products, manuallyFeaturedSlug)
+	if manuallyFeatured.IsFeatured {
+		t.Fatalf("seeded product %q IsFeatured = true, want false (fixture assumption: it is NOT one of catalog_data.go's featured products)", manuallyFeaturedSlug)
+	}
+
+	authCtx := ownerAuthContext(ctx, shopReport.ShopID, owner.ID)
+	unfeatured := false
+	if _, err := catalogHandler.UpdateProduct(authCtx, gen.UpdateProductRequestObject{
+		Id: specFeatured.ID, Body: &gen.ProductPatch{IsFeatured: &unfeatured},
+	}); err != nil {
+		t.Fatalf("UpdateProduct(%s, isFeatured=false) error = %v", specFeatured.Slug, err)
+	}
+	featured := true
+	if _, err := catalogHandler.UpdateProduct(authCtx, gen.UpdateProductRequestObject{
+		Id: manuallyFeatured.ID, Body: &gen.ProductPatch{IsFeatured: &featured},
+	}); err != nil {
+		t.Fatalf("UpdateProduct(%s, isFeatured=true) error = %v", manuallyFeatured.Slug, err)
+	}
+
+	second, err := seed.Catalog(ctx, q, catalogHandler, mediaSvc, shopReport.ShopID, owner.ID)
+	if err != nil {
+		t.Fatalf("second Catalog() error = %v", err)
+	}
+	if second.ProductsCreated != 0 {
+		t.Errorf("second Catalog() ProductsCreated = %d, want 0 (every product already existed)", second.ProductsCreated)
+	}
+	if second.FeaturedRepaired != 1 {
+		t.Errorf("second Catalog() FeaturedRepaired = %d, want 1 (only %q needed repair)", second.FeaturedRepaired, specFeatured.Slug)
+	}
+
+	productsAfter, err := q.ListProductsForStaff(ctx, db.ListProductsForStaffParams{
+		Locale: "uz", ShopID: shopReport.ShopID, IncludeInactive: true, Limit: 1000,
+	})
+	if err != nil {
+		t.Fatalf("ListProductsForStaff() after repair error = %v", err)
+	}
+	got := findProductBySlug(t, productsAfter, taggedProductSlug)
+	if !got.IsFeatured {
+		t.Errorf("product %q IsFeatured = false after repair, want true (restored)", taggedProductSlug)
+	}
+	gotManual := findProductBySlug(t, productsAfter, manuallyFeaturedSlug)
+	if !gotManual.IsFeatured {
+		t.Errorf("product %q IsFeatured = false after repair, want true (an owner's manual toggle must survive a re-seed)", manuallyFeaturedSlug)
+	}
+
+	third, err := seed.Catalog(ctx, q, catalogHandler, mediaSvc, shopReport.ShopID, owner.ID)
+	if err != nil {
+		t.Fatalf("third Catalog() error = %v", err)
+	}
+	if third != (seed.CatalogReport{}) {
+		t.Errorf("third Catalog() = %+v, want a zero report (already repaired, nothing left to do)", third)
+	}
+}
