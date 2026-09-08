@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -17,6 +18,19 @@ func publicCategory(ctx context.Context, t *testing.T, q *db.Queries, shopID uui
 	t.Helper()
 	c, err := q.CreateCategory(ctx, db.CreateCategoryParams{
 		ID: uuid.New(), ShopID: shopID, Slug: slug, IsActive: isActive,
+	})
+	if err != nil {
+		t.Fatalf("CreateCategory(%q): %v", slug, err)
+	}
+	return c
+}
+
+// publicSubcategory creates a category under parentID for the T7
+// parent/child public-catalogue tests below.
+func publicSubcategory(ctx context.Context, t *testing.T, q *db.Queries, shopID, parentID uuid.UUID, slug string, isActive bool) db.Category {
+	t.Helper()
+	c, err := q.CreateCategory(ctx, db.CreateCategoryParams{
+		ID: uuid.New(), ShopID: shopID, ParentID: &parentID, Slug: slug, IsActive: isActive,
 	})
 	if err != nil {
 		t.Fatalf("CreateCategory(%q): %v", slug, err)
@@ -247,6 +261,163 @@ func TestListPublicCategories_activeOnlyWithProductCount(t *testing.T) {
 	}
 	if rows[0].ProductCount != 2 {
 		t.Fatalf("ProductCount = %d, want 2 (active products only)", rows[0].ProductCount)
+	}
+}
+
+// TestListPublicCategories_aggregatesDescendantProductCounts pins T7 at the
+// query layer: a parent's product_count sums its own direct products AND
+// every active, non-deleted descendant's, its parent_slug/parent_name are
+// nil for a root and set for a child, and rows sort parents-before-children
+// (ORDER BY the query's own sort_path).
+func TestListPublicCategories_aggregatesDescendantProductCounts(t *testing.T) {
+	pool := testdb.New(t)
+	testdb.Truncate(t, pool)
+	ctx := context.Background()
+	q := db.New(pool)
+
+	shop := catalogShop(ctx, t, q, "shop-category-tree")
+	unit := catalogUnit(ctx, t, q, shop.ID, "pcs")
+
+	parent := publicCategory(ctx, t, q, shop.ID, "parent", true)
+	if err := q.UpsertCategoryTranslation(ctx, db.UpsertCategoryTranslationParams{CategoryID: parent.ID, Locale: "uz", Name: "Parent"}); err != nil {
+		t.Fatalf("UpsertCategoryTranslation(parent): %v", err)
+	}
+	child := publicSubcategory(ctx, t, q, shop.ID, parent.ID, "child", true)
+	if err := q.UpsertCategoryTranslation(ctx, db.UpsertCategoryTranslationParams{CategoryID: child.ID, Locale: "uz", Name: "Child"}); err != nil {
+		t.Fatalf("UpsertCategoryTranslation(child): %v", err)
+	}
+
+	publicProduct(ctx, t, q, shop.ID, unit.ID, &child.ID, "tree-product-1", true, false)
+	publicProduct(ctx, t, q, shop.ID, unit.ID, &child.ID, "tree-product-2", true, false)
+
+	rows, err := q.ListPublicCategories(ctx, db.ListPublicCategoriesParams{ShopID: shop.ID, Locale: "uz"})
+	if err != nil {
+		t.Fatalf("ListPublicCategories: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("ListPublicCategories = %+v, want 2 (parent + child)", rows)
+	}
+	if rows[0].ID != parent.ID || rows[1].ID != child.ID {
+		t.Fatalf("ListPublicCategories order = %+v, want parent immediately before child", rows)
+	}
+	if rows[0].ParentSlug != nil {
+		t.Errorf("parent.ParentSlug = %v, want nil (root)", rows[0].ParentSlug)
+	}
+	if rows[0].ProductCount != 2 {
+		t.Errorf("parent.ProductCount = %d, want 2 (its child's products, it has none of its own)", rows[0].ProductCount)
+	}
+	if rows[1].ParentSlug == nil || *rows[1].ParentSlug != "parent" {
+		t.Errorf("child.ParentSlug = %v, want \"parent\"", rows[1].ParentSlug)
+	}
+	if rows[1].ParentName != "Parent" {
+		t.Errorf("child.ParentName = %q, want \"Parent\"", rows[1].ParentName)
+	}
+	if rows[1].ProductCount != 2 {
+		t.Errorf("child.ProductCount = %d, want 2", rows[1].ProductCount)
+	}
+}
+
+// TestListPublicCategories_parentIdCycleDoesNotHang pins T7 review round 1
+// MAJOR 1: ListPublicCategories' descendants/paths CTEs must stay bounded
+// even against a parent_id cycle a manual DB edit could produce — this
+// endpoint has no auth, so it must not rely solely on catalog.Service's
+// own depth guard (GetCategoryDepth/GetCategorySubtreeHeight), which the
+// raw SQL below deliberately bypasses. Asserts the query both returns
+// well inside a generous context timeout and succeeds outright — if the
+// depth guard regressed, the query would still be running (or freshly
+// cancelled, returning an error) right at the timeout instead.
+//
+// A cycle is, by construction, unreachable from any real root (every
+// member's single parent_id slot is spent pointing at another cycle
+// member), so it can never itself surface a row (paths' own base case
+// requires an actual root) — cycle-a/cycle-b below never appear in the
+// result either way. real, a normal rooted category in the *same* shop
+// with a product of its own, is what actually exercises the guard: only
+// because a real row needs product_counts does the query even have to
+// materialize the (otherwise entirely skippable) descendants CTE over
+// the whole shop's active_cats, cycle included — verified empirically
+// (this comment's author reproduced both the hang without real present,
+// and its absence with it, via manual psql before writing this test).
+func TestListPublicCategories_parentIdCycleDoesNotHang(t *testing.T) {
+	pool := testdb.New(t)
+	testdb.Truncate(t, pool)
+	ctx := context.Background()
+	q := db.New(pool)
+
+	shop := catalogShop(ctx, t, q, "shop-category-cycle")
+	unit := catalogUnit(ctx, t, q, shop.ID, "pcs")
+
+	a := publicCategory(ctx, t, q, shop.ID, "cycle-a", true)
+	b := publicSubcategory(ctx, t, q, shop.ID, a.ID, "cycle-b", true)
+	// Bypass catalog.Service's own depth/cycle guard: a's parent_id now
+	// points at b, whose own parent_id already points at a — a two-node
+	// cycle a raw UPDATE can create but CreateCategory/UpdateCategory
+	// (going through the service) never would.
+	if _, err := pool.Exec(ctx, `UPDATE categories SET parent_id = $1 WHERE id = $2`, b.ID, a.ID); err != nil {
+		t.Fatalf("create parent_id cycle: %v", err)
+	}
+
+	real := publicCategory(ctx, t, q, shop.ID, "cycle-real", true)
+	if err := q.UpsertCategoryTranslation(ctx, db.UpsertCategoryTranslationParams{CategoryID: real.ID, Locale: "uz", Name: "Real"}); err != nil {
+		t.Fatalf("UpsertCategoryTranslation(real): %v", err)
+	}
+	publicProduct(ctx, t, q, shop.ID, unit.ID, &real.ID, "cycle-real-product", true, false)
+
+	timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	rows, err := q.ListPublicCategories(timeoutCtx, db.ListPublicCategoriesParams{ShopID: shop.ID, Locale: "uz"})
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("ListPublicCategories with a parent_id cycle: %v (after %s)", err, elapsed)
+	}
+	if elapsed > 2*time.Second {
+		t.Fatalf("ListPublicCategories with a parent_id cycle took %s, want well under the depth guard's bound", elapsed)
+	}
+	if len(rows) != 1 || rows[0].Slug != "cycle-real" || rows[0].ProductCount != 1 {
+		t.Fatalf("ListPublicCategories with a parent_id cycle = %+v, want only cycle-real with ProductCount 1 (the cycle members never surface — neither is reachable from a real root)", rows)
+	}
+}
+
+// TestListPublicProducts_categoryParentIdCycleDoesNotHang is
+// TestListPublicCategories_parentIdCycleDoesNotHang's counterpart for
+// ListPublicProducts' matched_categories CTE (the `category` filter).
+func TestListPublicProducts_categoryParentIdCycleDoesNotHang(t *testing.T) {
+	pool := testdb.New(t)
+	testdb.Truncate(t, pool)
+	ctx := context.Background()
+	q := db.New(pool)
+
+	shop := catalogShop(ctx, t, q, "shop-product-category-cycle")
+	unit := catalogUnit(ctx, t, q, shop.ID, "pcs")
+
+	a := publicCategory(ctx, t, q, shop.ID, "cycle-a", true)
+	b := publicSubcategory(ctx, t, q, shop.ID, a.ID, "cycle-b", true)
+	if _, err := pool.Exec(ctx, `UPDATE categories SET parent_id = $1 WHERE id = $2`, b.ID, a.ID); err != nil {
+		t.Fatalf("create parent_id cycle: %v", err)
+	}
+	publicProduct(ctx, t, q, shop.ID, unit.ID, &a.ID, "cycle-product", true, false)
+
+	timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	slug := "cycle-a"
+	start := time.Now()
+	rows, err := q.ListPublicProducts(timeoutCtx, db.ListPublicProductsParams{
+		ShopID: shop.ID, Locale: "uz", CategorySlug: &slug, Limit: 20,
+	})
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("ListPublicProducts with a parent_id cycle: %v (after %s)", err, elapsed)
+	}
+	if elapsed > 2*time.Second {
+		t.Fatalf("ListPublicProducts with a parent_id cycle took %s, want well under the depth guard's bound", elapsed)
+	}
+	if len(rows) != 1 || rows[0].Slug != "cycle-product" {
+		t.Fatalf("ListPublicProducts with a parent_id cycle = %+v, want just cycle-product", rows)
 	}
 }
 

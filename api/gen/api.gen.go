@@ -1026,14 +1026,20 @@ type ProductPublic struct {
 	Variants            *[]VariantPublic             `json:"variants,omitempty"`
 }
 
-// PublicCategory One row of `GET /public/categories` (O-21).
+// PublicCategory One row of `GET /public/categories` (O-21, T7). `parentSlug`/ `parentName` are both `null` for a top-level (root) category, and set for a child, letting the web group children under their parent without a second call.
 type PublicCategory struct {
 	Id openapi_types.UUID `json:"id"`
 
 	// Name Resolved for the caller's `Accept-Language`, falling back to `uz` then any locale (ADR-012).
 	Name string `json:"name"`
 
-	// ProductCount Active, non-deleted products in this category (O-20).
+	// ParentName The immediate parent category's name, same locale fallback as `name`, or `null` for a root category (T7).
+	ParentName nullable.Nullable[string] `json:"parentName"`
+
+	// ParentSlug The immediate parent category's slug, or `null` for a root category (T7).
+	ParentSlug nullable.Nullable[string] `json:"parentSlug"`
+
+	// ProductCount Active, non-deleted products in this category and, for a parent category, in every one of its active, non-deleted descendants too (T7) — a pure grouping category with no products of its own reports its children's total.
 	ProductCount int    `json:"productCount"`
 	Slug         string `json:"slug"`
 }
@@ -1991,7 +1997,7 @@ type ListProductsParams struct {
 
 // ListPublicProductsParams defines parameters for ListPublicProducts.
 type ListPublicProductsParams struct {
-	// Category Filter to one category's slug.
+	// Category Filter to one category's slug. Matches products in that category AND in every one of its active, non-deleted descendant categories (T7) — filtering by a parent slug (e.g. "erkaklar") includes its children's products.
 	Category *string `form:"category,omitempty" json:"category,omitempty"`
 	Featured *bool   `form:"featured,omitempty" json:"featured,omitempty"`
 

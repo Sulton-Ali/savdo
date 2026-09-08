@@ -82,6 +82,20 @@ func seedCategory(ctx context.Context, t *testing.T, q *db.Queries, shopID uuid.
 	return c
 }
 
+// seedSubcategory creates an active/inactive category under parentID, with
+// a uz translation — T7's parent/child hierarchy tests.
+func seedSubcategory(ctx context.Context, t *testing.T, q *db.Queries, shopID, parentID uuid.UUID, slug, name string, isActive bool) db.Category {
+	t.Helper()
+	c, err := q.CreateCategory(ctx, db.CreateCategoryParams{ID: uuid.New(), ShopID: shopID, ParentID: &parentID, Slug: slug, IsActive: isActive})
+	if err != nil {
+		t.Fatalf("seedSubcategory(%q): %v", slug, err)
+	}
+	if err := q.UpsertCategoryTranslation(ctx, db.UpsertCategoryTranslationParams{CategoryID: c.ID, Locale: "uz", Name: name}); err != nil {
+		t.Fatalf("seedSubcategory(%q) translation: %v", slug, err)
+	}
+	return c
+}
+
 // productSpec is seedProduct's input — every field has a small, obvious
 // default via seedProduct's own zero-value handling, so a test only sets
 // the fields it cares about.

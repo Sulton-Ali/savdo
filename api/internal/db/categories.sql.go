@@ -351,13 +351,62 @@ func (q *Queries) ListCategoryTranslations(ctx context.Context, arg ListCategory
 }
 
 const listPublicCategories = `-- name: ListPublicCategories :many
+WITH RECURSIVE active_cats AS (
+    SELECT c.id, c.parent_id, c.slug, c.sort_order
+    FROM categories c
+    WHERE c.shop_id = $2 AND c.deleted_at IS NULL AND c.is_active
+),
+descendants AS (
+    -- Every active category is its own descendant at distance 0 (depth
+    -- 1), so a leaf with no children still gets a product_counts row
+    -- below, matching the pre-T7 per-category-only count exactly in that
+    -- case.
+    SELECT id AS ancestor_id, id AS descendant_id, 1 AS depth FROM active_cats
+
+    UNION ALL
+
+    SELECT d.ancestor_id, c.id, d.depth + 1
+    FROM active_cats c
+    JOIN descendants d ON c.parent_id = d.descendant_id
+    WHERE d.depth < 4
+),
+product_counts AS (
+    SELECT d.ancestor_id AS category_id, count(p.id) AS product_count
+    FROM descendants d
+    JOIN products p ON p.category_id = d.descendant_id
+        AND p.shop_id = $2 AND p.deleted_at IS NULL AND p.is_active
+    GROUP BY d.ancestor_id
+),
+paths AS (
+    SELECT c.id, lpad(c.sort_order::text, 10, '0') || ':' || c.slug AS sort_path, 1 AS depth
+    FROM active_cats c
+    WHERE c.parent_id IS NULL OR c.parent_id NOT IN (SELECT id FROM active_cats)
+
+    UNION ALL
+
+    SELECT c.id, p.sort_path || '/' || lpad(c.sort_order::text, 10, '0') || ':' || c.slug, p.depth + 1
+    FROM active_cats c
+    JOIN paths p ON c.parent_id = p.id
+    WHERE p.depth < 4
+)
 SELECT
     c.id, c.shop_id, c.parent_id, c.slug, c.sort_order, c.is_active, c.image_id, c.created_at, c.updated_at,
     COALESCE(t.locale, '') AS locale_used,
     COALESCE(t.name, '') AS name,
     t.description,
+    parent.slug AS parent_slug,
+    -- Same '' sentinel as name/locale_used above (sqlc infers a plain
+    -- non-nullable string here, not *string, the same LATERAL-join
+    -- quirk); the handler only surfaces parentName when parent_slug is
+    -- non-nil, so a root category's '' here is never observed as a real
+    -- value — see handler.go.
+    COALESCE(pt.name, '') AS parent_name,
     COALESCE(pc.product_count, 0)::bigint AS product_count
 FROM categories c
+JOIN active_cats a ON a.id = c.id
+JOIN paths pa ON pa.id = c.id
+LEFT JOIN categories parent ON parent.id = c.parent_id AND parent.shop_id = c.shop_id
+    AND parent.deleted_at IS NULL AND parent.is_active
 LEFT JOIN LATERAL (
     SELECT ct.locale, ct.name, ct.description
     FROM category_translations ct
@@ -371,14 +420,20 @@ LEFT JOIN LATERAL (
     LIMIT 1
 ) t ON true
 LEFT JOIN LATERAL (
-    SELECT count(*) AS product_count
-    FROM products p
-    WHERE p.category_id = c.id AND p.shop_id = c.shop_id AND p.deleted_at IS NULL AND p.is_active
-) pc ON true
+    SELECT ct.name
+    FROM category_translations ct
+    WHERE ct.category_id = parent.id
+    ORDER BY
+        CASE
+            WHEN ct.locale = $1 THEN 0
+            WHEN ct.locale = 'uz' THEN 1
+            ELSE 2
+        END
+    LIMIT 1
+) pt ON true
+LEFT JOIN product_counts pc ON pc.category_id = c.id
 WHERE c.shop_id = $2
-    AND c.deleted_at IS NULL
-    AND c.is_active
-ORDER BY c.sort_order, c.slug
+ORDER BY pa.sort_path
 `
 
 type ListPublicCategoriesParams struct {
@@ -399,13 +454,46 @@ type ListPublicCategoriesRow struct {
 	LocaleUsed   string     `json:"locale_used"`
 	Name         string     `json:"name"`
 	Description  *string    `json:"description"`
+	ParentSlug   *string    `json:"parent_slug"`
+	ParentName   string     `json:"parent_name"`
 	ProductCount int64      `json:"product_count"`
 }
 
-// Phase 6 public catalogue (D-99): active, non-deleted categories with a
-// count of their active, non-deleted products, for the landing's category
-// grid. Same locale-fallback + COALESCE pattern as ListCategories, active-
-// only like ListProductsPublic (no include_inactive parameter at all).
+// Phase 6 public catalogue (D-99), extended by T7 for the landing's
+// parent/child grouping: active, non-deleted categories, each with its
+// resolved name (same locale-fallback + COALESCE ” pattern as
+// ListCategories, active-only like ListPublicProducts, no
+// include_inactive parameter at all), its immediate parent's slug/name
+// (parent_slug/parent_name), and a product_count that now sums active,
+// non-deleted products across the category AND every one of its active,
+// non-deleted descendants (descendants CTE) — a pure grouping parent
+// like "Erkaklar" (no products of its own) reports the total of its
+// children instead of 0.
+//
+// parent_slug/parent_name are NULL for a root category (parent_id IS
+// NULL) and, deliberately, also for a category whose parent exists but
+// is inactive or soft-deleted: the same "inactive hides everything about
+// it, not just itself" rule O-22 already applies to a product's own
+// category — a child must not surface an ancestor's slug/name that this
+// same endpoint would never itself list as a row, since the landing
+// could never link to it. Such a child sorts as a top-level entry too
+// (paths CTE's own base case), consistent with having no visible parent.
+//
+// Rows are ordered by a materialized (sort_order, slug) path built at
+// each level by the recursive paths CTE, so a parent always sorts
+// immediately before its own children, at any depth up to the schema's
+// depth <= 3 rule (04-DATA-MODEL.md) — not just the two levels the
+// current catalogue actually uses.
+//
+// T7 review round 1, MAJOR 1: both descendants and paths carry a depth
+// column and stop recursing once depth reaches 4 (one past the schema's
+// own depth <= 3 rule, 04-DATA-MODEL.md) — depth is normally enforced by
+// catalog.Service before a category is created or re-parented
+// (GetCategoryDepth/GetCategorySubtreeHeight), but this endpoint has no
+// auth and must not trust that guard alone: a parent_id cycle from a
+// manual DB edit (or a bug elsewhere) would otherwise recurse forever and
+// hang the request instead of erroring or returning a bounded, if
+// incomplete, result.
 func (q *Queries) ListPublicCategories(ctx context.Context, arg ListPublicCategoriesParams) ([]ListPublicCategoriesRow, error) {
 	rows, err := q.db.Query(ctx, listPublicCategories, arg.Locale, arg.ShopID)
 	if err != nil {
@@ -428,6 +516,8 @@ func (q *Queries) ListPublicCategories(ctx context.Context, arg ListPublicCatego
 			&i.LocaleUsed,
 			&i.Name,
 			&i.Description,
+			&i.ParentSlug,
+			&i.ParentName,
 			&i.ProductCount,
 		); err != nil {
 			return nil, err
