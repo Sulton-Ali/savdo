@@ -129,4 +129,31 @@ describe("AppLayout navigation", () => {
     expect(screen.getByText("Categories")).toBeTruthy();
     expect(screen.getByText("Attributes")).toBeTruthy();
   });
+
+  // Phase 6 T4: landing content editor nav entry (manager+, D-99).
+  it("shows Landing content only with content.manage", async () => {
+    fetchMeMock.mockResolvedValueOnce(buildMe(["content.manage"]));
+    const { router, queryClient } = buildRouterAndClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByText("Test Shop")).toBeTruthy());
+    expect(screen.getByText("Landing content")).toBeTruthy();
+  });
+
+  it("hides Landing content without content.manage", async () => {
+    fetchMeMock.mockResolvedValueOnce(buildMe([]));
+    const { router, queryClient } = buildRouterAndClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByText("Test Shop")).toBeTruthy());
+    expect(screen.queryByText("Landing content")).toBeNull();
+  });
 });

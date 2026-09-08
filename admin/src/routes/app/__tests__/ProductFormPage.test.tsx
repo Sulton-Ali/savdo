@@ -273,6 +273,50 @@ describe("ProductFormPage", () => {
     });
   });
 
+  // Phase 6 T4 (D-101): the "Featured on landing" toggle — curated manually,
+  // no automatic selection.
+  it("patches isFeatured when the Featured switch is toggled on", async () => {
+    const existing: Product = {
+      id: "p1",
+      categoryId: null,
+      slug: "existing-product",
+      sku: null,
+      unitId: "unit1",
+      basePrice: "10000.00",
+      promoPrice: null,
+      promoFrom: null,
+      promoTo: null,
+      isActive: true,
+      isFeatured: false,
+      name: "Existing product",
+      description: null,
+      locale: "uz",
+      translationFallback: false,
+      lowStockThreshold: null,
+      translations: { uz: { name: "Existing product" } },
+    };
+    mockGetByPath({
+      "/categories": { items: [] },
+      "/units": { items: [unit()] },
+      "/products/{id}": existing,
+    });
+    mockedApi.PATCH.mockResolvedValueOnce(jsonResult({ ...existing, isFeatured: true }));
+
+    renderForm("p1");
+
+    const featuredSwitch = await screen.findByRole("switch", { name: "Featured" });
+    fireEvent.click(featuredSwitch);
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(mockedApi.PATCH).toHaveBeenCalledWith("/products/{id}", {
+        params: { path: { id: "p1" } },
+        body: { isFeatured: true },
+      });
+    });
+  });
+
   // T6a review MINOR: a 409 CONFLICT naming a real, mounted field (slug is a
   // top-level Form.Item, unlike the nested translation fields) must still
   // land as an inline field error.

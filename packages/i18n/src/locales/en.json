@@ -772,6 +772,62 @@
       "saleNotReturnable": "This is a return and cannot itself be returned."
     }
   },
+  "content": {
+    "nav": "Landing content",
+    "title": "Landing content",
+    "saved": "Content saved",
+    "keys": {
+      "hero": "Hero",
+      "about": "About",
+      "hours": "Hours",
+      "contacts": "Contacts",
+      "social": "Social",
+      "seo": "SEO"
+    },
+    "hero": {
+      "title": "Title",
+      "tagline": "Tagline",
+      "image": "Image",
+      "uploadImage": "Upload image",
+      "replaceImage": "Replace image",
+      "removeImage": "Remove image",
+      "imageSet": "An image is already saved for this block."
+    },
+    "about": {
+      "title": "Title",
+      "body": "Body"
+    },
+    "hours": {
+      "note": "Note",
+      "fallbackHint": "Without your own hours, this language shows the Uzbek hours below. You can still add a translated note.",
+      "closedToggle": "Closed",
+      "open": "Opens",
+      "close": "Closes",
+      "days": {
+        "mon": "Monday",
+        "tue": "Tuesday",
+        "wed": "Wednesday",
+        "thu": "Thursday",
+        "fri": "Friday",
+        "sat": "Saturday",
+        "sun": "Sunday"
+      }
+    },
+    "contacts": {
+      "phone": "Phone",
+      "address": "Address",
+      "mapUrl": "Map link",
+      "mapUrlHint": "A Yandex Maps link (https only)."
+    },
+    "social": {
+      "telegram": "Telegram",
+      "instagram": "Instagram"
+    },
+    "seo": {
+      "title": "Meta title",
+      "description": "Meta description"
+    }
+  },
   "mobile": {
     "shell": {
       "server": "Server address",

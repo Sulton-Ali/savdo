@@ -772,6 +772,62 @@
       "saleNotReturnable": "Bu qaytarish, unga nisbatan qaytarish rasmiylashtirib bo‘lmaydi."
     }
   },
+  "content": {
+    "nav": "Sayt kontenti",
+    "title": "Sayt kontenti",
+    "saved": "Kontent saqlandi",
+    "keys": {
+      "hero": "Bosh blok",
+      "about": "Biz haqimizda",
+      "hours": "Ish vaqti",
+      "contacts": "Kontaktlar",
+      "social": "Ijtimoiy tarmoqlar",
+      "seo": "SEO"
+    },
+    "hero": {
+      "title": "Sarlavha",
+      "tagline": "Shior",
+      "image": "Rasm",
+      "uploadImage": "Rasm yuklash",
+      "replaceImage": "Rasmni almashtirish",
+      "removeImage": "Rasmni o‘chirish",
+      "imageSet": "Bu blok uchun rasm allaqachon saqlangan."
+    },
+    "about": {
+      "title": "Sarlavha",
+      "body": "Matn"
+    },
+    "hours": {
+      "note": "Izoh",
+      "fallbackHint": "O‘z ish vaqtingiz bo‘lmasa, bu yerda quyida o‘zbekcha ish vaqti ko‘rsatiladi. Tarjima qilingan izoh qo‘shishingiz mumkin.",
+      "closedToggle": "Yopiq",
+      "open": "Ochilish",
+      "close": "Yopilish",
+      "days": {
+        "mon": "Dushanba",
+        "tue": "Seshanba",
+        "wed": "Chorshanba",
+        "thu": "Payshanba",
+        "fri": "Juma",
+        "sat": "Shanba",
+        "sun": "Yakshanba"
+      }
+    },
+    "contacts": {
+      "phone": "Telefon",
+      "address": "Manzil",
+      "mapUrl": "Xarita havolasi",
+      "mapUrlHint": "Yandex Xaritalar havolasi (faqat https)."
+    },
+    "social": {
+      "telegram": "Telegram",
+      "instagram": "Instagram"
+    },
+    "seo": {
+      "title": "Meta sarlavha",
+      "description": "Meta tavsif"
+    }
+  },
   "mobile": {
     "shell": {
       "server": "Server manzili",

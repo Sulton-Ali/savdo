@@ -7,6 +7,7 @@ import { categoriesRoute } from "./routes/app/categoriesRoute";
 import { customerDetailRoute } from "./routes/app/customerDetailRoute";
 import { customersRoute } from "./routes/app/customersRoute";
 import { dashboardRoute } from "./routes/app/dashboardRoute";
+import { landingContentRoute } from "./routes/app/landingContentRoute";
 import { locationsRoute } from "./routes/app/locationsRoute";
 import { productEditRoute } from "./routes/app/productEditRoute";
 import { productNewRoute } from "./routes/app/productNewRoute";
@@ -63,6 +64,8 @@ const routeTree = rootRoute.addChildren([
     saleDraftDetailRoute,
     reportsRoute,
     settingsRoute,
+    // Phase 6 T4: landing content editor (manager+, D-99/O-19/O-21).
+    landingContentRoute,
     stockLevelsRoute,
     stockMovementsRoute,
     stockLowRoute,
