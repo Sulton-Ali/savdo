@@ -241,6 +241,17 @@ func TestGetPublicProductBySlug_promoAcrossCalendarDayBoundary(t *testing.T) {
 	if !v.Price.PromoActive || v.Price.Current != "80000.00" || v.Price.Regular != "100000.00" {
 		t.Errorf("on-promo price = %+v, want current=80000.00 (active), regular=100000.00", v.Price)
 	}
+	// D-109: promoPrice/promoFrom/promoTo are present while the promo is
+	// active.
+	if !onPromo.PromoPrice.IsSpecified() || onPromo.PromoPrice.IsNull() || onPromo.PromoPrice.MustGet() != "80000.00" {
+		t.Errorf("on-promo PromoPrice = %+v, want 80000.00 (promo is active)", onPromo.PromoPrice)
+	}
+	if !onPromo.PromoFrom.IsSpecified() || onPromo.PromoFrom.IsNull() {
+		t.Errorf("on-promo PromoFrom = %+v, want present (promo is active)", onPromo.PromoFrom)
+	}
+	if !onPromo.PromoTo.IsSpecified() || onPromo.PromoTo.IsNull() {
+		t.Errorf("on-promo PromoTo = %+v, want present (promo is active)", onPromo.PromoTo)
+	}
 
 	expired, err := getPublicProduct(ctxWithAcceptLanguage("uz"), t, h, "expired-promo")
 	if err != nil {
@@ -250,6 +261,18 @@ func TestGetPublicProductBySlug_promoAcrossCalendarDayBoundary(t *testing.T) {
 	if ev.Price.PromoActive || ev.Price.Current != "100000.00" {
 		t.Errorf("expired-promo price = %+v, want current=regular=100000.00, promoActive=false", ev.Price)
 	}
+	// D-109: an expired promo's fields are hidden too — not just a future
+	// one — since the rule is "only while active", not "only before it
+	// starts".
+	if expired.PromoPrice.IsSpecified() && !expired.PromoPrice.IsNull() {
+		t.Errorf("expired-promo PromoPrice = %+v, want null (promo is no longer active)", expired.PromoPrice)
+	}
+	if expired.PromoFrom.IsSpecified() && !expired.PromoFrom.IsNull() {
+		t.Errorf("expired-promo PromoFrom = %+v, want null", expired.PromoFrom)
+	}
+	if expired.PromoTo.IsSpecified() && !expired.PromoTo.IsNull() {
+		t.Errorf("expired-promo PromoTo = %+v, want null", expired.PromoTo)
+	}
 
 	future, err := getPublicProduct(ctxWithAcceptLanguage("uz"), t, h, "future-promo")
 	if err != nil {
@@ -258,6 +281,19 @@ func TestGetPublicProductBySlug_promoAcrossCalendarDayBoundary(t *testing.T) {
 	fv := (*future.Variants)[0]
 	if fv.Price.PromoActive || fv.Price.Current != "100000.00" {
 		t.Errorf("future-promo price = %+v, want current=regular=100000.00, promoActive=false (starts tomorrow)", fv.Price)
+	}
+	// D-109 (owner ruling): a promo that has not started yet must be
+	// entirely invisible on the public site, not just inactive in price —
+	// promoPrice/promoFrom/promoTo are null, never a preview of tomorrow's
+	// promo window.
+	if future.PromoPrice.IsSpecified() && !future.PromoPrice.IsNull() {
+		t.Errorf("future-promo PromoPrice = %+v, want null (promo has not started yet)", future.PromoPrice)
+	}
+	if future.PromoFrom.IsSpecified() && !future.PromoFrom.IsNull() {
+		t.Errorf("future-promo PromoFrom = %+v, want null", future.PromoFrom)
+	}
+	if future.PromoTo.IsSpecified() && !future.PromoTo.IsNull() {
+		t.Errorf("future-promo PromoTo = %+v, want null", future.PromoTo)
 	}
 }
 

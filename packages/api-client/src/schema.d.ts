@@ -1550,11 +1550,20 @@ export interface components {
             /** Format: uuid */
             unitId: string;
             basePrice: components["schemas"]["Decimal"];
-            /** Format: decimal */
+            /**
+             * Format: decimal
+             * @description `null` unless a promo is active right now, per the D-68 calendar-day rule in the shop's timezone (D-109: a future promo is hidden from the public site until it starts). Use `price.current`/`price.promoActive` to know what a customer actually pays; this field and `promoFrom`/`promoTo` are only for showing an active promo's own window, never a preview of one still to come.
+             */
             promoPrice: string | null;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description `null` unless a promo is active right now (see `promoPrice`).
+             */
             promoFrom: string | null;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description `null` unless a promo is active right now (see `promoPrice`).
+             */
             promoTo: string | null;
             isActive: boolean;
             isFeatured: boolean;

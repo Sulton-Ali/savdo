@@ -303,6 +303,24 @@ func (h *Handler) GetPublicProductBySlug(ctx context.Context, req gen.GetPublicP
 	if err != nil {
 		return nil, fmt.Errorf("public: product promo price: %w", err)
 	}
+	promoFrom, promoTo := nullableTime(row.PromoFrom), nullableTime(row.PromoTo)
+	// D-109 (owner ruling): a promo that is not active right now — future
+	// or past — must be entirely invisible on the public site, not just
+	// inactive in price: promoPrice/promoFrom/promoTo are null unless the
+	// promo is active per the same D-68 calendar-day rule effectivePrice
+	// already applies to compute price.current/price.promoActive below. A
+	// caller must not be able to read tomorrow's promo window off this
+	// response before it starts.
+	now := time.Now()
+	loc := shopLocation(shop)
+	if !promoActive(row.PromoFrom, row.PromoTo, now, loc) {
+		promoPrice, err = nullableNumeric(pgtype.Numeric{}) // Valid=false -> null
+		if err != nil {
+			return nil, fmt.Errorf("public: hide inactive promo price: %w", err)
+		}
+		promoFrom = nullableTime(nil)
+		promoTo = nullableTime(nil)
+	}
 
 	variants, activeVariantIDs, err := h.publicVariants(ctx, shop, row)
 	if err != nil {
@@ -330,7 +348,7 @@ func (h *Handler) GetPublicProductBySlug(ctx context.Context, req gen.GetPublicP
 	resp := gen.ProductPublic{
 		Id: row.ID, CategoryId: nullableUUID(row.CategoryID), CategorySlug: nullableString(row.CategorySlug),
 		CategoryName: nullableString(categoryName), Slug: row.Slug, Sku: nullableString(row.Sku), UnitId: row.UnitID,
-		BasePrice: money.String(basePrice), PromoPrice: promoPrice, PromoFrom: nullableTime(row.PromoFrom), PromoTo: nullableTime(row.PromoTo),
+		BasePrice: money.String(basePrice), PromoPrice: promoPrice, PromoFrom: promoFrom, PromoTo: promoTo,
 		// IsActive is always true: GetPublicProductBySlug's own WHERE
 		// clause (p.is_active) guarantees it, the same way ADR-010 keeps
 		// this schema active-only.

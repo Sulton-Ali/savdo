@@ -1009,9 +1009,15 @@ type ProductPublic struct {
 	Locale Locale `json:"locale"`
 
 	// Name Resolved for the caller's `Accept-Language`.
-	Name                string                       `json:"name"`
-	PromoFrom           nullable.Nullable[time.Time] `json:"promoFrom"`
-	PromoPrice          nullable.Nullable[string]    `json:"promoPrice"`
+	Name string `json:"name"`
+
+	// PromoFrom `null` unless a promo is active right now (see `promoPrice`).
+	PromoFrom nullable.Nullable[time.Time] `json:"promoFrom"`
+
+	// PromoPrice `null` unless a promo is active right now, per the D-68 calendar-day rule in the shop's timezone (D-109: a future promo is hidden from the public site until it starts). Use `price.current`/`price.promoActive` to know what a customer actually pays; this field and `promoFrom`/`promoTo` are only for showing an active promo's own window, never a preview of one still to come.
+	PromoPrice nullable.Nullable[string] `json:"promoPrice"`
+
+	// PromoTo `null` unless a promo is active right now (see `promoPrice`).
 	PromoTo             nullable.Nullable[time.Time] `json:"promoTo"`
 	Sku                 nullable.Nullable[string]    `json:"sku"`
 	Slug                string                       `json:"slug"`
