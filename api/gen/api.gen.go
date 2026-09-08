@@ -193,7 +193,6 @@ const (
 	FORBIDDEN                ErrorCode = "FORBIDDEN"
 	IDEMPOTENCYKEYREUSED     ErrorCode = "IDEMPOTENCY_KEY_REUSED"
 	INTERNAL                 ErrorCode = "INTERNAL"
-	INVALIDCREDENTIALS       ErrorCode = "INVALID_CREDENTIALS"
 	NOTFOUND                 ErrorCode = "NOT_FOUND"
 	PURCHASEALREADYCANCELLED ErrorCode = "PURCHASE_ALREADY_CANCELLED"
 	PURCHASEALREADYRECEIVED  ErrorCode = "PURCHASE_ALREADY_RECEIVED"
@@ -223,8 +222,6 @@ func (e ErrorCode) Valid() bool {
 	case IDEMPOTENCYKEYREUSED:
 		return true
 	case INTERNAL:
-		return true
-	case INVALIDCREDENTIALS:
 		return true
 	case NOTFOUND:
 		return true
@@ -873,7 +870,7 @@ type DiscountType string
 // Error The error envelope every non-2xx JSON response uses (ADR-013).
 type Error struct {
 	Error struct {
-		// Code Machine-readable error codes (ADR-013). A client translates a code to a display sentence; the API never returns one. Adding a new error code means adding it here first. `UNAUTHENTICATED` means "no valid session or bearer token" (docs/05-API.md § Conventions); `INVALID_CREDENTIALS` (Phase 7) is the distinct 401 the four no-session `/auth/*` operations return for a bad Telegram HMAC, an unlinked Telegram id, or a wrong/expired/over-attempted OTP code — none of them have a session to be missing.
+		// Code Machine-readable error codes (ADR-013). A client translates a code to a display sentence; the API never returns one. Adding a new error code means adding it here first. `UNAUTHENTICATED` covers every reason a request isn't authenticated: no valid session or bearer token (docs/05-API.md § Conventions), and, since Phase 7, the same code for the four no-session `/auth/*` operations rejecting a bad Telegram HMAC, an unlinked Telegram id, or a wrong/expired/over-attempted OTP code or action token — one code per failure class (ADR-013), the same one `POST /auth/login` already returns for rejected credentials.
 		Code ErrorCode `json:"code"`
 
 		// Details Optional machine-readable context, shape depends on `code`. For `VALIDATION_FAILED` this is `{ "fields": { "<field>": "<reason>" } }`.
@@ -881,7 +878,7 @@ type Error struct {
 	} `json:"error"`
 }
 
-// ErrorCode Machine-readable error codes (ADR-013). A client translates a code to a display sentence; the API never returns one. Adding a new error code means adding it here first. `UNAUTHENTICATED` means "no valid session or bearer token" (docs/05-API.md § Conventions); `INVALID_CREDENTIALS` (Phase 7) is the distinct 401 the four no-session `/auth/*` operations return for a bad Telegram HMAC, an unlinked Telegram id, or a wrong/expired/over-attempted OTP code — none of them have a session to be missing.
+// ErrorCode Machine-readable error codes (ADR-013). A client translates a code to a display sentence; the API never returns one. Adding a new error code means adding it here first. `UNAUTHENTICATED` covers every reason a request isn't authenticated: no valid session or bearer token (docs/05-API.md § Conventions), and, since Phase 7, the same code for the four no-session `/auth/*` operations rejecting a bad Telegram HMAC, an unlinked Telegram id, or a wrong/expired/over-attempted OTP code or action token — one code per failure class (ADR-013), the same one `POST /auth/login` already returns for rejected credentials.
 type ErrorCode string
 
 // Healthz Response body for `GET /healthz`.
@@ -2111,9 +2108,6 @@ type Forbidden = Error
 
 // Internal The error envelope every non-2xx JSON response uses (ADR-013).
 type Internal = Error
-
-// InvalidCredentials The error envelope every non-2xx JSON response uses (ADR-013).
-type InvalidCredentials = Error
 
 // NotFound The error envelope every non-2xx JSON response uses (ADR-013).
 type NotFound = Error
@@ -5818,8 +5812,6 @@ type ForbiddenJSONResponse Error
 
 type InternalJSONResponse Error
 
-type InvalidCredentialsJSONResponse Error
-
 type NotFoundJSONResponse Error
 
 type RateLimitedJSONResponse Error
@@ -6242,7 +6234,7 @@ func (response VerifyOtp400JSONResponse) VisitVerifyOtpResponse(w http.ResponseW
 	return err
 }
 
-type VerifyOtp401JSONResponse struct{ InvalidCredentialsJSONResponse }
+type VerifyOtp401JSONResponse struct{ UnauthenticatedJSONResponse }
 
 func (response VerifyOtp401JSONResponse) VisitVerifyOtpResponse(w http.ResponseWriter) error {
 
@@ -6300,7 +6292,7 @@ func (response ResetPassword400JSONResponse) VisitResetPasswordResponse(w http.R
 	return err
 }
 
-type ResetPassword401JSONResponse struct{ InvalidCredentialsJSONResponse }
+type ResetPassword401JSONResponse struct{ UnauthenticatedJSONResponse }
 
 func (response ResetPassword401JSONResponse) VisitResetPasswordResponse(w http.ResponseWriter) error {
 
@@ -6430,7 +6422,7 @@ func (response AuthenticateTelegram400JSONResponse) VisitAuthenticateTelegramRes
 	return err
 }
 
-type AuthenticateTelegram401JSONResponse struct{ InvalidCredentialsJSONResponse }
+type AuthenticateTelegram401JSONResponse struct{ UnauthenticatedJSONResponse }
 
 func (response AuthenticateTelegram401JSONResponse) VisitAuthenticateTelegramResponse(w http.ResponseWriter) error {
 

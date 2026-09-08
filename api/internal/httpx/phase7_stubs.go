@@ -28,7 +28,11 @@ import (
 // and this task's scope does not include contracts/openapi.yaml's error
 // vocabulary or the apierr package), so this reuses the closest existing
 // code, INTERNAL, the same way asError's own fallback does for any
-// otherwise-unmapped error.
+// otherwise-unmapped error. The literal (rather than one of apierr's own
+// constructors) is a temporary scaffold for this placeholder file only —
+// not a pattern to copy elsewhere; real handlers build errors through
+// apierr's constructors (Unauthenticated, Forbidden, NotFound, …), same
+// as every other module.
 func notImplemented() error {
 	return &apierr.Error{
 		Status:  http.StatusNotImplemented,

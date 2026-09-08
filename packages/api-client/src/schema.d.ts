@@ -146,7 +146,7 @@ export interface paths {
         put?: never;
         /**
          * Authenticate via the Telegram Login Widget.
-         * @description Verifies the Login Widget payload's HMAC against `TELEGRAM_BOT_TOKEN` (ADR-005) and, only for a Telegram id already linked (`telegram_accounts`) to a user, starts a session exactly like `POST /auth/login` for `client: web` (cookie, no `token` — the Login Widget is a web-only flow; mobile links via the bot deep-link instead, ADR-005). Never creates a user: a failed HMAC and an unlinked Telegram id both answer `401 INVALID_CREDENTIALS`, so a client cannot tell the two apart.
+         * @description Verifies the Login Widget payload's HMAC against `TELEGRAM_BOT_TOKEN` (ADR-005) and, only for a Telegram id already linked (`telegram_accounts`) to a user, starts a session exactly like `POST /auth/login` for `client: web` (cookie, no `token` — the Login Widget is a web-only flow; mobile links via the bot deep-link instead, ADR-005). Never creates a user: a failed HMAC and an unlinked Telegram id both answer `401 UNAUTHENTICATED` (the same code `POST /auth/login` returns for rejected credentials), so a client cannot tell the two apart.
          */
         post: operations["authenticateTelegram"];
         delete?: never;
@@ -186,7 +186,7 @@ export interface paths {
         put?: never;
         /**
          * Exchange a valid OTP code for a short-lived action token.
-         * @description `401 INVALID_CREDENTIALS` for a wrong or expired code, or once too many attempts have been made against it (`otp_codes.attempts`) — the same code for every failure reason, again to avoid enumeration. On success the code is marked used (single use); the returned `actionToken` is itself single use, 10-minute, and only `POST /auth/password/reset` accepts it.
+         * @description `401 UNAUTHENTICATED` for a wrong or expired code, or once too many attempts have been made against it (`otp_codes.attempts`) — the same code for every failure reason, again to avoid enumeration. On success the code is marked used (single use); the returned `actionToken` is itself single use, 10-minute, and only `POST /auth/password/reset` accepts it.
          */
         post: operations["verifyOtp"];
         delete?: never;
@@ -1337,10 +1337,10 @@ export interface components {
             };
         };
         /**
-         * @description Machine-readable error codes (ADR-013). A client translates a code to a display sentence; the API never returns one. Adding a new error code means adding it here first. `UNAUTHENTICATED` means "no valid session or bearer token" (docs/05-API.md § Conventions); `INVALID_CREDENTIALS` (Phase 7) is the distinct 401 the four no-session `/auth/*` operations return for a bad Telegram HMAC, an unlinked Telegram id, or a wrong/expired/over-attempted OTP code — none of them have a session to be missing.
+         * @description Machine-readable error codes (ADR-013). A client translates a code to a display sentence; the API never returns one. Adding a new error code means adding it here first. `UNAUTHENTICATED` covers every reason a request isn't authenticated: no valid session or bearer token (docs/05-API.md § Conventions), and, since Phase 7, the same code for the four no-session `/auth/*` operations rejecting a bad Telegram HMAC, an unlinked Telegram id, or a wrong/expired/over-attempted OTP code or action token — one code per failure class (ADR-013), the same one `POST /auth/login` already returns for rejected credentials.
          * @enum {string}
          */
-        ErrorCode: "VALIDATION_FAILED" | "UNAUTHENTICATED" | "INVALID_CREDENTIALS" | "FORBIDDEN" | "NOT_FOUND" | "CONFLICT" | "RATE_LIMITED" | "INTERNAL" | "STOCK_INSUFFICIENT" | "PURCHASE_NOT_DRAFT" | "PURCHASE_ALREADY_RECEIVED" | "PURCHASE_ALREADY_CANCELLED" | "SAME_LOCATION" | "IDEMPOTENCY_KEY_REUSED" | "DISCOUNT_EXCEEDS_SUBTOTAL" | "SALE_ALREADY_VOIDED" | "SALE_VOID_WINDOW_CLOSED" | "SALE_HAS_RETURNS" | "SALE_NOT_VOIDABLE" | "SALE_NOT_RETURNABLE" | "RETURN_EXCEEDS_SOLD";
+        ErrorCode: "VALIDATION_FAILED" | "UNAUTHENTICATED" | "FORBIDDEN" | "NOT_FOUND" | "CONFLICT" | "RATE_LIMITED" | "INTERNAL" | "STOCK_INSUFFICIENT" | "PURCHASE_NOT_DRAFT" | "PURCHASE_ALREADY_RECEIVED" | "PURCHASE_ALREADY_CANCELLED" | "SAME_LOCATION" | "IDEMPOTENCY_KEY_REUSED" | "DISCOUNT_EXCEEDS_SUBTOTAL" | "SALE_ALREADY_VOIDED" | "SALE_VOID_WINDOW_CLOSED" | "SALE_HAS_RETURNS" | "SALE_NOT_VOIDABLE" | "SALE_NOT_RETURNABLE" | "RETURN_EXCEEDS_SOLD";
         /** @description The error envelope every non-2xx JSON response uses (ADR-013). */
         Error: {
             error: {
@@ -2664,17 +2664,8 @@ export interface components {
         };
     };
     responses: {
-        /** @description The request has no valid session or bearer token. */
+        /** @description No valid session or bearer token, or — for the Phase 7 no-session `/auth/*` operations — the credential the request itself carries (a Telegram HMAC/link, an OTP code, or an action token) was wrong, expired, or rejected. */
         Unauthenticated: {
-            headers: {
-                [name: string]: unknown;
-            };
-            content: {
-                "application/json": components["schemas"]["Error"];
-            };
-        };
-        /** @description The credential this no-session endpoint itself checks — a Telegram HMAC/link, or an OTP code — was wrong, expired, or used too many times (`ErrorCode.INVALID_CREDENTIALS`, Phase 7). */
-        InvalidCredentials: {
             headers: {
                 [name: string]: unknown;
             };
@@ -2940,7 +2931,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["ValidationFailed"];
-            401: components["responses"]["InvalidCredentials"];
+            401: components["responses"]["Unauthenticated"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -2991,7 +2982,7 @@ export interface operations {
                 };
             };
             400: components["responses"]["ValidationFailed"];
-            401: components["responses"]["InvalidCredentials"];
+            401: components["responses"]["Unauthenticated"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -3016,7 +3007,7 @@ export interface operations {
                 content?: never;
             };
             400: components["responses"]["ValidationFailed"];
-            401: components["responses"]["InvalidCredentials"];
+            401: components["responses"]["Unauthenticated"];
         };
     };
     getTelegramLink: {
