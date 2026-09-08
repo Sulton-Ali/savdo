@@ -1054,7 +1054,8 @@
       "contactsTitle": "Contacts"
     },
     "category": {
-      "empty": "No products in this category yet."
+      "empty": "No products in this category yet.",
+      "breadcrumbAria": "Category path"
     },
     "product": {
       "variantsTitle": "Options",

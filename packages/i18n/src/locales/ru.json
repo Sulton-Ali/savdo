@@ -1054,7 +1054,8 @@
       "contactsTitle": "Контакты"
     },
     "category": {
-      "empty": "В этой категории пока нет товаров."
+      "empty": "В этой категории пока нет товаров.",
+      "breadcrumbAria": "Путь категории"
     },
     "product": {
       "variantsTitle": "Варианты",
