@@ -153,35 +153,55 @@ func TestBotConversations_listNewestActivityFirst(t *testing.T) {
 	}
 }
 
-// TestBotMessages_noUpdateQuery documents, at compile time, that this
-// package generates no UpdateBotMessage (or similarly named) query:
-// bot_messages is append-only by convention (no UPDATE statement ever
-// written against it, § 0022_bot_messages.sql), not by a database
-// trigger — DELETE stays available for D-114's retention job. There is
-// nothing to call here; the test exists so an accidental future UPDATE
-// query gets caught by code review re-reading this comment, and so the
-// test list in the task description has a concrete home. Real assertions
-// live in TestBotMessages_deleteBeforeRetention below (DELETE works) and
-// the schema itself (no UPDATE query is defined anywhere in bot.sql).
+// TestBotMessages_noUpdateQuery pins bot_messages' append-only guarantee
+// two ways: (1) at compile time, this package generates no
+// UpdateBotMessage (or similarly named) query — bot_messages is
+// append-only by convention (no UPDATE statement is ever written against
+// it in bot.sql); (2) at the database level, the bot_messages_immutable
+// trigger (0022_bot_messages.sql, the UPDATE-only twin of
+// stock_movements_no_update_delete) rejects any UPDATE outright, even one
+// issued outside sqlc — DELETE stays allowed, for D-114's retention job.
 func TestBotMessages_noUpdateQuery(t *testing.T) {
-	t.Skip("documentation-only: bot_messages has no generated UPDATE query, see comment")
-}
-
-func mustInsertMessage(ctx context.Context, t *testing.T, f botFixture, convID uuid.UUID, role db.BotMessageRole, provider *string, at time.Time) db.BotMessage {
-	t.Helper()
+	f := newBotFixture(t, "shop-bot-msg-noupdate")
+	ctx := context.Background()
+	conv := f.createConversation(ctx, t, 1)
 	msg, err := f.q.InsertBotMessage(ctx, db.InsertBotMessageParams{
-		ID: uuid.New(), ConversationID: convID, ShopID: f.shopID, Role: role, Content: "hi", Provider: provider,
+		ID: uuid.New(), ConversationID: conv.ID, ShopID: f.shopID, Role: db.BotMessageRoleUser, Content: "hi",
 	})
 	if err != nil {
 		t.Fatalf("InsertBotMessage: %v", err)
 	}
-	// created_at defaults to now(); backdate it directly for time-window
-	// tests (there is no UPDATE query for this table, so this is the
-	// test's own raw SQL, not something production code ever does).
-	if _, err := f.pool.Exec(ctx, `UPDATE bot_messages SET created_at = $1 WHERE id = $2`, at, msg.ID); err != nil {
-		t.Fatalf("backdate bot_messages.created_at: %v", err)
+
+	_, err = f.pool.Exec(ctx, `UPDATE bot_messages SET content = 'edited' WHERE id = $1`, msg.ID)
+	if err == nil {
+		t.Fatal("want UPDATE on bot_messages to be rejected by the append-only trigger, got no error")
 	}
-	msg.CreatedAt = at
+	if !strings.Contains(err.Error(), "append-only") {
+		t.Fatalf("want an append-only trigger error, got: %v", err)
+	}
+}
+
+// mustInsertMessage inserts a bot_messages row with an explicit
+// created_at, for the time-window tests below. It cannot go through
+// InsertBotMessage (which always defaults created_at to now()) and then
+// backdate with an UPDATE, the way earlier tests in this file did:
+// bot_messages_immutable (0022_bot_messages.sql) now rejects every
+// UPDATE, including the test's own. Raw SQL sets created_at at INSERT
+// time instead — not a path production code ever takes.
+func mustInsertMessage(ctx context.Context, t *testing.T, f botFixture, convID uuid.UUID, role db.BotMessageRole, provider *string, at time.Time) db.BotMessage {
+	t.Helper()
+	var msg db.BotMessage
+	err := f.pool.QueryRow(ctx, `
+		INSERT INTO bot_messages (id, conversation_id, shop_id, role, content, provider, created_at)
+		VALUES ($1, $2, $3, $4, 'hi', $5, $6)
+		RETURNING id, conversation_id, shop_id, role, content, tool_calls, provider, model, input_tokens, output_tokens, latency_ms, cost_estimate, created_at
+	`, uuid.New(), convID, f.shopID, role, provider, at).Scan(
+		&msg.ID, &msg.ConversationID, &msg.ShopID, &msg.Role, &msg.Content, &msg.ToolCalls,
+		&msg.Provider, &msg.Model, &msg.InputTokens, &msg.OutputTokens, &msg.LatencyMs, &msg.CostEstimate, &msg.CreatedAt,
+	)
+	if err != nil {
+		t.Fatalf("insert backdated bot_messages row: %v", err)
+	}
 	return msg
 }
 
@@ -226,15 +246,12 @@ func TestBotMessages_sumTokensSinceWindow(t *testing.T) {
 	provider := "anthropic"
 
 	insertWithTokens := func(convID uuid.UUID, in, out int32, at time.Time) {
-		msg, err := f.q.InsertBotMessage(ctx, db.InsertBotMessageParams{
-			ID: uuid.New(), ConversationID: convID, ShopID: f.shopID, Role: db.BotMessageRoleAssistant,
-			Content: "hi", Provider: &provider, InputTokens: &in, OutputTokens: &out,
-		})
-		if err != nil {
-			t.Fatalf("InsertBotMessage: %v", err)
-		}
-		if _, err := f.pool.Exec(ctx, `UPDATE bot_messages SET created_at = $1 WHERE id = $2`, at, msg.ID); err != nil {
-			t.Fatalf("backdate: %v", err)
+		t.Helper()
+		if _, err := f.pool.Exec(ctx, `
+			INSERT INTO bot_messages (id, conversation_id, shop_id, role, content, provider, input_tokens, output_tokens, created_at)
+			VALUES ($1, $2, $3, $4, 'hi', $5, $6, $7, $8)
+		`, uuid.New(), convID, f.shopID, db.BotMessageRoleAssistant, provider, in, out, at); err != nil {
+			t.Fatalf("insert backdated bot_messages row: %v", err)
 		}
 	}
 
@@ -272,15 +289,8 @@ func TestBotMessages_deleteBeforeRetention(t *testing.T) {
 
 	old := mustInsertMessage(ctx, t, f, conv.ID, db.BotMessageRoleUser, nil, cutoff.Add(-time.Hour))   // older than cutoff: deleted
 	recent := mustInsertMessage(ctx, t, f, conv.ID, db.BotMessageRoleUser, nil, cutoff.Add(time.Hour)) // newer than cutoff: kept
-	oldInOtherShop, err := f.q.InsertBotMessage(ctx, db.InsertBotMessageParams{
-		ID: uuid.New(), ConversationID: otherConv.ID, ShopID: otherShop.ID, Role: db.BotMessageRoleUser, Content: "hi",
-	})
-	if err != nil {
-		t.Fatalf("InsertBotMessage (other shop): %v", err)
-	}
-	if _, err := f.pool.Exec(ctx, `UPDATE bot_messages SET created_at = $1 WHERE id = $2`, cutoff.Add(-time.Hour), oldInOtherShop.ID); err != nil {
-		t.Fatalf("backdate: %v", err)
-	}
+	otherShopFixture := botFixture{pool: f.pool, q: f.q, shopID: otherShop.ID}
+	oldInOtherShop := mustInsertMessage(ctx, t, otherShopFixture, otherConv.ID, db.BotMessageRoleUser, nil, cutoff.Add(-time.Hour))
 
 	affected, err := f.q.DeleteBotMessagesBefore(ctx, db.DeleteBotMessagesBeforeParams{ShopID: f.shopID, Before: cutoff})
 	if err != nil {

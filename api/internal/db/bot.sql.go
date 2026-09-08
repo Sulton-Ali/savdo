@@ -186,9 +186,9 @@ type InsertBotMessageParams struct {
 	CostEstimate   pgtype.Numeric `json:"cost_estimate"`
 }
 
-// Append-only (0022_bot_messages.sql's own comment: no UPDATE query
-// exists for this table, enforced by review, not a trigger — DELETE stays
-// available for D-114's retention job, DeleteBotMessagesBefore below).
+// Append-only: bot_messages_immutable (0022_bot_messages.sql) rejects any
+// UPDATE on this table at the database level; DELETE stays available for
+// D-114's retention job, DeleteBotMessagesBefore below.
 func (q *Queries) InsertBotMessage(ctx context.Context, arg InsertBotMessageParams) (BotMessage, error) {
 	row := q.db.QueryRow(ctx, insertBotMessage,
 		arg.ID,

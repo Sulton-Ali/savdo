@@ -8,15 +8,9 @@ CREATE TYPE bot_message_role AS ENUM ('user', 'assistant', 'tool');
 -- enforcement: stock_movements' trigger blocks both UPDATE and DELETE
 -- because nothing may ever remove a ledger entry. bot_messages allows
 -- DELETE — D-114's retention job deletes rows older than 365 days — it
--- only forbids UPDATE (a message, once written, is never edited). No
--- trigger is added here: the codebase's own convention (rule 8's "keep
--- separate sqlc queries rather than filtering in Go") is enforced the
--- same way — by never writing an UPDATE query for this table at all
--- (db.md's own test list: "no update query exists"), not by a DB-level
--- guard. A trigger that blocked UPDATE only, and not DELETE, would be
--- straightforward to add later if review wants belt-and-braces; left out
--- for now as the simplest thing that satisfies the spec (Karpathy
--- guideline: simplicity first).
+-- only forbids UPDATE (a message, once written, is never edited). The
+-- trigger below is the UPDATE-only twin of
+-- stock_movements_no_update_delete (0012_stock_ledger.sql).
 CREATE TABLE bot_messages (
     id               uuid PRIMARY KEY,
     conversation_id  uuid NOT NULL REFERENCES bot_conversations (id),
@@ -46,6 +40,23 @@ CREATE INDEX bot_messages_conversation_id_created_at_idx ON bot_messages (conver
 -- created_at bound.
 CREATE INDEX bot_messages_shop_id_created_at_idx ON bot_messages (shop_id, created_at);
 
+-- No UPDATE is ever issued against a written bot_messages row — a
+-- message, once stored, is never edited (unlike DELETE, which D-114's
+-- retention job needs and this trigger deliberately does not block).
+-- +goose StatementBegin
+CREATE FUNCTION bot_messages_no_update() RETURNS trigger AS $$
+BEGIN
+    RAISE EXCEPTION 'bot_messages is append-only: UPDATE is not allowed';
+END;
+$$ LANGUAGE plpgsql;
+-- +goose StatementEnd
+
+CREATE TRIGGER bot_messages_immutable
+    BEFORE UPDATE ON bot_messages
+    FOR EACH ROW EXECUTE FUNCTION bot_messages_no_update();
+
 -- +goose Down
+DROP TRIGGER bot_messages_immutable ON bot_messages;
+DROP FUNCTION bot_messages_no_update();
 DROP TABLE bot_messages;
 DROP TYPE bot_message_role;

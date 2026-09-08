@@ -43,9 +43,9 @@ ORDER BY COALESCE(last_message_at, created_at) DESC, id DESC
 LIMIT sqlc.arg('limit');
 
 -- name: InsertBotMessage :one
--- Append-only (0022_bot_messages.sql's own comment: no UPDATE query
--- exists for this table, enforced by review, not a trigger — DELETE stays
--- available for D-114's retention job, DeleteBotMessagesBefore below).
+-- Append-only: bot_messages_immutable (0022_bot_messages.sql) rejects any
+-- UPDATE on this table at the database level; DELETE stays available for
+-- D-114's retention job, DeleteBotMessagesBefore below.
 INSERT INTO bot_messages (
     id, conversation_id, shop_id, role, content, tool_calls,
     provider, model, input_tokens, output_tokens, latency_ms, cost_estimate

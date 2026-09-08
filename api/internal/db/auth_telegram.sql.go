@@ -12,7 +12,7 @@ import (
 )
 
 const getTelegramAccountByTelegramUserID = `-- name: GetTelegramAccountByTelegramUserID :one
-SELECT user_id, shop_id, telegram_user_id, telegram_username, linked_at FROM telegram_accounts
+SELECT id, user_id, shop_id, telegram_user_id, telegram_username, linked_at FROM telegram_accounts
 WHERE telegram_user_id = $1
 `
 
@@ -26,6 +26,7 @@ func (q *Queries) GetTelegramAccountByTelegramUserID(ctx context.Context, telegr
 	row := q.db.QueryRow(ctx, getTelegramAccountByTelegramUserID, telegramUserID)
 	var i TelegramAccount
 	err := row.Scan(
+		&i.ID,
 		&i.UserID,
 		&i.ShopID,
 		&i.TelegramUserID,
@@ -36,7 +37,7 @@ func (q *Queries) GetTelegramAccountByTelegramUserID(ctx context.Context, telegr
 }
 
 const getTelegramAccountByUserID = `-- name: GetTelegramAccountByUserID :one
-SELECT user_id, shop_id, telegram_user_id, telegram_username, linked_at FROM telegram_accounts
+SELECT id, user_id, shop_id, telegram_user_id, telegram_username, linked_at FROM telegram_accounts
 WHERE shop_id = $1 AND user_id = $2
 `
 
@@ -49,6 +50,7 @@ func (q *Queries) GetTelegramAccountByUserID(ctx context.Context, arg GetTelegra
 	row := q.db.QueryRow(ctx, getTelegramAccountByUserID, arg.ShopID, arg.UserID)
 	var i TelegramAccount
 	err := row.Scan(
+		&i.ID,
 		&i.UserID,
 		&i.ShopID,
 		&i.TelegramUserID,
@@ -59,30 +61,37 @@ func (q *Queries) GetTelegramAccountByUserID(ctx context.Context, arg GetTelegra
 }
 
 const linkTelegramAccount = `-- name: LinkTelegramAccount :one
-INSERT INTO telegram_accounts (user_id, shop_id, telegram_user_id, telegram_username, linked_at)
-VALUES ($1, $2, $3, $4, now())
+INSERT INTO telegram_accounts (id, user_id, shop_id, telegram_user_id, telegram_username, linked_at)
+VALUES ($1, $2, $3, $4, $5, now())
 ON CONFLICT (user_id) DO UPDATE
 SET telegram_user_id = EXCLUDED.telegram_user_id,
     telegram_username = EXCLUDED.telegram_username,
     linked_at = now()
-RETURNING user_id, shop_id, telegram_user_id, telegram_username, linked_at
+RETURNING id, user_id, shop_id, telegram_user_id, telegram_username, linked_at
 `
 
 type LinkTelegramAccountParams struct {
+	ID               uuid.UUID `json:"id"`
 	UserID           uuid.UUID `json:"user_id"`
 	ShopID           uuid.UUID `json:"shop_id"`
 	TelegramUserID   int64     `json:"telegram_user_id"`
 	TelegramUsername *string   `json:"telegram_username"`
 }
 
-// Upsert on user_id (the primary key, 0019_telegram_accounts.sql): a user
-// re-linking a different Telegram account replaces the row in place
-// rather than erroring. If telegram_user_id already belongs to another
-// user, the UNIQUE(telegram_user_id) constraint rejects the insert with a
-// distinct error — one Telegram account must never link to two users;
-// the service surfaces that as its own error code, not handled here.
+// Upsert on user_id (UNIQUE, not the primary key since the review fix in
+// 0019_telegram_accounts.sql gave this table its own id like every other
+// table): a user re-linking a different Telegram account replaces the row
+// in place rather than erroring or leaving a second row behind. If
+// telegram_user_id already belongs to another user, the
+// UNIQUE(telegram_user_id) constraint rejects the insert with a distinct
+// error — one Telegram account must never link to two users; the service
+// surfaces that as its own error code, not handled here. id is
+// app-generated (sqlc.arg) and only used on the insert branch: ON
+// CONFLICT's UPDATE never touches it, so a re-link keeps the row's
+// original id.
 func (q *Queries) LinkTelegramAccount(ctx context.Context, arg LinkTelegramAccountParams) (TelegramAccount, error) {
 	row := q.db.QueryRow(ctx, linkTelegramAccount,
+		arg.ID,
 		arg.UserID,
 		arg.ShopID,
 		arg.TelegramUserID,
@@ -90,6 +99,7 @@ func (q *Queries) LinkTelegramAccount(ctx context.Context, arg LinkTelegramAccou
 	)
 	var i TelegramAccount
 	err := row.Scan(
+		&i.ID,
 		&i.UserID,
 		&i.ShopID,
 		&i.TelegramUserID,

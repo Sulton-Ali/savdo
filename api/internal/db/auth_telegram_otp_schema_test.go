@@ -34,7 +34,7 @@ func TestTelegramAccounts_linkUnlinkAndCrossShopIsolation(t *testing.T) {
 
 	username := "alice_tg"
 	linked, err := q.LinkTelegramAccount(ctx, db.LinkTelegramAccountParams{
-		UserID: userA.ID, ShopID: shopA.ID, TelegramUserID: 111222333, TelegramUsername: &username,
+		ID: uuid.New(), UserID: userA.ID, ShopID: shopA.ID, TelegramUserID: 111222333, TelegramUsername: &username,
 	})
 	if err != nil {
 		t.Fatalf("LinkTelegramAccount: %v", err)
@@ -56,13 +56,16 @@ func TestTelegramAccounts_linkUnlinkAndCrossShopIsolation(t *testing.T) {
 	// place rather than erroring or creating a second one.
 	newUsername := "alice_new_tg"
 	relinked, err := q.LinkTelegramAccount(ctx, db.LinkTelegramAccountParams{
-		UserID: userA.ID, ShopID: shopA.ID, TelegramUserID: 999888777, TelegramUsername: &newUsername,
+		ID: uuid.New(), UserID: userA.ID, ShopID: shopA.ID, TelegramUserID: 999888777, TelegramUsername: &newUsername,
 	})
 	if err != nil {
 		t.Fatalf("LinkTelegramAccount (relink): %v", err)
 	}
 	if relinked.TelegramUserID != 999888777 {
 		t.Fatalf("relinked TelegramUserID = %d, want 999888777", relinked.TelegramUserID)
+	}
+	if relinked.ID != linked.ID {
+		t.Fatalf("relinked.ID = %s, want the original row's id %s (ON CONFLICT UPDATE never touches id)", relinked.ID, linked.ID)
 	}
 	if _, err := q.GetTelegramAccountByTelegramUserID(ctx, 111222333); !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("old telegram_user_id should no longer resolve, got err=%v", err)
@@ -72,7 +75,7 @@ func TestTelegramAccounts_linkUnlinkAndCrossShopIsolation(t *testing.T) {
 	// must not be visible through shopB's by-user-id read for userA, or
 	// vice versa (hard rule 1).
 	if _, err := q.LinkTelegramAccount(ctx, db.LinkTelegramAccountParams{
-		UserID: userB.ID, ShopID: shopB.ID, TelegramUserID: 444555666,
+		ID: uuid.New(), UserID: userB.ID, ShopID: shopB.ID, TelegramUserID: 444555666,
 	}); err != nil {
 		t.Fatalf("LinkTelegramAccount (shop B): %v", err)
 	}
@@ -111,13 +114,13 @@ func TestTelegramAccounts_telegramUserIDUniqueAcrossUsers(t *testing.T) {
 	user2 := salesUser(ctx, t, q, shop.ID, "user2", db.UserRoleManager)
 
 	if _, err := q.LinkTelegramAccount(ctx, db.LinkTelegramAccountParams{
-		UserID: user1.ID, ShopID: shop.ID, TelegramUserID: 12345,
+		ID: uuid.New(), UserID: user1.ID, ShopID: shop.ID, TelegramUserID: 12345,
 	}); err != nil {
 		t.Fatalf("LinkTelegramAccount(user1): %v", err)
 	}
 
 	_, err := q.LinkTelegramAccount(ctx, db.LinkTelegramAccountParams{
-		UserID: user2.ID, ShopID: shop.ID, TelegramUserID: 12345,
+		ID: uuid.New(), UserID: user2.ID, ShopID: shop.ID, TelegramUserID: 12345,
 	})
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) || pgErr.Code != "23505" {
@@ -243,6 +246,64 @@ func TestOTPCodes_newCodeInvalidatesOld(t *testing.T) {
 	}
 	if active.ID != second.ID {
 		t.Fatalf("GetActiveOTPCode = %s, want the newest code %s (first %s should be expired)", active.ID, second.ID, first.ID)
+	}
+}
+
+// TestOTPCodes_crossShopIsolation mirrors
+// TestTelegramAccounts_linkUnlinkAndCrossShopIsolation's own cross-shop
+// check: even though a user_id already belongs to exactly one shop, every
+// otp_codes query still takes shop_id and must actually filter by it
+// (hard rule 1) — a caller passing the right user_id with the wrong
+// shop_id (a stale or forged auth context) must see nothing and change
+// nothing, not silently fall back to matching on user_id alone.
+func TestOTPCodes_crossShopIsolation(t *testing.T) {
+	pool := testdb.New(t)
+	testdb.Truncate(t, pool)
+	ctx := context.Background()
+	q := db.New(pool)
+
+	shopA := catalogShop(ctx, t, q, "shop-otp-cross-a")
+	shopB := catalogShop(ctx, t, q, "shop-otp-cross-b")
+	userA := salesUser(ctx, t, q, shopA.ID, "ownera", db.UserRoleOwner)
+
+	code, err := q.CreateOTPCode(ctx, db.CreateOTPCodeParams{
+		ID: uuid.New(), ShopID: shopA.ID, UserID: userA.ID, Purpose: db.OtpPurposePasswordReset,
+		CodeHash: []byte("hashed"), ExpiresAt: time.Now().Add(5 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("CreateOTPCode: %v", err)
+	}
+
+	// Reading userA's active code through shopB's shop_id must see nothing.
+	if _, err := q.GetActiveOTPCode(ctx, db.GetActiveOTPCodeParams{ShopID: shopB.ID, UserID: userA.ID, Purpose: db.OtpPurposePasswordReset}); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("shop B must not see shop A's active OTP code by user_id, got err=%v", err)
+	}
+
+	// Incrementing/marking-used through the wrong shop_id must touch
+	// nothing — the code stays exactly as it was.
+	if _, err := q.IncrementOTPAttempts(ctx, db.IncrementOTPAttemptsParams{ShopID: shopB.ID, ID: code.ID}); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("IncrementOTPAttempts through shop B must not touch shop A's code, got err=%v", err)
+	}
+	if _, err := q.MarkOTPUsed(ctx, db.MarkOTPUsedParams{ShopID: shopB.ID, ID: code.ID}); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("MarkOTPUsed through shop B must not touch shop A's code, got err=%v", err)
+	}
+
+	// ExpireOTPCodes scoped to shop B must invalidate zero rows; the code
+	// is still active for shop A afterwards.
+	affected, err := q.ExpireOTPCodes(ctx, db.ExpireOTPCodesParams{ShopID: shopB.ID, UserID: userA.ID, Purpose: db.OtpPurposePasswordReset})
+	if err != nil {
+		t.Fatalf("ExpireOTPCodes (shop B): %v", err)
+	}
+	if affected != 0 {
+		t.Fatalf("ExpireOTPCodes through shop B affected = %d, want 0", affected)
+	}
+
+	stillActive, err := q.GetActiveOTPCode(ctx, db.GetActiveOTPCodeParams{ShopID: shopA.ID, UserID: userA.ID, Purpose: db.OtpPurposePasswordReset})
+	if err != nil {
+		t.Fatalf("GetActiveOTPCode (shop A, after shop B's no-op ExpireOTPCodes): %v", err)
+	}
+	if stillActive.ID != code.ID {
+		t.Fatalf("GetActiveOTPCode (shop A) = %s, want %s untouched", stillActive.ID, code.ID)
 	}
 }
 

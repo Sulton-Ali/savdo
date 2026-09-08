@@ -983,6 +983,7 @@ type Supplier struct {
 }
 
 type TelegramAccount struct {
+	ID               uuid.UUID `json:"id"`
 	UserID           uuid.UUID `json:"user_id"`
 	ShopID           uuid.UUID `json:"shop_id"`
 	TelegramUserID   int64     `json:"telegram_user_id"`
