@@ -191,8 +191,8 @@ Low stock: reuse `GET /stock/low` (Phase 3, D-55).
 | GET | `/content/{key}` | manager+ | Returns all three locales' raw data (`{ key, locales: { uz?, ru?, en? } }`); fallback on read |
 | PUT | `/content/{key}` | manager+ | Body: `{ locale: uz\|ru\|en, data }`, upserts one locale; validated against O-19 schema; 422 `VALIDATION_FAILED` with field details on shape errors, 400 on unknown key or locale. |
 | GET | `/public/shop` | public | Returns { name, slug, currency, defaultLocale, locale, translationFallback, blocks: { hero, about, hours, contacts, social, seo } } with fallback; `hero.image` resolves to media URL when `imageMediaId` set |
-| GET | `/public/categories` | public | Active categories: slug, name, product count |
-| GET | `/public/products` | public | Query `category` (slug), `featured` (bool), `q`, `cursor`, `limit`; items: id, slug, name, coverImage, price, availability, categorySlug (nullable, O-22); newest first (D-92) |
+| GET | `/public/categories` | public | Active categories: slug, name, parentSlug/parentName, product count (sums descendants); sorted so parent precedes children (O-23) |
+| GET | `/public/products` | public | Query `category` (slug), `featured` (bool), `q`, `cursor`, `limit`; `category` filter includes descendants (O-23); items: id, slug, name, coverImage, price, availability, categorySlug (nullable, O-22); newest first (D-92) |
 | GET | `/public/products/{slug}` | public | Full product with variants (availability, price), images, description; promo fields only while active (D-109) |
 
 Content blocks: `about.body` is plain text; renderers must escape it (never treat as HTML).
