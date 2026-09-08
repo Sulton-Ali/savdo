@@ -24,7 +24,12 @@ tags:
   - name: ops
     description: Health and other operational endpoints.
   - name: auth
-    description: Login, logout, the current user and session management.
+    description: >
+      Login, logout, the current user and session management. Phase 7 adds
+      Telegram Login Widget auth, OTP-driven password reset and the
+      Telegram account-linking operations (ADR-005) — none of the four
+      no-session operations here enumerate whether a username or Telegram
+      id exists (docs/05-API.md § Conventions).
   - name: shop
     description: Shop settings, locations and staff (Phase 1).
   - name: catalog
@@ -89,6 +94,17 @@ tags:
       (`If-None-Match` → `304`), served from an in-process cache keyed by
       shop + path + query + resolved locale, cleared on a content `PUT`
       or a catalogue product/category/variant/image write.
+  - name: bot
+    description: >
+      Telegram bot webhook and read-only conversation history (Phase 7,
+      ADR-009). `POST /bot/webhook/{secret}` is Telegram-only (no client
+      calls it): `secret` is compared against `TELEGRAM_WEBHOOK_SECRET` in
+      constant time, `404 NOT_FOUND` on a mismatch; `security: []` is
+      documentation only — `auth.allowlistedOperations` is the actual gate
+      (docs/05-API.md § Conventions). The two `GET /bot/conversations*`
+      operations are `manager+` (04-DATA-MODEL.md § 7, "Bot conversations
+      (read)") and never carry `cost_price`/`unit_cost` — the bot's
+      customer mode never touched them in the first place (ADR-009).
 
 paths:
   /healthz:
@@ -227,6 +243,171 @@ paths:
           $ref: "#/components/responses/Unauthenticated"
         "404":
           $ref: "#/components/responses/NotFound"
+
+  /auth/telegram:
+    post:
+      operationId: authenticateTelegram
+      tags: [auth]
+      summary: Authenticate via the Telegram Login Widget.
+      description: >
+        Verifies the Login Widget payload's HMAC against
+        `TELEGRAM_BOT_TOKEN` (ADR-005) and, only for a Telegram id already
+        linked (`telegram_accounts`) to a user, starts a session exactly
+        like `POST /auth/login` for `client: web` (cookie, no `token` —
+        the Login Widget is a web-only flow; mobile links via the bot
+        deep-link instead, ADR-005). Never creates a user: a failed HMAC
+        and an unlinked Telegram id both answer `401 INVALID_CREDENTIALS`,
+        so a client cannot tell the two apart.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TelegramAuthRequest"
+      responses:
+        "200":
+          description: Authenticated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/InvalidCredentials"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /auth/otp/request:
+    post:
+      operationId: requestOtp
+      tags: [auth]
+      summary: Request an OTP code for a sensitive action.
+      description: >
+        Delivered by the bot to `username`'s linked Telegram account
+        (ADR-005). Answers `202` whether or not `username` exists or is
+        linked, and whatever `purpose` was sent — no enumeration. Only
+        `password_reset` is implemented in Phase 7; `OtpPurpose`'s other
+        values are reserved for flows that do not go through this
+        endpoint.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OtpRequest"
+      responses:
+        "202":
+          description: >
+            Accepted. Always this, never a 200/204-with-a-body, so status
+            and timing can't reveal whether `username` exists.
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /auth/otp/verify:
+    post:
+      operationId: verifyOtp
+      tags: [auth]
+      summary: Exchange a valid OTP code for a short-lived action token.
+      description: >
+        `401 INVALID_CREDENTIALS` for a wrong or expired code, or once too
+        many attempts have been made against it (`otp_codes.attempts`) —
+        the same code for every failure reason, again to avoid
+        enumeration. On success the code is marked used (single use); the
+        returned `actionToken` is itself single use, 10-minute, and only
+        `POST /auth/password/reset` accepts it.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OtpVerifyRequest"
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OtpVerifyResponse"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/InvalidCredentials"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /auth/password/reset:
+    post:
+      operationId: resetPassword
+      tags: [auth]
+      summary: Reset a password using an action token from `POST /auth/otp/verify`.
+      description: >
+        `actionToken` is the credential — this endpoint needs no session.
+        Revokes every other session belonging to the user whose password
+        was reset.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasswordResetRequest"
+      responses:
+        "204":
+          description: Password reset.
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/InvalidCredentials"
+
+  /auth/telegram/link:
+    post:
+      operationId: createTelegramLink
+      tags: [auth]
+      summary: Start linking the caller's account to a Telegram account.
+      description: >
+        Any authenticated role. Returns a single-use, 10-minute `code` and
+        the deep link the user opens in Telegram
+        (`https://t.me/<bot>?start=link_<code>`); the bot completes the
+        link once the user starts a chat with that payload.
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TelegramLinkCode"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+    delete:
+      operationId: deleteTelegramLink
+      tags: [auth]
+      summary: Unlink the caller's Telegram account.
+      description: Any authenticated role.
+      responses:
+        "204":
+          description: Unlinked.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+    get:
+      operationId: getTelegramLink
+      tags: [auth]
+      summary: The caller's current Telegram link status.
+      description: Any authenticated role.
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TelegramLinkStatus"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
 
   /shop:
     get:
@@ -2707,6 +2888,89 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /bot/webhook/{secret}:
+    post:
+      operationId: handleBotWebhook
+      tags: [bot]
+      summary: Telegram webhook. Telegram-only — no client calls this.
+      description: >
+        `secret` is compared against `TELEGRAM_WEBHOOK_SECRET` in constant
+        time; a mismatch is `404 NOT_FOUND` rather than `401`/`403`, so a
+        prober learns nothing about whether webhooks are even configured.
+        The body is an opaque Telegram Update object, forwarded as-is to
+        `internal/bot`.
+      security: []
+      parameters:
+        - name: secret
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Acknowledged. Telegram does not read the response body.
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /bot/conversations:
+    get:
+      operationId: listBotConversations
+      tags: [bot]
+      summary: List the shop's bot conversations.
+      description: >
+        Requires `manager+` (04-DATA-MODEL.md § 7). Cursor-paginated,
+        newest activity (`lastMessageAt`) first.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotConversationList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /bot/conversations/{id}/messages:
+    get:
+      operationId: listBotConversationMessages
+      tags: [bot]
+      summary: List one conversation's messages.
+      description: Requires `manager+`. Cursor-paginated, oldest first.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotMessageList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
 components:
   securitySchemes:
     cookieAuth:
@@ -2761,10 +3025,16 @@ components:
       description: >
         Machine-readable error codes (ADR-013). A client translates a code
         to a display sentence; the API never returns one. Adding a new
-        error code means adding it here first.
+        error code means adding it here first. `UNAUTHENTICATED` means "no
+        valid session or bearer token" (docs/05-API.md § Conventions);
+        `INVALID_CREDENTIALS` (Phase 7) is the distinct 401 the four
+        no-session `/auth/*` operations return for a bad Telegram HMAC, an
+        unlinked Telegram id, or a wrong/expired/over-attempted OTP code —
+        none of them have a session to be missing.
       enum:
         - VALIDATION_FAILED
         - UNAUTHENTICATED
+        - INVALID_CREDENTIALS
         - FORBIDDEN
         - NOT_FOUND
         - CONFLICT
@@ -3085,6 +3355,130 @@ components:
             Bearer token for `client: mobile` only. Absent for `client:
             web`, which authenticates with the `savdo_session` cookie
             instead.
+
+    TelegramAuthRequest:
+      type: object
+      description: >
+        The Telegram Login Widget's callback payload (ADR-005), verified
+        server-side against `TELEGRAM_BOT_TOKEN` before any lookup. Field
+        names are camelCase per API convention; the widget's own field
+        names (`first_name`, `auth_date`, …) are mapped by the caller.
+      required:
+        - id
+        - authDate
+        - hash
+      properties:
+        id:
+          type: string
+          description: >
+            The Telegram user id as a decimal string — kept a string end
+            to end for JS safety, matching `BotConversation.telegramChatId`.
+        firstName:
+          type: string
+        lastName:
+          type: string
+        username:
+          type: string
+        photoUrl:
+          type: string
+          format: uri
+        authDate:
+          type: integer
+          description: Unix timestamp (seconds) the widget signed the payload at.
+        hash:
+          type: string
+          description: Hex-encoded HMAC-SHA-256 signature from the widget.
+
+    OtpPurpose:
+      type: string
+      description: >
+        `otp_codes.purpose` (docs/04-DATA-MODEL.md § 1). Only
+        `password_reset` is accepted by `POST /auth/otp/request` in Phase
+        7; `link_telegram` and `confirm_action` are reserved for flows
+        that do not go through this endpoint.
+      enum: [password_reset, link_telegram, confirm_action]
+
+    OtpRequest:
+      type: object
+      required:
+        - username
+        - purpose
+      properties:
+        username:
+          type: string
+          maxLength: 64
+        purpose:
+          $ref: "#/components/schemas/OtpPurpose"
+
+    OtpVerifyRequest:
+      type: object
+      required:
+        - username
+        - purpose
+        - code
+      properties:
+        username:
+          type: string
+          maxLength: 64
+        purpose:
+          $ref: "#/components/schemas/OtpPurpose"
+        code:
+          type: string
+          minLength: 6
+          maxLength: 6
+
+    OtpVerifyResponse:
+      type: object
+      required:
+        - actionToken
+        - expiresAt
+      properties:
+        actionToken:
+          type: string
+          description: >
+            Opaque, single-use token for `POST /auth/password/reset`,
+            valid 10 minutes.
+        expiresAt:
+          type: string
+          format: date-time
+
+    PasswordResetRequest:
+      type: object
+      required:
+        - actionToken
+        - newPassword
+      properties:
+        actionToken:
+          type: string
+        newPassword:
+          type: string
+          minLength: 8
+          maxLength: 128
+
+    TelegramLinkCode:
+      type: object
+      required:
+        - code
+        - deepLink
+      properties:
+        code:
+          type: string
+          description: Single-use linking code, valid 10 minutes.
+        deepLink:
+          type: string
+          format: uri
+          description: '`https://t.me/<bot>?start=link_<code>`.'
+
+    TelegramLinkStatus:
+      type: object
+      required:
+        - linked
+        - telegramUsername
+      properties:
+        linked:
+          type: boolean
+        telegramUsername:
+          type: ["string", "null"]
 
     Me:
       type: object
@@ -5693,6 +6087,136 @@ components:
           type: string
           maxLength: 200
 
+    BotConversationMode:
+      type: string
+      description: >
+        `bot_conversations.mode` (docs/04-DATA-MODEL.md § 6). Only
+        `customer` exists in Phase 7 — staff mode is post-MVP (D-111).
+      enum: [customer]
+
+    BotMessageRole:
+      type: string
+      description: '`bot_messages.role` (docs/04-DATA-MODEL.md § 6).'
+      enum: [user, assistant, tool]
+
+    BotConversation:
+      type: object
+      description: One Telegram chat's conversation with the bot, forever (O-26).
+      required:
+        - id
+        - telegramChatId
+        - telegramUsername
+        - customerId
+        - mode
+        - messageCount
+        - lastMessageAt
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        telegramChatId:
+          type: string
+          description: >
+            The Telegram chat id as a decimal string — kept a string for
+            JS safety (an `int64` as a JSON number risks silent precision
+            loss past 2^53), matching `TelegramAuthRequest.id`.
+        telegramUsername:
+          type: ["string", "null"]
+        customerId:
+          type: ["string", "null"]
+          format: uuid
+        mode:
+          $ref: "#/components/schemas/BotConversationMode"
+        messageCount:
+          type: integer
+        lastMessageAt:
+          type: ["string", "null"]
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+
+    BotConversationList:
+      type: object
+      description: Cursor-paginated envelope for `GET /bot/conversations`.
+      required:
+        - items
+        - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/BotConversation"
+        nextCursor:
+          type: ["string", "null"]
+
+    BotMessage:
+      type: object
+      description: >
+        One turn of a bot conversation (docs/04-DATA-MODEL.md § 6).
+        `provider`/`model`/token counts/`latencyMs`/`costEstimate` are
+        null for `role: user` and `role: tool` rows — only an `assistant`
+        reply calls the LLM (O-28).
+      required:
+        - id
+        - role
+        - content
+        - toolCalls
+        - provider
+        - model
+        - inputTokens
+        - outputTokens
+        - latencyMs
+        - costEstimate
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        role:
+          $ref: "#/components/schemas/BotMessageRole"
+        content:
+          type: string
+        toolCalls:
+          type: ["object", "null"]
+          description: >
+            Raw tool-call/result payload for an `assistant` row
+            (docs/04-DATA-MODEL.md § 6); null otherwise. Never persisted
+            as its own message row (O-26).
+        provider:
+          type: ["string", "null"]
+        model:
+          type: ["string", "null"]
+        inputTokens:
+          type: ["integer", "null"]
+        outputTokens:
+          type: ["integer", "null"]
+        latencyMs:
+          type: ["integer", "null"]
+        costEstimate:
+          type: ["string", "null"]
+          format: decimal
+          pattern: '^-?\d+(\.\d+)?$'
+          description: USD, `NUMERIC(10,6)` (O-28) — a decimal string, never a float.
+        createdAt:
+          type: string
+          format: date-time
+
+    BotMessageList:
+      type: object
+      description: Cursor-paginated envelope for `GET /bot/conversations/{id}/messages`.
+      required:
+        - items
+        - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/BotMessage"
+        nextCursor:
+          type: ["string", "null"]
+
   parameters:
     Limit:
       name: limit
@@ -5737,6 +6261,16 @@ components:
   responses:
     Unauthenticated:
       description: The request has no valid session or bearer token.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+    InvalidCredentials:
+      description: >
+        The credential this no-session endpoint itself checks — a
+        Telegram HMAC/link, or an OTP code — was wrong, expired, or used
+        too many times (`ErrorCode.INVALID_CREDENTIALS`, Phase 7).
       content:
         application/json:
           schema:

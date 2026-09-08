@@ -28,7 +28,16 @@ import (
 // contract): this map is the one place that actually enforces "no
 // session required" — the contract's `security: []` is documentation,
 // not enforcement — so internal/public reads no auth.Context anywhere
-// (it has none to read).
+// (it has none to read). The five Phase 7 entries (T3) are the contract's
+// other `security: []` operations: AuthenticateTelegram, RequestOtp and
+// VerifyOtp (an unauthenticated caller proving who they are, not someone
+// who already has a session) and ResetPassword (authenticated by its
+// `actionToken` body field, not a session) under `auth`, plus
+// HandleBotWebhook under `bot` (authenticated by its `secret` path
+// segment, compared constant-time by the handler — T5 — not by a
+// session). The three `/auth/telegram/link` operations are deliberately
+// NOT here: linking a Telegram account requires an existing session (any
+// role).
 var allowlistedOperations = map[string]bool{
 	"GetHealthz":             true,
 	"GetReadyz":              true,
@@ -37,6 +46,11 @@ var allowlistedOperations = map[string]bool{
 	"ListPublicCategories":   true,
 	"ListPublicProducts":     true,
 	"GetPublicProductBySlug": true,
+	"AuthenticateTelegram":   true,
+	"RequestOtp":             true,
+	"VerifyOtp":              true,
+	"ResetPassword":          true,
+	"HandleBotWebhook":       true,
 }
 
 // requestCtxKey is the context key requestInfo is stored under.

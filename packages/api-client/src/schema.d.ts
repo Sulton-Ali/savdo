@@ -135,6 +135,114 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/telegram": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Authenticate via the Telegram Login Widget.
+         * @description Verifies the Login Widget payload's HMAC against `TELEGRAM_BOT_TOKEN` (ADR-005) and, only for a Telegram id already linked (`telegram_accounts`) to a user, starts a session exactly like `POST /auth/login` for `client: web` (cookie, no `token` — the Login Widget is a web-only flow; mobile links via the bot deep-link instead, ADR-005). Never creates a user: a failed HMAC and an unlinked Telegram id both answer `401 INVALID_CREDENTIALS`, so a client cannot tell the two apart.
+         */
+        post: operations["authenticateTelegram"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/otp/request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request an OTP code for a sensitive action.
+         * @description Delivered by the bot to `username`'s linked Telegram account (ADR-005). Answers `202` whether or not `username` exists or is linked, and whatever `purpose` was sent — no enumeration. Only `password_reset` is implemented in Phase 7; `OtpPurpose`'s other values are reserved for flows that do not go through this endpoint.
+         */
+        post: operations["requestOtp"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/otp/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Exchange a valid OTP code for a short-lived action token.
+         * @description `401 INVALID_CREDENTIALS` for a wrong or expired code, or once too many attempts have been made against it (`otp_codes.attempts`) — the same code for every failure reason, again to avoid enumeration. On success the code is marked used (single use); the returned `actionToken` is itself single use, 10-minute, and only `POST /auth/password/reset` accepts it.
+         */
+        post: operations["verifyOtp"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/password/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reset a password using an action token from `POST /auth/otp/verify`.
+         * @description `actionToken` is the credential — this endpoint needs no session. Revokes every other session belonging to the user whose password was reset.
+         */
+        post: operations["resetPassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/telegram/link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The caller's current Telegram link status.
+         * @description Any authenticated role.
+         */
+        get: operations["getTelegramLink"];
+        put?: never;
+        /**
+         * Start linking the caller's account to a Telegram account.
+         * @description Any authenticated role. Returns a single-use, 10-minute `code` and the deep link the user opens in Telegram (`https://t.me/<bot>?start=link_<code>`); the bot completes the link once the user starts a chat with that payload.
+         */
+        post: operations["createTelegramLink"];
+        /**
+         * Unlink the caller's Telegram account.
+         * @description Any authenticated role.
+         */
+        delete: operations["deleteTelegramLink"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/shop": {
         parameters: {
             query?: never;
@@ -1150,6 +1258,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/bot/webhook/{secret}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Telegram webhook. Telegram-only — no client calls this.
+         * @description `secret` is compared against `TELEGRAM_WEBHOOK_SECRET` in constant time; a mismatch is `404 NOT_FOUND` rather than `401`/`403`, so a prober learns nothing about whether webhooks are even configured. The body is an opaque Telegram Update object, forwarded as-is to `internal/bot`.
+         */
+        post: operations["handleBotWebhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/bot/conversations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the shop's bot conversations.
+         * @description Requires `manager+` (04-DATA-MODEL.md § 7). Cursor-paginated, newest activity (`lastMessageAt`) first.
+         */
+        get: operations["listBotConversations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/bot/conversations/{id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List one conversation's messages.
+         * @description Requires `manager+`. Cursor-paginated, oldest first.
+         */
+        get: operations["listBotConversationMessages"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1169,10 +1337,10 @@ export interface components {
             };
         };
         /**
-         * @description Machine-readable error codes (ADR-013). A client translates a code to a display sentence; the API never returns one. Adding a new error code means adding it here first.
+         * @description Machine-readable error codes (ADR-013). A client translates a code to a display sentence; the API never returns one. Adding a new error code means adding it here first. `UNAUTHENTICATED` means "no valid session or bearer token" (docs/05-API.md § Conventions); `INVALID_CREDENTIALS` (Phase 7) is the distinct 401 the four no-session `/auth/*` operations return for a bad Telegram HMAC, an unlinked Telegram id, or a wrong/expired/over-attempted OTP code — none of them have a session to be missing.
          * @enum {string}
          */
-        ErrorCode: "VALIDATION_FAILED" | "UNAUTHENTICATED" | "FORBIDDEN" | "NOT_FOUND" | "CONFLICT" | "RATE_LIMITED" | "INTERNAL" | "STOCK_INSUFFICIENT" | "PURCHASE_NOT_DRAFT" | "PURCHASE_ALREADY_RECEIVED" | "PURCHASE_ALREADY_CANCELLED" | "SAME_LOCATION" | "IDEMPOTENCY_KEY_REUSED" | "DISCOUNT_EXCEEDS_SUBTOTAL" | "SALE_ALREADY_VOIDED" | "SALE_VOID_WINDOW_CLOSED" | "SALE_HAS_RETURNS" | "SALE_NOT_VOIDABLE" | "SALE_NOT_RETURNABLE" | "RETURN_EXCEEDS_SOLD";
+        ErrorCode: "VALIDATION_FAILED" | "UNAUTHENTICATED" | "INVALID_CREDENTIALS" | "FORBIDDEN" | "NOT_FOUND" | "CONFLICT" | "RATE_LIMITED" | "INTERNAL" | "STOCK_INSUFFICIENT" | "PURCHASE_NOT_DRAFT" | "PURCHASE_ALREADY_RECEIVED" | "PURCHASE_ALREADY_CANCELLED" | "SAME_LOCATION" | "IDEMPOTENCY_KEY_REUSED" | "DISCOUNT_EXCEEDS_SUBTOTAL" | "SALE_ALREADY_VOIDED" | "SALE_VOID_WINDOW_CLOSED" | "SALE_HAS_RETURNS" | "SALE_NOT_VOIDABLE" | "SALE_NOT_RETURNABLE" | "RETURN_EXCEEDS_SOLD";
         /** @description The error envelope every non-2xx JSON response uses (ADR-013). */
         Error: {
             error: {
@@ -1309,6 +1477,57 @@ export interface components {
             session: components["schemas"]["Session"];
             /** @description Bearer token for `client: mobile` only. Absent for `client: web`, which authenticates with the `savdo_session` cookie instead. */
             token?: string;
+        };
+        /** @description The Telegram Login Widget's callback payload (ADR-005), verified server-side against `TELEGRAM_BOT_TOKEN` before any lookup. Field names are camelCase per API convention; the widget's own field names (`first_name`, `auth_date`, …) are mapped by the caller. */
+        TelegramAuthRequest: {
+            /** @description The Telegram user id as a decimal string — kept a string end to end for JS safety, matching `BotConversation.telegramChatId`. */
+            id: string;
+            firstName?: string;
+            lastName?: string;
+            username?: string;
+            /** Format: uri */
+            photoUrl?: string;
+            /** @description Unix timestamp (seconds) the widget signed the payload at. */
+            authDate: number;
+            /** @description Hex-encoded HMAC-SHA-256 signature from the widget. */
+            hash: string;
+        };
+        /**
+         * @description `otp_codes.purpose` (docs/04-DATA-MODEL.md § 1). Only `password_reset` is accepted by `POST /auth/otp/request` in Phase 7; `link_telegram` and `confirm_action` are reserved for flows that do not go through this endpoint.
+         * @enum {string}
+         */
+        OtpPurpose: "password_reset" | "link_telegram" | "confirm_action";
+        OtpRequest: {
+            username: string;
+            purpose: components["schemas"]["OtpPurpose"];
+        };
+        OtpVerifyRequest: {
+            username: string;
+            purpose: components["schemas"]["OtpPurpose"];
+            code: string;
+        };
+        OtpVerifyResponse: {
+            /** @description Opaque, single-use token for `POST /auth/password/reset`, valid 10 minutes. */
+            actionToken: string;
+            /** Format: date-time */
+            expiresAt: string;
+        };
+        PasswordResetRequest: {
+            actionToken: string;
+            newPassword: string;
+        };
+        TelegramLinkCode: {
+            /** @description Single-use linking code, valid 10 minutes. */
+            code: string;
+            /**
+             * Format: uri
+             * @description `https://t.me/<bot>?start=link_<code>`.
+             */
+            deepLink: string;
+        };
+        TelegramLinkStatus: {
+            linked: boolean;
+            telegramUsername: string | null;
         };
         Me: {
             user: components["schemas"]["User"];
@@ -2386,10 +2605,76 @@ export interface components {
             title: string;
             description: string;
         };
+        /**
+         * @description `bot_conversations.mode` (docs/04-DATA-MODEL.md § 6). Only `customer` exists in Phase 7 — staff mode is post-MVP (D-111).
+         * @enum {string}
+         */
+        BotConversationMode: "customer";
+        /**
+         * @description `bot_messages.role` (docs/04-DATA-MODEL.md § 6).
+         * @enum {string}
+         */
+        BotMessageRole: "user" | "assistant" | "tool";
+        /** @description One Telegram chat's conversation with the bot, forever (O-26). */
+        BotConversation: {
+            /** Format: uuid */
+            id: string;
+            /** @description The Telegram chat id as a decimal string — kept a string for JS safety (an `int64` as a JSON number risks silent precision loss past 2^53), matching `TelegramAuthRequest.id`. */
+            telegramChatId: string;
+            telegramUsername: string | null;
+            /** Format: uuid */
+            customerId: string | null;
+            mode: components["schemas"]["BotConversationMode"];
+            messageCount: number;
+            /** Format: date-time */
+            lastMessageAt: string | null;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        /** @description Cursor-paginated envelope for `GET /bot/conversations`. */
+        BotConversationList: {
+            items: components["schemas"]["BotConversation"][];
+            nextCursor: string | null;
+        };
+        /** @description One turn of a bot conversation (docs/04-DATA-MODEL.md § 6). `provider`/`model`/token counts/`latencyMs`/`costEstimate` are null for `role: user` and `role: tool` rows — only an `assistant` reply calls the LLM (O-28). */
+        BotMessage: {
+            /** Format: uuid */
+            id: string;
+            role: components["schemas"]["BotMessageRole"];
+            content: string;
+            /** @description Raw tool-call/result payload for an `assistant` row (docs/04-DATA-MODEL.md § 6); null otherwise. Never persisted as its own message row (O-26). */
+            toolCalls: Record<string, never> | null;
+            provider: string | null;
+            model: string | null;
+            inputTokens: number | null;
+            outputTokens: number | null;
+            latencyMs: number | null;
+            /**
+             * Format: decimal
+             * @description USD, `NUMERIC(10,6)` (O-28) — a decimal string, never a float.
+             */
+            costEstimate: string | null;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        /** @description Cursor-paginated envelope for `GET /bot/conversations/{id}/messages`. */
+        BotMessageList: {
+            items: components["schemas"]["BotMessage"][];
+            nextCursor: string | null;
+        };
     };
     responses: {
         /** @description The request has no valid session or bearer token. */
         Unauthenticated: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description The credential this no-session endpoint itself checks — a Telegram HMAC/link, or an OTP code — was wrong, expired, or used too many times (`ErrorCode.INVALID_CREDENTIALS`, Phase 7). */
+        InvalidCredentials: {
             headers: {
                 [name: string]: unknown;
             };
@@ -2630,6 +2915,169 @@ export interface operations {
             };
             401: components["responses"]["Unauthenticated"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    authenticateTelegram: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TelegramAuthRequest"];
+            };
+        };
+        responses: {
+            /** @description Authenticated. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoginResponse"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["InvalidCredentials"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    requestOtp: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OtpRequest"];
+            };
+        };
+        responses: {
+            /** @description Accepted. Always this, never a 200/204-with-a-body, so status and timing can't reveal whether `username` exists. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationFailed"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    verifyOtp: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OtpVerifyRequest"];
+            };
+        };
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OtpVerifyResponse"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["InvalidCredentials"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    resetPassword: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordResetRequest"];
+            };
+        };
+        responses: {
+            /** @description Password reset. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["InvalidCredentials"];
+        };
+    };
+    getTelegramLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TelegramLinkStatus"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+        };
+    };
+    createTelegramLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TelegramLinkCode"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+        };
+    };
+    deleteTelegramLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Unlinked. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthenticated"];
         };
     };
     getShop: {
@@ -4762,6 +5210,90 @@ export interface operations {
                     "application/json": components["schemas"]["ProductPublic"];
                 };
             };
+            404: components["responses"]["NotFound"];
+        };
+    };
+    handleBotWebhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                secret: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Acknowledged. Telegram does not read the response body. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listBotConversations: {
+        parameters: {
+            query?: {
+                /** @description Maximum number of items to return. */
+                limit?: components["parameters"]["Limit"];
+                /** @description Opaque cursor from a previous page's `nextCursor`. */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BotConversationList"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    listBotConversationMessages: {
+        parameters: {
+            query?: {
+                /** @description Maximum number of items to return. */
+                limit?: components["parameters"]["Limit"];
+                /** @description Opaque cursor from a previous page's `nextCursor`. */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BotMessageList"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
     };
