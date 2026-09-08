@@ -108,14 +108,11 @@ pattern; revisit if bundle size becomes a landing performance issue.
 | GitHub Actions  | —        | `ci.yml` from Phase 0, `deploy.yml` from Phase 8                                                                        |
 | lefthook        | 2.1.12   | Git hooks (commit-msg conventional-commit + trailer ban); installed by `pnpm install` (`prepare`), build approved in `pnpm-workspace.yaml` |
 
-## LLM for the bot (Q-01 open)
+## LLM for the bot (D-110: Claude Sonnet 5)
 
-Cost reference from the Claude API pricing table (2026-06-24 cache): Haiku 4.5 $1/$5
-per MTok in/out (200K context); Sonnet 5 $2/$10. A customer question with tools is
-roughly 2–4K tokens in and 200 out, so Haiku is on the order of $0.005 per answer. Gemini
-Flash-class models are comparable or cheaper; self-hosted has no per-token cost but needs
-RAM/GPU on the VPS and someone to operate it. ADR-009 keeps all three behind one
-interface so the choice can be made — and changed — by config.
+Model: `claude-sonnet-5` (D-110); Go SDK version pinned by the Phase 7 adapter task.
+Config: `AI_MODEL` environment variable defaults to `claude-sonnet-5`, changeable without
+code (ADR-009 provider-agnostic adapter).
 
 ## Tooling for agents
 

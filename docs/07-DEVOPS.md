@@ -161,6 +161,9 @@ absolute (config.go L120-129).
 | `MEDIA_MAX_BYTES`   | `10485760`     | Single upload file part size cap (10 MB); checked before WebP encoding                |
 | `MEDIA_CONCURRENCY` | `2`            | Max WebP derivative encode tasks running concurrently (gated by a semaphore; Review B) |
 | `MEDIA_QUEUE`       | `8`            | Max uploads in flight (spooling + queued + encoding); admission gate outside encode queue |
+| `TELEGRAM_BOT_TOKEN`| (secret)       | Telegram bot API token (D-112); owner-provided in `infra/.env` only, never in repo or logs |
+| `ANTHROPIC_API_KEY` | (secret)       | Anthropic API key for the bot's LLM (D-112); owner-provided in `infra/.env` only, never in repo or logs |
+| `AI_MODEL`          | `claude-sonnet-5` | LLM model identifier (D-110); configurable for different providers via the `internal/ai` adapter |
 
 ## Shared local services during parallel work
 
