@@ -1,6 +1,7 @@
 import { type Locale, locales } from "@savdo/i18n";
 import { useTranslation } from "react-i18next";
 import { Modal, Pressable, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { i18next } from "@/i18n";
 import { useLogout } from "@/lib/session";
@@ -18,6 +19,7 @@ import { Text } from "./ui/text";
 export function SettingsSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   const { t } = useTranslation();
   const logout = useLogout();
+  const insets = useSafeAreaInsets();
 
   function handleSelectLocale(locale: Locale) {
     void i18next.changeLanguage(locale);
@@ -31,7 +33,7 @@ export function SettingsSheet({ visible, onClose }: { visible: boolean; onClose:
     <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
       <Pressable className="flex-1 justify-end bg-black/40" onPress={onClose}>
         <Pressable onPress={(event) => event.stopPropagation()}>
-          <Card className="rounded-b-none">
+          <Card className="rounded-b-none" style={{ paddingBottom: insets.bottom + 24 }}>
             <CardHeader>
               <CardTitle>{t("settings.title")}</CardTitle>
             </CardHeader>

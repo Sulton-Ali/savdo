@@ -224,7 +224,7 @@ export default function HomeScreen() {
             ) : lowStockQuery.isError ? (
               <ErrorRow onRetry={() => lowStockQuery.refetch()} />
             ) : (
-              <View className="flex-row items-center justify-between">
+              <View className="gap-2">
                 <Text>
                   {t("reports.lowStock.count", {
                     value: `${lowStockCount}${lowStockHasMore ? "+" : ""}`,
