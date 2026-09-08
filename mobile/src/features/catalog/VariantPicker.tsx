@@ -2,16 +2,17 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Search } from "lucide-react-native";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { FlatList, Pressable, TextInput, View } from "react-native";
+import { ActivityIndicator, FlatList, Pressable, TextInput, View } from "react-native";
 
 import { Text } from "@/components/ui/text";
 import { formatMoney } from "@/lib/money";
 import { catalogKeys } from "@/lib/queryKeys";
 import { useSession } from "@/lib/session";
 
-import { listAllStockLevels, listProducts, listVariants, type Product, type Variant } from "./api";
-import { useDebouncedValue } from "./hooks";
+import { listAllStockLevels, listVariants, type Product, type Variant } from "./api";
+import { useDebouncedValue, useProductsSearch } from "./hooks";
 import { resolveEffectivePrice } from "./pricing";
+import { flattenProductPages } from "./productPages";
 import { formatQty } from "./qty";
 
 const SEARCH_DEBOUNCE_MS = 300;
@@ -77,11 +78,19 @@ export function VariantPicker({ locationId, onPick, excludeVariantIds }: Variant
   // and `customers/index.tsx`'s own search screens); typing narrows the
   // results via the debounced query above. No minimum query length either
   // (dropped, was 2 chars) — D-92 explicitly asks for this.
-  const productsQuery = useQuery({
-    queryKey: catalogKeys.products({ q: trimmedQuery }),
-    queryFn: () => listProducts({ q: trimmedQuery, cursor: null }),
-  });
-  const products = productsQuery.data?.items ?? [];
+  //
+  // Reuses `useProductsSearch`, the same `useInfiniteQuery` the Products
+  // tab uses, rather than a second `useQuery` under the same
+  // `catalogKeys.products` key: TanStack Query caches one entry per key, so
+  // a second consumer expecting a different shape (`{ items }` instead of
+  // `{ pages, pageParams }`) read whichever shape the *other* screen had
+  // last cached and saw an empty list — the bug the owner reported on this
+  // picker (stock levels, adjustment, quick sale, new purchase all use it).
+  const productsQuery = useProductsSearch(trimmedQuery);
+  const products = useMemo(
+    () => flattenProductPages(productsQuery.data?.pages),
+    [productsQuery.data],
+  );
 
   const variantsQuery = useQuery({
     queryKey: catalogKeys.variants(selectedProduct?.id ?? ""),
@@ -171,12 +180,21 @@ export function VariantPicker({ locationId, onPick, excludeVariantIds }: Variant
       <FlatList
         data={products}
         keyExtractor={(product) => product.id}
+        onEndReachedThreshold={0.4}
+        onEndReached={() => {
+          if (productsQuery.hasNextPage && !productsQuery.isFetchingNextPage) {
+            productsQuery.fetchNextPage();
+          }
+        }}
         ListEmptyComponent={
           !productsQuery.isFetching ? (
             <Text variant="muted" className="p-4 text-center">
               {t("mobile.catalog.picker.empty")}
             </Text>
           ) : null
+        }
+        ListFooterComponent={
+          productsQuery.isFetchingNextPage ? <ActivityIndicator className="py-4" /> : null
         }
         renderItem={({ item: product }) => (
           <Pressable
