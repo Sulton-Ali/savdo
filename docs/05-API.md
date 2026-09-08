@@ -189,11 +189,13 @@ Low stock: reuse `GET /stock/low` (Phase 3, D-55).
 | Method | Path                            | Role      | Notes |
 | ------ | ------------------------------- | --------- | ----- |
 | GET | `/content/{key}` | manager+ | Returns all three locales' raw data (`{ key, locales: { uz?, ru?, en? } }`); fallback on read |
-| PUT | `/content/{key}` | manager+ | `?locale=` or body field; validates against O-19 schema; 422 `VALIDATION_FAILED` on shape error |
+| PUT | `/content/{key}` | manager+ | Body: `{ locale: uz\|ru\|en, data }`, upserts one locale; validated against O-19 schema; 422 `VALIDATION_FAILED` with field details on shape errors, 400 on unknown key or locale. |
 | GET | `/public/shop` | public | Returns { name, slug, currency, defaultLocale, locale, translationFallback, blocks: { hero, about, hours, contacts, social, seo } } with fallback; `hero.image` resolves to media URL when `imageMediaId` set |
 | GET | `/public/categories` | public | Active categories: slug, name, product count |
 | GET | `/public/products` | public | Query `category` (slug), `featured` (bool), `q`, `cursor`, `limit`; items: id, slug, name, coverImage, price, availability, categorySlug (nullable, O-22); newest first (D-92) |
 | GET | `/public/products/{slug}` | public | Full product with variants (availability, price), images, description |
+
+Content blocks: `about.body` is plain text; renderers must escape it (never treat as HTML).
 
 Public responses: availability only (`in_stock|low|out_of_stock` per O-20 rules), never cost/margin/qty/inactive items. Caching: `Cache-Control: public, max-age=60`, strong `ETag` via `If-None-Match` → 304; in-process cache keyed by path + query + resolved locale, TTL 60 s, cleared on content PUT and product/category writes (D-106).
 
