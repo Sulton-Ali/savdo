@@ -44,7 +44,7 @@
     "locations": "Filiallar",
     "customers": "Mijozlar",
     "suppliers": "Yetkazib beruvchilar",
-    "purchases": "Ta'minot",
+    "purchases": "Ta‘minot",
     "settings": "Sozlamalar",
     "stockLevels": "Qoldiqlar",
     "stockMovements": "Ombor harakatlari",
@@ -241,7 +241,7 @@
     }
   },
   "purchases": {
-    "title": "Ta'minot",
+    "title": "Ta‘minot",
     "add": "Yangi xarid",
     "createTitle": "Yangi xarid",
     "editTitle": "Xaridni tahrirlash",
