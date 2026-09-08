@@ -20,8 +20,8 @@ func TestNew_appliesAllMigrations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read goose_db_version: %v", err)
 	}
-	if version != 18 {
-		t.Fatalf("want migrations up to version 18, got %d", version)
+	if version != 22 {
+		t.Fatalf("want migrations up to version 22, got %d", version)
 	}
 
 	// Every table the migrations create must exist and be queryable.
@@ -38,6 +38,8 @@ func TestNew_appliesAllMigrations(t *testing.T) {
 		"customers", "sales", "sale_items", "sale_payments",
 		"sale_drafts", "sale_draft_items",
 		"content_blocks",
+		"telegram_accounts", "otp_codes",
+		"bot_conversations", "bot_messages",
 	} {
 		if _, err := pool.Exec(ctx, "SELECT 1 FROM "+table+" LIMIT 0"); err != nil {
 			t.Fatalf("table %q not usable: %v", table, err)
@@ -124,8 +126,8 @@ func TestMigrations_downAllThenUpAgain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read goose_db_version after down+up: %v", err)
 	}
-	if version != 18 {
-		t.Fatalf("want version 18 after down-all then up, got %d", version)
+	if version != 22 {
+		t.Fatalf("want version 22 after down-all then up, got %d", version)
 	}
 	// Down recreated empty tables; leave the database clean for tests that
 	// run after this one in the same binary.

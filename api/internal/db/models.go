@@ -60,6 +60,90 @@ func (ns NullAdjustmentReason) Value() (driver.Value, error) {
 	return string(ns.AdjustmentReason), nil
 }
 
+type BotMessageRole string
+
+const (
+	BotMessageRoleUser      BotMessageRole = "user"
+	BotMessageRoleAssistant BotMessageRole = "assistant"
+	BotMessageRoleTool      BotMessageRole = "tool"
+)
+
+func (e *BotMessageRole) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = BotMessageRole(s)
+	case string:
+		*e = BotMessageRole(s)
+	default:
+		return fmt.Errorf("unsupported scan type for BotMessageRole: %T", src)
+	}
+	return nil
+}
+
+type NullBotMessageRole struct {
+	BotMessageRole BotMessageRole `json:"bot_message_role"`
+	Valid          bool           `json:"valid"` // Valid is true if BotMessageRole is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullBotMessageRole) Scan(value interface{}) error {
+	if value == nil {
+		ns.BotMessageRole, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.BotMessageRole.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullBotMessageRole) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.BotMessageRole), nil
+}
+
+type BotMode string
+
+const (
+	BotModeCustomer BotMode = "customer"
+)
+
+func (e *BotMode) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = BotMode(s)
+	case string:
+		*e = BotMode(s)
+	default:
+		return fmt.Errorf("unsupported scan type for BotMode: %T", src)
+	}
+	return nil
+}
+
+type NullBotMode struct {
+	BotMode BotMode `json:"bot_mode"`
+	Valid   bool    `json:"valid"` // Valid is true if BotMode is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullBotMode) Scan(value interface{}) error {
+	if value == nil {
+		ns.BotMode, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.BotMode.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullBotMode) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.BotMode), nil
+}
+
 type ContentBlockKey string
 
 const (
@@ -188,6 +272,49 @@ func (ns NullLocationKind) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.LocationKind), nil
+}
+
+type OtpPurpose string
+
+const (
+	OtpPurposePasswordReset OtpPurpose = "password_reset"
+	OtpPurposeLinkTelegram  OtpPurpose = "link_telegram"
+	OtpPurposeConfirmAction OtpPurpose = "confirm_action"
+)
+
+func (e *OtpPurpose) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = OtpPurpose(s)
+	case string:
+		*e = OtpPurpose(s)
+	default:
+		return fmt.Errorf("unsupported scan type for OtpPurpose: %T", src)
+	}
+	return nil
+}
+
+type NullOtpPurpose struct {
+	OtpPurpose OtpPurpose `json:"otp_purpose"`
+	Valid      bool       `json:"valid"` // Valid is true if OtpPurpose is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullOtpPurpose) Scan(value interface{}) error {
+	if value == nil {
+		ns.OtpPurpose, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.OtpPurpose.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullOtpPurpose) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.OtpPurpose), nil
 }
 
 type PaymentMethod string
@@ -519,6 +646,34 @@ type AuditLog struct {
 	CreatedAt  time.Time `json:"created_at"`
 }
 
+type BotConversation struct {
+	ID             uuid.UUID  `json:"id"`
+	ShopID         uuid.UUID  `json:"shop_id"`
+	TelegramChatID int64      `json:"telegram_chat_id"`
+	TelegramUserID int64      `json:"telegram_user_id"`
+	CustomerID     *uuid.UUID `json:"customer_id"`
+	Mode           BotMode    `json:"mode"`
+	MessageCount   int32      `json:"message_count"`
+	LastMessageAt  *time.Time `json:"last_message_at"`
+	CreatedAt      time.Time  `json:"created_at"`
+}
+
+type BotMessage struct {
+	ID             uuid.UUID      `json:"id"`
+	ConversationID uuid.UUID      `json:"conversation_id"`
+	ShopID         uuid.UUID      `json:"shop_id"`
+	Role           BotMessageRole `json:"role"`
+	Content        string         `json:"content"`
+	ToolCalls      []byte         `json:"tool_calls"`
+	Provider       *string        `json:"provider"`
+	Model          *string        `json:"model"`
+	InputTokens    *int32         `json:"input_tokens"`
+	OutputTokens   *int32         `json:"output_tokens"`
+	LatencyMs      *int32         `json:"latency_ms"`
+	CostEstimate   pgtype.Numeric `json:"cost_estimate"`
+	CreatedAt      time.Time      `json:"created_at"`
+}
+
 type Category struct {
 	ID        uuid.UUID  `json:"id"`
 	ShopID    uuid.UUID  `json:"shop_id"`
@@ -593,6 +748,18 @@ type MediaFile struct {
 	UploadedBy *uuid.UUID `json:"uploaded_by"`
 	CreatedAt  time.Time  `json:"created_at"`
 	UpdatedAt  time.Time  `json:"updated_at"`
+}
+
+type OtpCode struct {
+	ID        uuid.UUID  `json:"id"`
+	ShopID    uuid.UUID  `json:"shop_id"`
+	UserID    uuid.UUID  `json:"user_id"`
+	Purpose   OtpPurpose `json:"purpose"`
+	CodeHash  []byte     `json:"code_hash"`
+	ExpiresAt time.Time  `json:"expires_at"`
+	UsedAt    *time.Time `json:"used_at"`
+	Attempts  int32      `json:"attempts"`
+	CreatedAt time.Time  `json:"created_at"`
 }
 
 type Product struct {
@@ -813,6 +980,15 @@ type Supplier struct {
 	DeletedAt        *time.Time `json:"deleted_at"`
 	CreatedAt        time.Time  `json:"created_at"`
 	UpdatedAt        time.Time  `json:"updated_at"`
+}
+
+type TelegramAccount struct {
+	ID               uuid.UUID `json:"id"`
+	UserID           uuid.UUID `json:"user_id"`
+	ShopID           uuid.UUID `json:"shop_id"`
+	TelegramUserID   int64     `json:"telegram_user_id"`
+	TelegramUsername *string   `json:"telegram_username"`
+	LinkedAt         time.Time `json:"linked_at"`
 }
 
 type Unit struct {
