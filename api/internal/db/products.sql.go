@@ -320,7 +320,7 @@ SELECT
     COALESCE(t.locale, '') AS locale_used,
     COALESCE(t.name, '') AS name
 FROM products p
-JOIN categories c ON c.id = p.category_id AND c.shop_id = p.shop_id AND c.deleted_at IS NULL AND c.is_active
+LEFT JOIN categories c ON c.id = p.category_id AND c.shop_id = p.shop_id
 LEFT JOIN LATERAL (
     SELECT pt.locale, pt.name
     FROM product_translations pt
@@ -337,6 +337,7 @@ WHERE p.shop_id = $2
     AND p.slug = $3
     AND p.deleted_at IS NULL
     AND p.is_active
+    AND (p.category_id IS NULL OR (c.deleted_at IS NULL AND c.is_active))
 `
 
 type GetPublicProductBySlugParams struct {
@@ -358,7 +359,7 @@ type GetPublicProductBySlugRow struct {
 	PromoTo      *time.Time     `json:"promo_to"`
 	IsFeatured   bool           `json:"is_featured"`
 	CreatedAt    time.Time      `json:"created_at"`
-	CategorySlug string         `json:"category_slug"`
+	CategorySlug *string        `json:"category_slug"`
 	LocaleUsed   string         `json:"locale_used"`
 	Name         string         `json:"name"`
 }
@@ -810,7 +811,7 @@ SELECT
     COALESCE(t.locale, '') AS locale_used,
     COALESCE(t.name, '') AS name
 FROM products p
-JOIN categories c ON c.id = p.category_id AND c.shop_id = p.shop_id AND c.deleted_at IS NULL AND c.is_active
+LEFT JOIN categories c ON c.id = p.category_id AND c.shop_id = p.shop_id
 LEFT JOIN LATERAL (
     SELECT pt.locale, pt.name
     FROM product_translations pt
@@ -826,6 +827,7 @@ LEFT JOIN LATERAL (
 WHERE p.shop_id = $2
     AND p.deleted_at IS NULL
     AND p.is_active
+    AND (p.category_id IS NULL OR (c.deleted_at IS NULL AND c.is_active))
     AND ($3::text IS NULL OR c.slug = $3)
     AND ($4::bool IS NULL OR p.is_featured = $4)
     AND (
@@ -868,24 +870,30 @@ type ListPublicProductsRow struct {
 	PromoTo      *time.Time     `json:"promo_to"`
 	IsFeatured   bool           `json:"is_featured"`
 	CreatedAt    time.Time      `json:"created_at"`
-	CategorySlug string         `json:"category_slug"`
+	CategorySlug *string        `json:"category_slug"`
 	LocaleUsed   string         `json:"locale_used"`
 	Name         string         `json:"name"`
 }
 
 // Phase 6 public catalogue (docs/06-ROADMAP.md Phase 6, D-99, D-103). Both
-// queries below join categories (INNER, not LEFT) so "in active categories
-// only" and the category_slug output fall out of the same join, and a
-// product with no category or with a soft-deleted/inactive category is
-// excluded rather than surfaced with a null category. Neither embeds a
-// cover image: the handler reuses ListCoverImagesForProducts (D-83, same
-// one-query-per-page pattern ListProducts already uses) against this
-// query's page of product ids instead of duplicating that selection logic
-// (flagged cover else first by position) in another LATERAL here.
-// Translations, variants and images for the product-detail page reuse
-// ListProductTranslations, ListVariantsForCashier (filtered to is_active
-// in the handler — its column set already excludes cost_override, the
-// only thing rule 8 requires a separate query for) and ListProductImages.
+// queries below LEFT JOIN categories (orchestrator ruling, O-row TBD): a
+// product with no category (category_id IS NULL) still belongs in the
+// public catalogue — only a product whose category exists and is
+// soft-deleted/inactive is hidden. category_slug is therefore nullable:
+// NULL when the product has no category at all. When category_slug is
+// given as a filter, an uncategorized product's c.slug is NULL and never
+// equals the filter, so it is excluded from a category-filtered list, and
+// the visibility condition below still requires that category to be
+// active — a category-filtered list never surfaces a product whose
+// matching category is inactive. Neither embeds a cover image: the
+// handler reuses ListCoverImagesForProducts (D-83, same one-query-per-page
+// pattern ListProducts already uses) against this query's page of product
+// ids instead of duplicating that selection logic (flagged cover else
+// first by position) in another LATERAL here. Translations, variants and
+// images for the product-detail page reuse ListProductTranslations,
+// ListVariantsForCashier (filtered to is_active in the handler — its
+// column set already excludes cost_override, the only thing rule 8
+// requires a separate query for) and ListProductImages.
 func (q *Queries) ListPublicProducts(ctx context.Context, arg ListPublicProductsParams) ([]ListPublicProductsRow, error) {
 	rows, err := q.db.Query(ctx, listPublicProducts,
 		arg.Locale,

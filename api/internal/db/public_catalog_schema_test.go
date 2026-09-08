@@ -38,6 +38,10 @@ func publicProduct(ctx context.Context, t *testing.T, q *db.Queries, shopID, uni
 	return p
 }
 
+// TestListPublicProducts_excludesInactiveProductsAndInactiveCategories pins
+// the orchestrator ruling (O-row, phase-6/t1-content-blocks-db review): a
+// product with no category at all still belongs in the public catalogue —
+// only a product whose category exists and is inactive is hidden.
 func TestListPublicProducts_excludesInactiveProductsAndInactiveCategories(t *testing.T) {
 	pool := testdb.New(t)
 	testdb.Truncate(t, pool)
@@ -52,17 +56,23 @@ func TestListPublicProducts_excludesInactiveProductsAndInactiveCategories(t *tes
 	visible := publicProduct(ctx, t, q, shop.ID, unit.ID, &activeCat.ID, "visible", true, false)
 	publicProduct(ctx, t, q, shop.ID, unit.ID, &activeCat.ID, "inactive-product", false, false)
 	publicProduct(ctx, t, q, shop.ID, unit.ID, &inactiveCat.ID, "product-in-inactive-category", true, false)
-	publicProduct(ctx, t, q, shop.ID, unit.ID, nil, "product-with-no-category", true, false)
+	uncategorized := publicProduct(ctx, t, q, shop.ID, unit.ID, nil, "product-with-no-category", true, false)
 
 	rows, err := q.ListPublicProducts(ctx, db.ListPublicProductsParams{ShopID: shop.ID, Locale: "uz", Limit: 100})
 	if err != nil {
 		t.Fatalf("ListPublicProducts: %v", err)
 	}
-	if len(rows) != 1 || rows[0].ID != visible.ID {
-		t.Fatalf("ListPublicProducts = %+v, want exactly the one active product in an active category", rows)
+	assertPublicProductIDs(t, rows, visible.ID, uncategorized.ID)
+
+	byID := map[uuid.UUID]db.ListPublicProductsRow{}
+	for _, r := range rows {
+		byID[r.ID] = r
 	}
-	if rows[0].CategorySlug != activeCat.Slug {
-		t.Fatalf("CategorySlug = %q, want %q", rows[0].CategorySlug, activeCat.Slug)
+	if got := byID[visible.ID].CategorySlug; got == nil || *got != activeCat.Slug {
+		t.Fatalf("visible product's CategorySlug = %v, want %q", got, activeCat.Slug)
+	}
+	if got := byID[uncategorized.ID].CategorySlug; got != nil {
+		t.Fatalf("uncategorized product's CategorySlug = %q, want nil", *got)
 	}
 }
 
@@ -80,6 +90,7 @@ func TestListPublicProducts_categorySlugAndFeaturedFilters(t *testing.T) {
 	featuredInA := publicProduct(ctx, t, q, shop.ID, unit.ID, &catA.ID, "featured-a", true, true)
 	plainInA := publicProduct(ctx, t, q, shop.ID, unit.ID, &catA.ID, "plain-a", true, false)
 	featuredInB := publicProduct(ctx, t, q, shop.ID, unit.ID, &catB.ID, "featured-b", true, true)
+	publicProduct(ctx, t, q, shop.ID, unit.ID, nil, "uncategorized-filter", true, false)
 
 	byCategory, err := q.ListPublicProducts(ctx, db.ListPublicProductsParams{
 		ShopID: shop.ID, Locale: "uz", Limit: 100, CategorySlug: &catA.Slug,
@@ -87,6 +98,9 @@ func TestListPublicProducts_categorySlugAndFeaturedFilters(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListPublicProducts(category=cat-a): %v", err)
 	}
+	// An uncategorized product belongs in the unfiltered catalogue (its own
+	// test), but a category filter must never match it — it has no
+	// category_slug to match against.
 	assertPublicProductIDs(t, byCategory, featuredInA.ID, plainInA.ID)
 
 	featured := true
@@ -180,13 +194,25 @@ func TestGetPublicProductBySlug_activeOnlyInActiveCategory(t *testing.T) {
 	visible := publicProduct(ctx, t, q, shop.ID, unit.ID, &activeCat.ID, "get-visible", true, false)
 	publicProduct(ctx, t, q, shop.ID, unit.ID, &activeCat.ID, "get-inactive-product", false, false)
 	publicProduct(ctx, t, q, shop.ID, unit.ID, &inactiveCat.ID, "get-inactive-category", true, false)
+	uncategorized := publicProduct(ctx, t, q, shop.ID, unit.ID, nil, "get-no-category", true, false)
 
 	got, err := q.GetPublicProductBySlug(ctx, db.GetPublicProductBySlugParams{ShopID: shop.ID, Locale: "uz", Slug: "get-visible"})
 	if err != nil {
 		t.Fatalf("GetPublicProductBySlug(visible): %v", err)
 	}
-	if got.ID != visible.ID || got.CategorySlug != activeCat.Slug {
+	if got.ID != visible.ID || got.CategorySlug == nil || *got.CategorySlug != activeCat.Slug {
 		t.Fatalf("got %+v, want id=%s categorySlug=%s", got, visible.ID, activeCat.Slug)
+	}
+
+	// A product with no category at all still belongs in the public
+	// catalogue (orchestrator ruling, O-row TBD) — only a product whose
+	// category exists and is inactive is hidden.
+	gotUncategorized, err := q.GetPublicProductBySlug(ctx, db.GetPublicProductBySlugParams{ShopID: shop.ID, Locale: "uz", Slug: "get-no-category"})
+	if err != nil {
+		t.Fatalf("GetPublicProductBySlug(uncategorized): %v", err)
+	}
+	if gotUncategorized.ID != uncategorized.ID || gotUncategorized.CategorySlug != nil {
+		t.Fatalf("got %+v, want id=%s categorySlug=nil", gotUncategorized, uncategorized.ID)
 	}
 
 	if _, err := q.GetPublicProductBySlug(ctx, db.GetPublicProductBySlugParams{ShopID: shop.ID, Locale: "uz", Slug: "get-inactive-product"}); err == nil {
