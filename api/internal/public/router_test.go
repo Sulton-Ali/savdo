@@ -64,7 +64,7 @@ func (c *queryCounter) Exec(ctx context.Context, sql string, args ...interface{}
 // besides `/public/*` and `/healthz`.
 func newTestRouter(pool *pgxpool.Pool, q *db.Queries, publicShopSlug string) (http.Handler, *public.Service) {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	authSvc := auth.NewService(nil, config.Config{}, uuid.New())
+	authSvc := auth.NewService(nil, nil, config.Config{}, uuid.New())
 	shopSvc := shop.NewService(nil, nil)
 	mediaSvc := media.NewService(nil, nil, "/media", 10<<20, 2, 10)
 	catalogSvc := catalog.NewService(nil, nil, "uz", "/media")
@@ -447,7 +447,7 @@ func TestPublicCache_contentPUT_invalidatesSoNextGETReflectsChange(t *testing.T)
 // must hold the same instances the router forwards to.
 func newTestRouterWithServices(pool *pgxpool.Pool, publicSvc *public.Service, contentSvc *content.Service) http.Handler {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	authSvc := auth.NewService(nil, config.Config{}, uuid.New())
+	authSvc := auth.NewService(nil, nil, config.Config{}, uuid.New())
 	shopSvc := shop.NewService(nil, nil)
 	mediaSvc := media.NewService(nil, nil, "/media", 10<<20, 2, 10)
 	catalogSvc := catalog.NewService(nil, nil, "uz", "/media")

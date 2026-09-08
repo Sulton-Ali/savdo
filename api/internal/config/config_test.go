@@ -61,6 +61,8 @@ func TestLoad(t *testing.T) {
 				"MEDIA_DIR":               "/data/media",
 				"MEDIA_CONCURRENCY":       "4",
 				"MEDIA_QUEUE":             "16",
+				"BOT_USERNAME":            "savdo_bot",
+				"TELEGRAM_BOT_TOKEN":      "123456:fake-token-for-tests",
 			},
 			want: Config{
 				Addr:                ":9090",
@@ -85,6 +87,8 @@ func TestLoad(t *testing.T) {
 				AIModel:              "claude-sonnet-5",
 				AIPriceInputPerMTok:  "2.00",
 				AIPriceOutputPerMTok: "10.00",
+				BotUsername:          "savdo_bot",
+				TelegramBotToken:     "123456:fake-token-for-tests",
 			},
 		},
 		{

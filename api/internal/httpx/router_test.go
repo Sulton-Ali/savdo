@@ -33,10 +33,11 @@ func testLogger() *slog.Logger {
 // tests that never authenticate a real session — GetHealthz/GetReadyz/
 // Login pass through Middleware's allow-list without touching its
 // db.Queries, and every other operation these tests hit is unauthenticated
-// on purpose (they assert the 401/not-implemented shape, not a successful
-// call), so a nil *db.Queries is never dereferenced.
+// on purpose (they assert the 401/validation/not-implemented shape, not a
+// successful call), so a nil pool and nil *db.Queries are never
+// dereferenced.
 func testAuthService() *auth.Service {
-	return auth.NewService(nil, config.Config{}, uuid.New())
+	return auth.NewService(nil, nil, config.Config{}, uuid.New())
 }
 
 // testShopService builds a shop.Service safe to wire into NewRouter for

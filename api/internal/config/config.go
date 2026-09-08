@@ -122,6 +122,22 @@ type Config struct {
 	// claude-sonnet-5's published per-token pricing.
 	AIPriceInputPerMTok  string `env:"AI_PRICE_INPUT_PER_MTOK" envDefault:"2.00"`
 	AIPriceOutputPerMTok string `env:"AI_PRICE_OUTPUT_PER_MTOK" envDefault:"10.00"`
+
+	// BotUsername names the bot the Telegram Login Widget signs requests
+	// against and CreateTelegramLink's deep link points users at (ADR-005:
+	// `https://t.me/<BOT_USERNAME>?start=link_<code>`) — non-secret, unlike
+	// TelegramBotToken below.
+	BotUsername string `env:"BOT_USERNAME"`
+
+	// TelegramBotToken is the API's own copy of the bot token (D-112,
+	// docs/07-DEVOPS.md § Environment variables) — AuthenticateTelegram
+	// uses it to verify the Telegram Login Widget's HMAC (ADR-005), a
+	// distinct read from whatever cmd/bot does with the same environment
+	// variable. No envDefault (secret; owner-provided in infra/.env only,
+	// never in the repo or logs — hard rule 9); an empty value simply
+	// means every Login Widget HMAC check fails, the same fail-closed
+	// posture a wrong value would have.
+	TelegramBotToken string `env:"TELEGRAM_BOT_TOKEN"`
 }
 
 // Load parses the environment into a Config, applying defaults. It fails

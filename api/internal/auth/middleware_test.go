@@ -139,7 +139,7 @@ func TestClientIPFallsBackWhenUnparseable(t *testing.T) {
 }
 
 func TestMiddlewareAllowlistsHealthzReadyzAndLoginWithoutASession(t *testing.T) {
-	svc := NewService(nil, config.Config{}, [16]byte{})
+	svc := NewService(nil, nil, config.Config{}, [16]byte{})
 
 	for _, op := range []string{"GetHealthz", "GetReadyz", "Login"} {
 		t.Run(op, func(t *testing.T) {
@@ -167,7 +167,7 @@ func TestMiddlewareAllowlistsHealthzReadyzAndLoginWithoutASession(t *testing.T) 
 }
 
 func TestMiddlewareRejectsAnythingElseWithNoCredential(t *testing.T) {
-	svc := NewService(nil, config.Config{}, [16]byte{})
+	svc := NewService(nil, nil, config.Config{}, [16]byte{})
 
 	next := func(_ context.Context, _ http.ResponseWriter, _ *http.Request, _ any) (any, error) {
 		t.Fatal("the inner handler must not run when there is no credential")

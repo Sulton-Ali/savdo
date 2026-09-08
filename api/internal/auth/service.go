@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Sulton-Ali/savdo/api/internal/apierr"
 	"github.com/Sulton-Ali/savdo/api/internal/config"
@@ -17,17 +18,37 @@ import (
 )
 
 // Service holds auth's dependencies and business logic: password
-// verification, session issuance/revocation and login rate limiting.
-// handler.go's Handler translates between this and the generated strict
-// server types; Middleware (middleware.go) is also a method on Service so
-// it shares the same db.Queries and config.
+// verification, session issuance/revocation, login/OTP/Telegram-link rate
+// limiting, and the Telegram/OTP flows (telegram.go, otp.go). handler.go
+// and its siblings translate between this and the generated strict server
+// types; Middleware (middleware.go) is also a method on Service so it
+// shares the same db.Queries and config.
 type Service struct {
+	pool   *pgxpool.Pool
 	q      *db.Queries
 	cfg    config.Config
 	shopID uuid.UUID
 
 	ipLimiter   *loginLimiter
 	userLimiter *loginLimiter
+
+	// otpRequestIPLimiter/otpRequestUserLimiter back RequestOtp, and
+	// otpVerifyIPLimiter/otpVerifyUserLimiter back VerifyOtp — two
+	// separate budgets (otp.go's own doc comment on why they aren't
+	// shared), both over a longer window than login's own ipLimiter/
+	// userLimiter (docs/03-ARCHITECTURE.md § Cross-cutting: "login and OTP
+	// endpoints per IP and per username").
+	otpRequestIPLimiter   *loginLimiter
+	otpRequestUserLimiter *loginLimiter
+	otpVerifyIPLimiter    *loginLimiter
+	otpVerifyUserLimiter  *loginLimiter
+
+	// otpSender delivers RequestOtp's codes (otp.go); nil until
+	// SetOTPSender is called (cmd/api wires internal/bot's implementation
+	// in once it exists, T4) — RequestOtp treats a nil sender as "nothing
+	// to deliver to yet", not a panic, since its own contract is "202
+	// either way".
+	otpSender OTPSender
 }
 
 // NewService builds the auth Service for shopID — the single shop this
@@ -36,14 +57,21 @@ type Service struct {
 // startup via GetShopBySlug(cfg.ShopSlug) and fails fast if it doesn't
 // exist. A future multi-tenant version replaces this single injected
 // shopID with per-request resolution from the host/slug (ADR-004) without
-// changing anything below Login itself.
-func NewService(q *db.Queries, cfg config.Config, shopID uuid.UUID) *Service {
+// changing anything below Login itself. pool is used only for the
+// operations that need a transaction — ResetPassword (otp.go), the same
+// way shop.NewService's pool backs SetStaffPassword.
+func NewService(pool *pgxpool.Pool, q *db.Queries, cfg config.Config, shopID uuid.UUID) *Service {
 	return &Service{
-		q:           q,
-		cfg:         cfg,
-		shopID:      shopID,
-		ipLimiter:   newLoginLimiter(cfg.LoginRateIPPerMin),
-		userLimiter: newLoginLimiter(cfg.LoginRateUserPerMin),
+		pool:                  pool,
+		q:                     q,
+		cfg:                   cfg,
+		shopID:                shopID,
+		ipLimiter:             newLoginLimiter(cfg.LoginRateIPPerMin),
+		userLimiter:           newLoginLimiter(cfg.LoginRateUserPerMin),
+		otpRequestIPLimiter:   newWindowedLimiter(otpRequestRateLimit, otpRateWindow),
+		otpRequestUserLimiter: newWindowedLimiter(otpRequestRateLimit, otpRateWindow),
+		otpVerifyIPLimiter:    newWindowedLimiter(otpVerifyRateLimit, otpRateWindow),
+		otpVerifyUserLimiter:  newWindowedLimiter(otpVerifyRateLimit, otpRateWindow),
 	}
 }
 
@@ -129,6 +157,22 @@ func (s *Service) Login(ctx context.Context, username, password string, client d
 	if !found || !verified || !user.IsActive {
 		return LoginResult{}, apierr.Unauthenticated()
 	}
+
+	return s.startSession(ctx, user, client, userAgent, ip)
+}
+
+// startSession issues a fresh session for an already-authenticated user —
+// the common tail Login and AuthenticateTelegram (telegram.go) share once
+// each has decided, its own way, that the caller really is user: creates
+// the session row, sets the cookie/token-bearing session and updates
+// last_login_at. Callers are responsible for every check that has to
+// happen before a session is minted (password verification, rate limits,
+// the Telegram HMAC and link lookup) — this only ever succeeds or fails on
+// its own infrastructure (token/session-id generation, the writes
+// themselves), never on "is this really allowed", so unlike Login it never
+// returns apierr.Unauthenticated() itself.
+func (s *Service) startSession(ctx context.Context, user db.User, client db.SessionClient, userAgent string, ip *netip.Addr) (LoginResult, error) {
+	now := time.Now()
 
 	rawToken, tokenHash, err := newToken()
 	if err != nil {

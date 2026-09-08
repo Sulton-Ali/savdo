@@ -75,7 +75,7 @@ func run() error {
 		return fmt.Errorf("load shop %q: %w", cfg.ShopSlug, err)
 	}
 
-	authSvc := auth.NewService(queries, cfg, shopRow.ID)
+	authSvc := auth.NewService(pool, queries, cfg, shopRow.ID)
 	shopSvc := shop.NewService(pool, queries)
 	catalogSvc := catalog.NewService(pool, queries, shopRow.DefaultLocale, cfg.MediaBaseURL)
 	stockSvc := stock.NewService(pool, queries)

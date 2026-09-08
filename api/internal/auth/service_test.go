@@ -65,7 +65,7 @@ func TestServiceLoginSuccessWeb(t *testing.T) {
 
 	shop := seedShop(ctx, t, q, "shop-a")
 	user := seedUser(ctx, t, q, shop.ID, "owner1", "correct-horse-battery", db.UserRoleOwner)
-	svc := NewService(q, testConfig(), shop.ID)
+	svc := NewService(pool, q, testConfig(), shop.ID)
 
 	result, err := svc.Login(ctx, "owner1", "correct-horse-battery", db.SessionClientWeb, "test-agent", nil)
 	if err != nil {
@@ -104,7 +104,7 @@ func TestServiceLoginSuccessMobileGetsLongerTTL(t *testing.T) {
 
 	shop := seedShop(ctx, t, q, "shop-a")
 	seedUser(ctx, t, q, shop.ID, "cashier1", "correct-horse-battery", db.UserRoleCashier)
-	svc := NewService(q, testConfig(), shop.ID)
+	svc := NewService(pool, q, testConfig(), shop.ID)
 
 	result, err := svc.Login(ctx, "cashier1", "correct-horse-battery", db.SessionClientMobile, "", nil)
 	if err != nil {
@@ -144,7 +144,7 @@ func TestServiceLoginRejectsWrongPasswordUnknownUserAndInactiveUserIdentically(t
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			svc := NewService(q, testConfig(), shop.ID)
+			svc := NewService(pool, q, testConfig(), shop.ID)
 			_, err := svc.Login(ctx, tt.username, tt.password, db.SessionClientWeb, "", nil)
 			if err == nil {
 				t.Fatal("Login() error = nil, want Unauthenticated")
@@ -167,7 +167,7 @@ func TestServiceLoginRateLimitsByIPAndUsername(t *testing.T) {
 
 	cfg := testConfig()
 	cfg.LoginRateUserPerMin = 2
-	svc := NewService(q, cfg, shop.ID)
+	svc := NewService(pool, q, cfg, shop.ID)
 
 	for i := 0; i < 2; i++ {
 		_, err := svc.Login(ctx, "owner1", "wrong-password", db.SessionClientWeb, "", nil)
@@ -201,7 +201,7 @@ func TestServiceLoginRateLimitsByUsernameCaseInsensitively(t *testing.T) {
 
 	cfg := testConfig()
 	cfg.LoginRateUserPerMin = 2
-	svc := NewService(q, cfg, shop.ID)
+	svc := NewService(pool, q, cfg, shop.ID)
 
 	variants := []string{"owner1", "Owner1", "OWNER1", "  owner1  "}
 	for i, username := range variants[:2] {
@@ -232,7 +232,7 @@ func TestServiceRevokeSessionIsIdempotent(t *testing.T) {
 	q := db.New(pool)
 
 	shop := seedShop(ctx, t, q, "shop-a")
-	svc := NewService(q, testConfig(), shop.ID)
+	svc := NewService(pool, q, testConfig(), shop.ID)
 	user := seedUser(ctx, t, q, shop.ID, "owner1", "correct-horse-battery", db.UserRoleOwner)
 
 	result, err := svc.Login(ctx, "owner1", "correct-horse-battery", db.SessionClientWeb, "", nil)
@@ -264,7 +264,7 @@ func TestServiceRevokeSessionNotFoundForAnotherUsersSession(t *testing.T) {
 	q := db.New(pool)
 
 	shop := seedShop(ctx, t, q, "shop-a")
-	svc := NewService(q, testConfig(), shop.ID)
+	svc := NewService(pool, q, testConfig(), shop.ID)
 	owner := seedUser(ctx, t, q, shop.ID, "owner1", "correct-horse-battery", db.UserRoleOwner)
 	seedUser(ctx, t, q, shop.ID, "cashier1", "correct-horse-battery", db.UserRoleCashier)
 
@@ -297,7 +297,7 @@ func TestServiceListSessionsAndGetMe(t *testing.T) {
 	q := db.New(pool)
 
 	shop := seedShop(ctx, t, q, "shop-a")
-	svc := NewService(q, testConfig(), shop.ID)
+	svc := NewService(pool, q, testConfig(), shop.ID)
 	user := seedUser(ctx, t, q, shop.ID, "manager1", "correct-horse-battery", db.UserRoleManager)
 
 	if _, err := svc.Login(ctx, "manager1", "correct-horse-battery", db.SessionClientWeb, "", nil); err != nil {

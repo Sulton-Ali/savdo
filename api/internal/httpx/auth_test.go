@@ -73,7 +73,7 @@ func newAuthTestFixture(t *testing.T, cfgOverrides func(*config.Config)) authTes
 		cfgOverrides(&cfg)
 	}
 
-	authSvc := auth.NewService(q, cfg, shop.ID)
+	authSvc := auth.NewService(pool, q, cfg, shop.ID)
 	shopSvc := shopmod.NewService(pool, q)
 	mediaSvc := mediamod.NewService(q, nil, "/media", 10<<20, 2, 10)
 	catalogSvc := catalog.NewService(pool, q, "uz", "/media")

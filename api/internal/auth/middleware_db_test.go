@@ -31,7 +31,7 @@ func TestMiddlewareAuthenticatesAValidCookieSession(t *testing.T) {
 
 	shop := seedShop(ctx, t, q, "shop-a")
 	user := seedUser(ctx, t, q, shop.ID, "owner1", "correct-horse-battery", db.UserRoleOwner)
-	svc := NewService(q, testConfig(), shop.ID)
+	svc := NewService(pool, q, testConfig(), shop.ID)
 
 	token := loginAndGetToken(t, svc, "owner1", "correct-horse-battery", db.SessionClientWeb)
 
@@ -76,7 +76,7 @@ func TestMiddlewareRejectsARevokedSession(t *testing.T) {
 
 	shop := seedShop(ctx, t, q, "shop-a")
 	seedUser(ctx, t, q, shop.ID, "owner1", "correct-horse-battery", db.UserRoleOwner)
-	svc := NewService(q, testConfig(), shop.ID)
+	svc := NewService(pool, q, testConfig(), shop.ID)
 
 	result, err := svc.Login(ctx, "owner1", "correct-horse-battery", db.SessionClientWeb, "", nil)
 	if err != nil {
@@ -112,7 +112,7 @@ func TestMiddlewareRejectsSessionOfInactiveUser(t *testing.T) {
 
 	shop := seedShop(ctx, t, q, "shop-a")
 	user := seedUser(ctx, t, q, shop.ID, "owner1", "correct-horse-battery", db.UserRoleOwner)
-	svc := NewService(q, testConfig(), shop.ID)
+	svc := NewService(pool, q, testConfig(), shop.ID)
 
 	result, err := svc.Login(ctx, "owner1", "correct-horse-battery", db.SessionClientWeb, "", nil)
 	if err != nil {
@@ -150,7 +150,7 @@ func TestMiddlewareCSRFOnCookieAuthenticatedMutatingRequest(t *testing.T) {
 
 	shop := seedShop(ctx, t, q, "shop-a")
 	seedUser(ctx, t, q, shop.ID, "owner1", "correct-horse-battery", db.UserRoleOwner)
-	svc := NewService(q, testConfig(), shop.ID)
+	svc := NewService(pool, q, testConfig(), shop.ID)
 	token := loginAndGetToken(t, svc, "owner1", "correct-horse-battery", db.SessionClientWeb)
 
 	next := func(_ context.Context, _ http.ResponseWriter, _ *http.Request, _ any) (any, error) {
@@ -195,7 +195,7 @@ func TestMiddlewareSlidesExpiryWhenSessionIsStale(t *testing.T) {
 
 	shop := seedShop(ctx, t, q, "shop-a")
 	seedUser(ctx, t, q, shop.ID, "owner1", "correct-horse-battery", db.UserRoleOwner)
-	svc := NewService(q, testConfig(), shop.ID)
+	svc := NewService(pool, q, testConfig(), shop.ID)
 
 	result, err := svc.Login(ctx, "owner1", "correct-horse-battery", db.SessionClientWeb, "", nil)
 	if err != nil {
@@ -255,7 +255,7 @@ func TestMiddlewareCSRFRejectionDoesNotTouchSession(t *testing.T) {
 
 	shop := seedShop(ctx, t, q, "shop-a")
 	seedUser(ctx, t, q, shop.ID, "owner1", "correct-horse-battery", db.UserRoleOwner)
-	svc := NewService(q, testConfig(), shop.ID)
+	svc := NewService(pool, q, testConfig(), shop.ID)
 
 	result, err := svc.Login(ctx, "owner1", "correct-horse-battery", db.SessionClientWeb, "", nil)
 	if err != nil {
@@ -325,7 +325,7 @@ func TestMiddlewareRejectsAnExpiredSessionWithoutTouchingIt(t *testing.T) {
 
 	shop := seedShop(ctx, t, q, "shop-a")
 	seedUser(ctx, t, q, shop.ID, "owner1", "correct-horse-battery", db.UserRoleOwner)
-	svc := NewService(q, testConfig(), shop.ID)
+	svc := NewService(pool, q, testConfig(), shop.ID)
 
 	result, err := svc.Login(ctx, "owner1", "correct-horse-battery", db.SessionClientWeb, "", nil)
 	if err != nil {
