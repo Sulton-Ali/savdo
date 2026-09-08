@@ -171,6 +171,86 @@ describe("LandingContentPage", () => {
     expect(await screen.findByText("This value is invalid")).toBeTruthy();
   });
 
+  // Review MAJOR 1: the server names a nested `ContentHours.days` error
+  // `"days[0].close"` (`api/internal/content/validate.go`); `applyApiErrorToForm`
+  // must parse that into the `["days", 0, "close"]` NamePath the Monday
+  // close `TimePicker` is actually registered under.
+  it("maps a nested 422 field path (days[0].close) onto the Monday close TimePicker", async () => {
+    mockContentGet({
+      hero: resource("hero", {}),
+      about: resource("about", {}),
+      hours: resource("hours", { uz: { days: OPEN_DAYS } }),
+      contacts: resource("contacts", {}),
+      social: resource("social", {}),
+      seo: resource("seo", {}),
+    });
+    mockedApi.PUT.mockResolvedValueOnce({
+      data: undefined,
+      error: {
+        error: { code: "VALIDATION_FAILED", details: { fields: { "days[0].close": "invalid" } } },
+      },
+      response: new Response(null, { status: 422 }),
+    } as never);
+
+    renderPage();
+
+    const mondayClose = await screen.findByLabelText("Monday Closes");
+    const hoursCard = mondayClose.closest(".ant-card") as HTMLElement;
+    fireEvent.click(within(hoursCard).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Monday Closes").getAttribute("aria-invalid")).toBe("true");
+    });
+  });
+
+  // Review MAJOR 2: all three locale tabs share the same `["content", key]`
+  // query cache, so saving one locale must not clobber an unsaved edit
+  // sitting in another (still-mounted) locale's form.
+  it("keeps an unsaved ru hero edit after saving the uz hero", async () => {
+    mockContentGet({
+      hero: resource("hero", { uz: { title: "Salom" }, ru: { title: "Privet" } }),
+      about: resource("about", {}),
+      hours: resource("hours", {}),
+      contacts: resource("contacts", {}),
+      social: resource("social", {}),
+      seo: resource("seo", {}),
+    });
+    mockedApi.PUT.mockResolvedValueOnce(
+      jsonResult({
+        key: "hero",
+        locale: "uz",
+        data: { title: "Salom" },
+        updatedAt: "2026-01-01T00:00:00Z",
+      }),
+    );
+
+    renderPage();
+
+    await screen.findByDisplayValue("Salom");
+
+    // Mounts the ru pane (lazy on first activation) and edit its title.
+    fireEvent.click(screen.getByRole("tab", { name: "Русский" }));
+    const ruTitleInput = await screen.findByDisplayValue("Privet");
+    fireEvent.change(ruTitleInput, { target: { value: "Privet edited" } });
+
+    // Switch back to uz and save it there.
+    fireEvent.click(screen.getByRole("tab", { name: "Oʻzbekcha" }));
+    const uzTitleInput = await screen.findByDisplayValue("Salom");
+    const uzHeroCard = uzTitleInput.closest(".ant-card") as HTMLElement;
+    fireEvent.click(within(uzHeroCard).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(mockedApi.PUT).toHaveBeenCalledWith("/content/{key}", {
+        params: { path: { key: "hero" } },
+        body: { locale: "uz", data: { title: "Salom" } },
+      });
+    });
+
+    // Switch to ru: the edit must still be there, untouched by the uz save.
+    fireEvent.click(screen.getByRole("tab", { name: "Русский" }));
+    expect(await screen.findByDisplayValue("Privet edited")).toBeTruthy();
+  });
+
   it("hours form renders exactly 7 fixed weekday rows and disables open/close once closed", async () => {
     mockContentGet({
       hero: resource("hero", {}),

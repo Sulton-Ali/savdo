@@ -59,15 +59,36 @@ export function parseRetryAfterSeconds(response: Response): number | undefined {
 }
 
 /**
+ * Parses a server field name into an Ant Design `NamePath` array. Most
+ * fields are a single flat name (`"slug"` → `["slug"]`); a nested array
+ * field — `content.Service`'s `"days[2].close"` for `ContentHours.days`
+ * (`api/internal/content/validate.go`) — becomes `["days", 2, "close"]`,
+ * matching the `Form.Item name={["days", index, "close"]}` path `HoursCard`
+ * actually renders. AntD 6's `form.setFields`/`getFieldInstance` only match
+ * a `NamePath` array, never the bracket string itself.
+ */
+function parseFieldNamePath(name: string): (string | number)[] {
+  const path: (string | number)[] = [];
+  const segment = /([^[\].]+)|\[(\d+)\]/g;
+  let match: RegExpExecArray | null = segment.exec(name);
+  while (match !== null) {
+    path.push(match[2] !== undefined ? Number(match[2]) : (match[1] as string));
+    match = segment.exec(name);
+  }
+  return path.length > 0 ? path : [name];
+}
+
+/**
  * Maps a `VALIDATION_FAILED` (`details.fields`) or `CONFLICT` (`details.field`)
  * error onto Ant Design form fields via `form.setFields` (D-26). Returns
  * `true` when it applied at least one field error, so the caller knows not to
  * also show a page-level notification for the same failure.
  *
  * Only names that resolve to a currently-mounted `Form.Item` (via
- * `form.getFieldInstance`) are used. A server field name that doesn't match
- * any rendered field — e.g. a flat `"name"` from a validation error on a
- * translation entry, which every form here renders as a nested
+ * `form.getFieldInstance`, after `parseFieldNamePath` turns a bracketed
+ * server name into a real `NamePath`) are used. A server field name that
+ * doesn't match any rendered field — e.g. a flat `"name"` from a validation
+ * error on a translation entry, which every form here renders as a nested
  * `["translations", locale, "name"]` path with no locale the server can
  * know — must fall back to a page-level notification instead of being
  * silently swallowed by `form.setFields` on a field nothing displays.
@@ -79,15 +100,15 @@ export function applyApiErrorToForm(form: FormInstance, error: unknown, t: TFunc
 
   if (error.code === "VALIDATION_FAILED") {
     const { fields } = error.details as ValidationFailedDetails;
-    const entries = Object.entries(fields ?? {}).filter(
-      ([name]) => form.getFieldInstance(name) != null,
-    );
+    const entries = Object.entries(fields ?? {})
+      .map(([name, reason]) => ({ namePath: parseFieldNamePath(name), reason }))
+      .filter(({ namePath }) => form.getFieldInstance(namePath) != null);
     if (entries.length === 0) {
       return false;
     }
     form.setFields(
-      entries.map(([name, reason]) => ({
-        name,
+      entries.map(({ namePath, reason }) => ({
+        name: namePath,
         errors: [
           t(`errors.field.${reason}`, {
             defaultValue: t("errors.field.invalid"),
@@ -100,10 +121,14 @@ export function applyApiErrorToForm(form: FormInstance, error: unknown, t: TFunc
 
   if (error.code === "CONFLICT") {
     const { field } = error.details as ConflictDetails;
-    if (!field || form.getFieldInstance(field) == null) {
+    if (!field) {
       return false;
     }
-    form.setFields([{ name: field, errors: [t("errors.field.conflict")] }]);
+    const namePath = parseFieldNamePath(field);
+    if (form.getFieldInstance(namePath) == null) {
+      return false;
+    }
+    form.setFields([{ name: namePath, errors: [t("errors.field.conflict")] }]);
     return true;
   }
 

@@ -2,7 +2,7 @@ import type { Locale } from "@savdo/i18n";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { App, Button, Card, Form, type FormInstance, Skeleton } from "antd";
 import type { ReactNode } from "react";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
   type ContentBlock,
@@ -57,30 +57,56 @@ export function ContentBlockCard<TValues extends object, TData extends Record<st
   const queryClient = useQueryClient();
   const [form] = Form.useForm<TValues>();
 
-  // Repopulates the form whenever the loaded resource or the active locale
-  // changes — each locale tab mounts its own `ContentBlockCard` instance
-  // (see `LandingContentPage`), so this also covers the initial populate
-  // once loading finishes.
+  // All three locale tabs mount their own `ContentBlockCard` instance (see
+  // `LandingContentPage`) but share one `["content", key]` query cache
+  // (`lib/content.ts`) — so this instance's `resource` prop can change for
+  // reasons that have nothing to do with its own locale: a background
+  // refetch, or *another* locale's save landing in the same cache entry.
+  // Populate unconditionally only on this instance's first successful load;
+  // after that, resync only when the user has not touched this form, so an
+  // in-progress edit in one locale is never silently overwritten by
+  // something happening in another (review MAJOR 2). `locale` itself never
+  // changes across one instance's lifetime, so `hasLoadedRef` only needs to
+  // track "have we populated at all yet".
+  const hasLoadedRef = useRef(false);
   useEffect(() => {
-    if (!isPending) {
+    if (isPending) {
+      return;
+    }
+    if (!hasLoadedRef.current || !form.isFieldsTouched()) {
+      hasLoadedRef.current = true;
       form.setFieldsValue(buildInitialValues(resource, locale) as TValues);
     }
-  }, [resource, locale, isPending, buildInitialValues, form.setFieldsValue]);
+  }, [resource, locale, isPending, buildInitialValues, form]);
 
   const saveMutation = useMutation({
     mutationFn: (values: TValues) =>
       saveContent(contentKey, { locale, data: buildPayload(values) }),
     onSuccess: (saved: ContentBlock) => {
-      queryClient.setQueryData<ContentResource>(["content", contentKey], (current) => {
-        const base = current ?? { key: contentKey, locales: {} };
-        return {
-          ...base,
-          locales: {
-            ...base.locales,
-            [locale]: { data: saved.data, updatedAt: saved.updatedAt, updatedBy: saved.updatedBy },
-          },
-        };
-      });
+      const updated = queryClient.setQueryData<ContentResource>(
+        ["content", contentKey],
+        (current) => {
+          const base = current ?? { key: contentKey, locales: {} };
+          return {
+            ...base,
+            locales: {
+              ...base.locales,
+              [locale]: {
+                data: saved.data,
+                updatedAt: saved.updatedAt,
+                updatedBy: saved.updatedBy,
+              },
+            },
+          };
+        },
+      );
+      // This locale's own successful save: always resync to the
+      // server-confirmed values, even though the form is "touched" from the
+      // edit just submitted — the guard above only protects against *other*
+      // tabs' pushes, never this tab's own save.
+      if (updated) {
+        form.setFieldsValue(buildInitialValues(updated, locale) as TValues);
+      }
       notification.success({ message: t("content.saved") });
     },
     onError: (error) => {
