@@ -118,6 +118,7 @@ restored; all with the tests above green.
 - [ ] Draft sales: server-side unpaid orders with Pay / Save draft / Delete from the quick-sale form (D-87..D-89); admin web drafts page
 - [ ] Navigation rework: five most-used tabs plus a drawer; stock page split into single-purpose pages (D-90); sales list tab with date range (D-91)
 - [ ] Lists show all rows newest first before search; stock levels order fixed (D-92); button label overflow fixed (D-93); bottom safe-area insets (D-95)
+- [ ] Phone-test fixes (2026-09-08): Customers/Drafts pages get the shared shell (header, menu, tab bar); variant picker cache-key fix so stock/adjustment pickers list products; location and settings sheets clear the system bar (D-95); low-stock card link on its own line; naming per D-98
 
 **Done when:** the owner installs the APK on an Android phone, logs in, makes a sale and
 receives a purchase against the local/dev API, and the numbers match the admin web.
