@@ -43,6 +43,17 @@ type Config struct {
 	// replaces this with per-request host/slug resolution (ADR-004).
 	ShopSlug string `env:"SHOP_SLUG" envDefault:"savdo-demo"`
 
+	// PublicShopSlug names the shop `GET /public/*` (Phase 6, D-105) serves
+	// — a separate slug from ShopSlug so a future deployment can point the
+	// authenticated API and the public landing at different shops; in the
+	// single-shop MVP both env vars are the same value. Unlike ShopSlug,
+	// this is resolved per request (internal/public.Service), not once at
+	// startup — cmd/api only does a best-effort warm-up lookup and logs a
+	// warning, never fails startup, since a bad value here degrades one
+	// unauthenticated surface, not the whole API. Phase 8 replaces this
+	// with a hostname-to-shop lookup (ADR-011 amendment).
+	PublicShopSlug string `env:"PUBLIC_SHOP_SLUG" envDefault:"savdo-demo"`
+
 	// MediaDir is the local-disk root media.LocalStorage writes under
 	// (ADR-008). In prod (docs/07-DEVOPS.md § Production) this is the
 	// Docker volume mounted at /data/media. The dev default is relative

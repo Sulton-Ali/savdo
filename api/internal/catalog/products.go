@@ -573,6 +573,7 @@ func (h *Handler) CreateProduct(ctx context.Context, req gen.CreateProductReques
 	if err != nil {
 		return nil, fmt.Errorf("catalog: %w", err)
 	}
+	h.svc.invalidatePublic(authCtx.ShopID)
 	return gen.CreateProduct201JSONResponse(g), nil
 }
 
@@ -844,6 +845,7 @@ func (h *Handler) UpdateProduct(ctx context.Context, req gen.UpdateProductReques
 	if err != nil {
 		return nil, fmt.Errorf("catalog: %w", err)
 	}
+	h.svc.invalidatePublic(authCtx.ShopID)
 	return gen.UpdateProduct200JSONResponse(g), nil
 }
 
@@ -871,5 +873,6 @@ func (h *Handler) DeleteProduct(ctx context.Context, req gen.DeleteProductReques
 	if err := h.svc.q.SoftDeleteProduct(ctx, db.SoftDeleteProductParams{ShopID: authCtx.ShopID, ID: req.Id}); err != nil {
 		return nil, fmt.Errorf("catalog: soft delete product: %w", err)
 	}
+	h.svc.invalidatePublic(authCtx.ShopID)
 	return gen.DeleteProduct204Response{}, nil
 }

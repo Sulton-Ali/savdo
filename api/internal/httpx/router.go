@@ -20,6 +20,7 @@ import (
 	"github.com/Sulton-Ali/savdo/api/internal/content"
 	"github.com/Sulton-Ali/savdo/api/internal/crm"
 	"github.com/Sulton-Ali/savdo/api/internal/media"
+	"github.com/Sulton-Ali/savdo/api/internal/public"
 	"github.com/Sulton-Ali/savdo/api/internal/reports"
 	"github.com/Sulton-Ali/savdo/api/internal/sales"
 	"github.com/Sulton-Ali/savdo/api/internal/shop"
@@ -62,8 +63,21 @@ import (
 // CreateSale additionally uses pool directly, the same way
 // ReceivePurchase does, for httpx.Idempotent's Idempotency-Key
 // bookkeeping (sales.go's own doc comment). contentSvc backs
-// GetContent/PutContent via content.NewHandler (content.go).
-func NewRouter(logger *slog.Logger, pool *pgxpool.Pool, authSvc *auth.Service, shopSvc *shop.Service, mediaSvc *media.Service, devMedia http.Handler, catalogSvc *catalog.Service, stockSvc *stock.Service, crmSvc *crm.Service, reportsSvc *reports.Service, salesSvc *sales.Service, contentSvc *content.Service) http.Handler {
+// GetContent/PutContent via content.NewHandler (content.go). publicSvc
+// backs the four `/public/*` operations via public.NewHandler
+// (public.go) and additionally supplies publicSvc.CacheMiddleware, a
+// third gen.StrictMiddlewareFunc alongside authSvc.Middleware and
+// catalog.AcceptLanguageMiddleware: it is a no-op for every operation
+// except those four (checked by operationID, the same way
+// auth.allowlistedOperations does), for which it serves a cached
+// response when one is fresh, or renders, ETags and caches one when it
+// is not (public/cache.go's own doc comment) — the "public routes are
+// mounted without the auth middleware" half of this is
+// auth.allowlistedOperations itself, not this router: authSvc.Middleware
+// still wraps every operation, including these four, but lets them
+// through without a session (see that map's own doc comment for why the
+// skip has to live there and not here).
+func NewRouter(logger *slog.Logger, pool *pgxpool.Pool, authSvc *auth.Service, shopSvc *shop.Service, mediaSvc *media.Service, devMedia http.Handler, catalogSvc *catalog.Service, stockSvc *stock.Service, crmSvc *crm.Service, reportsSvc *reports.Service, salesSvc *sales.Service, contentSvc *content.Service, publicSvc *public.Service) http.Handler {
 	mux := http.NewServeMux()
 
 	strictHandler := gen.NewStrictHandlerWithOptions(
@@ -72,9 +86,9 @@ func NewRouter(logger *slog.Logger, pool *pgxpool.Pool, authSvc *auth.Service, s
 			media: media.NewHandler(mediaSvc), catalog: catalog.NewHandler(catalogSvc),
 			crm: crm.NewHandler(crmSvc), stock: stock.NewHandler(stockSvc),
 			reports: reports.NewHandler(reportsSvc), sales: sales.NewHandler(salesSvc),
-			content: content.NewHandler(contentSvc),
+			content: content.NewHandler(contentSvc), public: public.NewHandler(publicSvc),
 		},
-		[]gen.StrictMiddlewareFunc{authSvc.Middleware, catalog.AcceptLanguageMiddleware},
+		[]gen.StrictMiddlewareFunc{authSvc.Middleware, catalog.AcceptLanguageMiddleware, publicSvc.CacheMiddleware},
 		gen.StrictHTTPServerOptions{
 			RequestErrorHandlerFunc:  writeRequestError,
 			ResponseErrorHandlerFunc: func(w http.ResponseWriter, _ *http.Request, err error) { apierr.Write(w, err) },

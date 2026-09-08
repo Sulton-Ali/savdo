@@ -32,6 +32,18 @@ type Service struct {
 	q             *db.Queries
 	defaultLocale string
 	mediaBaseURL  string
+	invalidator   Invalidator
+}
+
+// Invalidator is the public-cache-clearing side effect a catalogue write
+// (product/category/variant/image) triggers (O-20: "cleared for the shop
+// on ... product/category writes" — extended here to variant and image
+// writes too, since both change what GET /public/products/{slug} shows).
+// Declared here, the consumer, so wiring *public.Service in via
+// SetInvalidator never makes this package import internal/public — see
+// content.Invalidator's doc comment for the cycle this avoids.
+type Invalidator interface {
+	Invalidate(shopID uuid.UUID)
 }
 
 // NewService builds the catalog Service. defaultLocale is the shop's
@@ -43,6 +55,24 @@ type Service struct {
 // media module.
 func NewService(pool *pgxpool.Pool, q *db.Queries, defaultLocale, mediaBaseURL string) *Service {
 	return &Service{pool: pool, q: q, defaultLocale: defaultLocale, mediaBaseURL: mediaBaseURL}
+}
+
+// SetInvalidator wires inv as the public-cache invalidator every product/
+// category/variant/image write calls after committing. Optional
+// (cmd/api's own wiring is the only caller today); a nil invalidator —
+// the zero value, or any test that never calls this — makes
+// invalidatePublic a no-op, so nothing outside cmd/api needs to know this
+// exists.
+func (s *Service) SetInvalidator(inv Invalidator) {
+	s.invalidator = inv
+}
+
+// invalidatePublic clears shopID's public-response cache, when an
+// Invalidator is wired at all.
+func (s *Service) invalidatePublic(shopID uuid.UUID) {
+	if s.invalidator != nil {
+		s.invalidator.Invalidate(shopID)
+	}
 }
 
 // Handler implements catalog's 21 gen.StrictServerInterface operations by

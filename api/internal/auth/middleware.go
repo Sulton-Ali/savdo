@@ -23,11 +23,20 @@ import (
 // (lowerCamel, "getHealthz") — verified by reading the generated
 // middleware(handler, "...") call sites in gen/api.gen.go, since the two
 // casings differ and only one of them is what actually reaches this
-// function's operationID parameter at runtime.
+// function's operationID parameter at runtime. The four Public* entries
+// are Phase 6's `GET /public/*` (D-99/D-105, `security: []` in the
+// contract): this map is the one place that actually enforces "no
+// session required" — the contract's `security: []` is documentation,
+// not enforcement — so internal/public reads no auth.Context anywhere
+// (it has none to read).
 var allowlistedOperations = map[string]bool{
-	"GetHealthz": true,
-	"GetReadyz":  true,
-	"Login":      true,
+	"GetHealthz":             true,
+	"GetReadyz":              true,
+	"Login":                  true,
+	"GetPublicShop":          true,
+	"ListPublicCategories":   true,
+	"ListPublicProducts":     true,
+	"GetPublicProductBySlug": true,
 }
 
 // requestCtxKey is the context key requestInfo is stored under.
