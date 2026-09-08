@@ -164,6 +164,12 @@ absolute (config.go L120-129).
 | `TELEGRAM_BOT_TOKEN`| (secret)       | Telegram bot API token (D-112); owner-provided in `infra/.env` only, never in repo or logs |
 | `ANTHROPIC_API_KEY` | (secret)       | Anthropic API key for the bot's LLM (D-112); owner-provided in `infra/.env` only, never in repo or logs |
 | `AI_MODEL`          | `claude-sonnet-5` | LLM model identifier (D-110); configurable for different providers via the `internal/ai` adapter |
+| `AI_PROVIDER`       | `anthropic`    | LLM provider selector (O-29); `anthropic` or `openai_compat` (self-hosted) in Phase 7 |
+| `AI_PRICE_INPUT_PER_MTOK` | `2.00`   | Cost per million input tokens (USD) for the bot's cost estimate (O-28, D-110); default for `claude-sonnet-5` verified 2026-09-08 |
+| `AI_PRICE_OUTPUT_PER_MTOK` | `10.00` | Cost per million output tokens (USD) for the bot's cost estimate (O-28, D-110); default for `claude-sonnet-5` verified 2026-09-08 |
+| `BOT_WEBHOOK_SECRET`| (secret)       | Webhook signing secret for Telegram (Phase 8, D-112); owner-provided in `infra/.env` only for production mode |
+| `BOT_MODE`          | `polling`      | Bot update mechanism: `polling` (dev, long-polling) or `webhook` (prod, Phase 8) |
+| `SITE_URL`          | (placeholder)  | Public site URL for bot links and OG images (D-100, D-115); Phase 8 sets the real domain |
 
 ## Shared local services during parallel work
 
