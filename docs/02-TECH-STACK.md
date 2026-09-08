@@ -71,6 +71,7 @@ pattern; revisit if bundle size becomes a landing performance issue.
 | Biome                    | v2.5.11    | Lint + format, replaces ESLint/Prettier (O-07)                                          |
 | Vitest                   | v4.1.11    | Unit tests (5.0.0 is published; a bump is an owner decision)                            |
 | Playwright               | v1.62.1    | e2e for admin and landing; also the `playwright` MCP for `/phase-done`                  |
+| lighthouse               | 13.4.1     | Performance and SEO audit against local production build; verified 2026-09-08 (D-108)    |
 
 ## Mobile (`mobile/`)
 
