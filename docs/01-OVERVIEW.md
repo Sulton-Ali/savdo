@@ -75,6 +75,8 @@ racks and a storeroom. If the product works for them, it works for the segment.
 
 ## Landing (draft sections — Q-08)
 
+Decided 2026-09-08: D-99..D-104.
+
 Hero with shop name and tagline · category grid · featured/promo products · product
 pages with variant availability · about the shop · address with map link · hours ·
 contacts (phone, Telegram) · language switcher (uz/ru/en). SEO: SSR, per-locale meta,
