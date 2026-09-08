@@ -69,6 +69,42 @@ func (e Availability) Valid() bool {
 	}
 }
 
+// Defines values for BotConversationMode.
+const (
+	BotConversationModeCustomer BotConversationMode = "customer"
+)
+
+// Valid indicates whether the value is a known member of the BotConversationMode enum.
+func (e BotConversationMode) Valid() bool {
+	switch e {
+	case BotConversationModeCustomer:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for BotMessageRole.
+const (
+	BotMessageRoleAssistant BotMessageRole = "assistant"
+	BotMessageRoleTool      BotMessageRole = "tool"
+	BotMessageRoleUser      BotMessageRole = "user"
+)
+
+// Valid indicates whether the value is a known member of the BotMessageRole enum.
+func (e BotMessageRole) Valid() bool {
+	switch e {
+	case BotMessageRoleAssistant:
+		return true
+	case BotMessageRoleTool:
+		return true
+	case BotMessageRoleUser:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ContentHoursDayDay.
 const (
 	Fri ContentHoursDayDay = "fri"
@@ -270,6 +306,27 @@ func (e LocationKind) Valid() bool {
 	case Store:
 		return true
 	case Warehouse:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for OtpPurpose.
+const (
+	ConfirmAction OtpPurpose = "confirm_action"
+	LinkTelegram  OtpPurpose = "link_telegram"
+	PasswordReset OtpPurpose = "password_reset"
+)
+
+// Valid indicates whether the value is a known member of the OtpPurpose enum.
+func (e OtpPurpose) Valid() bool {
+	switch e {
+	case ConfirmAction:
+		return true
+	case LinkTelegram:
+		return true
+	case PasswordReset:
 		return true
 	default:
 		return false
@@ -550,6 +607,61 @@ type AttributeValues map[string]string
 // Availability Public/bot-facing stock signal — never a quantity (ADR-010, hard rule 4/5).
 type Availability string
 
+// BotConversation One Telegram chat's conversation with the bot, forever (O-26).
+type BotConversation struct {
+	CreatedAt     time.Time                             `json:"createdAt"`
+	CustomerId    nullable.Nullable[openapi_types.UUID] `json:"customerId"`
+	Id            openapi_types.UUID                    `json:"id"`
+	LastMessageAt nullable.Nullable[time.Time]          `json:"lastMessageAt"`
+	MessageCount  int                                   `json:"messageCount"`
+
+	// Mode `bot_conversations.mode` (docs/04-DATA-MODEL.md § 6). Only `customer` exists in Phase 7 — staff mode is post-MVP (D-111).
+	Mode BotConversationMode `json:"mode"`
+
+	// TelegramChatId The Telegram chat id as a decimal string — kept a string for JS safety (an `int64` as a JSON number risks silent precision loss past 2^53), matching `TelegramAuthRequest.id`.
+	TelegramChatId   string                    `json:"telegramChatId"`
+	TelegramUsername nullable.Nullable[string] `json:"telegramUsername"`
+}
+
+// BotConversationList Cursor-paginated envelope for `GET /bot/conversations`.
+type BotConversationList struct {
+	Items      []BotConversation         `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"nextCursor"`
+}
+
+// BotConversationMode `bot_conversations.mode` (docs/04-DATA-MODEL.md § 6). Only `customer` exists in Phase 7 — staff mode is post-MVP (D-111).
+type BotConversationMode string
+
+// BotMessage One turn of a bot conversation (docs/04-DATA-MODEL.md § 6). `provider`/`model`/token counts/`latencyMs`/`costEstimate` are null for `role: user` and `role: tool` rows — only an `assistant` reply calls the LLM (O-28).
+type BotMessage struct {
+	Content string `json:"content"`
+
+	// CostEstimate USD, `NUMERIC(10,6)` (O-28) — a decimal string, never a float.
+	CostEstimate nullable.Nullable[string] `json:"costEstimate"`
+	CreatedAt    time.Time                 `json:"createdAt"`
+	Id           openapi_types.UUID        `json:"id"`
+	InputTokens  nullable.Nullable[int]    `json:"inputTokens"`
+	LatencyMs    nullable.Nullable[int]    `json:"latencyMs"`
+	Model        nullable.Nullable[string] `json:"model"`
+	OutputTokens nullable.Nullable[int]    `json:"outputTokens"`
+	Provider     nullable.Nullable[string] `json:"provider"`
+
+	// Role `bot_messages.role` (docs/04-DATA-MODEL.md § 6).
+	Role BotMessageRole `json:"role"`
+
+	// ToolCalls Raw tool-call/result payload for an `assistant` row (docs/04-DATA-MODEL.md § 6); null otherwise. Never persisted as its own message row (O-26).
+	ToolCalls nullable.Nullable[map[string]interface{}] `json:"toolCalls"`
+}
+
+// BotMessageList Cursor-paginated envelope for `GET /bot/conversations/{id}/messages`.
+type BotMessageList struct {
+	Items      []BotMessage              `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"nextCursor"`
+}
+
+// BotMessageRole `bot_messages.role` (docs/04-DATA-MODEL.md § 6).
+type BotMessageRole string
+
 // Category defines model for Category.
 type Category struct {
 	Description nullable.Nullable[string]             `json:"description"`
@@ -758,7 +870,7 @@ type DiscountType string
 // Error The error envelope every non-2xx JSON response uses (ADR-013).
 type Error struct {
 	Error struct {
-		// Code Machine-readable error codes (ADR-013). A client translates a code to a display sentence; the API never returns one. Adding a new error code means adding it here first.
+		// Code Machine-readable error codes (ADR-013). A client translates a code to a display sentence; the API never returns one. Adding a new error code means adding it here first. `UNAUTHENTICATED` covers every reason a request isn't authenticated: no valid session or bearer token (docs/05-API.md § Conventions), and, since Phase 7, the same code for the four no-session `/auth/*` operations rejecting a bad Telegram HMAC, an unlinked Telegram id, or a wrong/expired/over-attempted OTP code or action token — one code per failure class (ADR-013), the same one `POST /auth/login` already returns for rejected credentials.
 		Code ErrorCode `json:"code"`
 
 		// Details Optional machine-readable context, shape depends on `code`. For `VALIDATION_FAILED` this is `{ "fields": { "<field>": "<reason>" } }`.
@@ -766,7 +878,7 @@ type Error struct {
 	} `json:"error"`
 }
 
-// ErrorCode Machine-readable error codes (ADR-013). A client translates a code to a display sentence; the API never returns one. Adding a new error code means adding it here first.
+// ErrorCode Machine-readable error codes (ADR-013). A client translates a code to a display sentence; the API never returns one. Adding a new error code means adding it here first. `UNAUTHENTICATED` covers every reason a request isn't authenticated: no valid session or bearer token (docs/05-API.md § Conventions), and, since Phase 7, the same code for the four no-session `/auth/*` operations rejecting a bad Telegram HMAC, an unlinked Telegram id, or a wrong/expired/over-attempted OTP code or action token — one code per failure class (ADR-013), the same one `POST /auth/login` already returns for rejected credentials.
 type ErrorCode string
 
 // Healthz Response body for `GET /healthz`.
@@ -858,6 +970,38 @@ type MediaUrls struct {
 	Card  string `json:"card"`
 	Full  string `json:"full"`
 	Thumb string `json:"thumb"`
+}
+
+// OtpPurpose `otp_codes.purpose` (docs/04-DATA-MODEL.md § 1). Only `password_reset` is accepted by `POST /auth/otp/request` in Phase 7; `link_telegram` and `confirm_action` are reserved for flows that do not go through this endpoint.
+type OtpPurpose string
+
+// OtpRequest defines model for OtpRequest.
+type OtpRequest struct {
+	// Purpose `otp_codes.purpose` (docs/04-DATA-MODEL.md § 1). Only `password_reset` is accepted by `POST /auth/otp/request` in Phase 7; `link_telegram` and `confirm_action` are reserved for flows that do not go through this endpoint.
+	Purpose  OtpPurpose `json:"purpose"`
+	Username string     `json:"username"`
+}
+
+// OtpVerifyRequest defines model for OtpVerifyRequest.
+type OtpVerifyRequest struct {
+	Code string `json:"code"`
+
+	// Purpose `otp_codes.purpose` (docs/04-DATA-MODEL.md § 1). Only `password_reset` is accepted by `POST /auth/otp/request` in Phase 7; `link_telegram` and `confirm_action` are reserved for flows that do not go through this endpoint.
+	Purpose  OtpPurpose `json:"purpose"`
+	Username string     `json:"username"`
+}
+
+// OtpVerifyResponse defines model for OtpVerifyResponse.
+type OtpVerifyResponse struct {
+	// ActionToken Opaque, single-use token for `POST /auth/password/reset`, valid 10 minutes.
+	ActionToken string    `json:"actionToken"`
+	ExpiresAt   time.Time `json:"expiresAt"`
+}
+
+// PasswordResetRequest defines model for PasswordResetRequest.
+type PasswordResetRequest struct {
+	ActionToken string `json:"actionToken"`
+	NewPassword string `json:"newPassword"`
 }
 
 // PaymentMethod docs/04-DATA-MODEL.md § 4 (D-54).
@@ -1789,6 +1933,37 @@ type SupplierPatch struct {
 	TelegramUsername nullable.Nullable[string] `json:"telegramUsername,omitempty"`
 }
 
+// TelegramAuthRequest The Telegram Login Widget's callback payload (ADR-005), verified server-side against `TELEGRAM_BOT_TOKEN` before any lookup. Field names are camelCase per API convention; the widget's own field names (`first_name`, `auth_date`, …) are mapped by the caller.
+type TelegramAuthRequest struct {
+	// AuthDate Unix timestamp (seconds) the widget signed the payload at.
+	AuthDate  int     `json:"authDate"`
+	FirstName *string `json:"firstName,omitempty"`
+
+	// Hash Hex-encoded HMAC-SHA-256 signature from the widget.
+	Hash string `json:"hash"`
+
+	// Id The Telegram user id as a decimal string — kept a string end to end for JS safety, matching `BotConversation.telegramChatId`.
+	Id       string  `json:"id"`
+	LastName *string `json:"lastName,omitempty"`
+	PhotoUrl *string `json:"photoUrl,omitempty"`
+	Username *string `json:"username,omitempty"`
+}
+
+// TelegramLinkCode defines model for TelegramLinkCode.
+type TelegramLinkCode struct {
+	// Code Single-use linking code, valid 10 minutes.
+	Code string `json:"code"`
+
+	// DeepLink `https://t.me/<bot>?start=link_<code>`.
+	DeepLink string `json:"deepLink"`
+}
+
+// TelegramLinkStatus defines model for TelegramLinkStatus.
+type TelegramLinkStatus struct {
+	Linked           bool                      `json:"linked"`
+	TelegramUsername nullable.Nullable[string] `json:"telegramUsername"`
+}
+
 // TranslationEntry One locale's name/description for a translatable entity.
 type TranslationEntry struct {
 	Description *string `json:"description,omitempty"`
@@ -1954,6 +2129,27 @@ type ListSessionsParams struct {
 	// Cursor Opaque cursor from a previous page's `nextCursor`.
 	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
 }
+
+// ListBotConversationsParams defines parameters for ListBotConversations.
+type ListBotConversationsParams struct {
+	// Limit Maximum number of items to return.
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque cursor from a previous page's `nextCursor`.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// ListBotConversationMessagesParams defines parameters for ListBotConversationMessages.
+type ListBotConversationMessagesParams struct {
+	// Limit Maximum number of items to return.
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque cursor from a previous page's `nextCursor`.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// HandleBotWebhookJSONBody defines parameters for HandleBotWebhook.
+type HandleBotWebhookJSONBody map[string]interface{}
 
 // ListCategoriesParams defines parameters for ListCategories.
 type ListCategoriesParams struct {
@@ -2177,6 +2373,21 @@ type UpdateAttributeDefinitionJSONRequestBody = AttributeDefinitionPatch
 // LoginJSONRequestBody defines body for Login for application/json ContentType.
 type LoginJSONRequestBody = LoginRequest
 
+// RequestOtpJSONRequestBody defines body for RequestOtp for application/json ContentType.
+type RequestOtpJSONRequestBody = OtpRequest
+
+// VerifyOtpJSONRequestBody defines body for VerifyOtp for application/json ContentType.
+type VerifyOtpJSONRequestBody = OtpVerifyRequest
+
+// ResetPasswordJSONRequestBody defines body for ResetPassword for application/json ContentType.
+type ResetPasswordJSONRequestBody = PasswordResetRequest
+
+// AuthenticateTelegramJSONRequestBody defines body for AuthenticateTelegram for application/json ContentType.
+type AuthenticateTelegramJSONRequestBody = TelegramAuthRequest
+
+// HandleBotWebhookJSONRequestBody defines body for HandleBotWebhook for application/json ContentType.
+type HandleBotWebhookJSONRequestBody HandleBotWebhookJSONBody
+
 // CreateCategoryJSONRequestBody defines body for CreateCategory for application/json ContentType.
 type CreateCategoryJSONRequestBody = CategoryCreate
 
@@ -2290,12 +2501,42 @@ type ServerInterface interface {
 	// GetMe The authenticated user, their shop and their permissions.
 	// (GET /auth/me)
 	GetMe(w http.ResponseWriter, r *http.Request)
+	// RequestOtp Request an OTP code for a sensitive action.
+	// (POST /auth/otp/request)
+	RequestOtp(w http.ResponseWriter, r *http.Request)
+	// VerifyOtp Exchange a valid OTP code for a short-lived action token.
+	// (POST /auth/otp/verify)
+	VerifyOtp(w http.ResponseWriter, r *http.Request)
+	// ResetPassword Reset a password using an action token from `POST /auth/otp/verify`.
+	// (POST /auth/password/reset)
+	ResetPassword(w http.ResponseWriter, r *http.Request)
 	// ListSessions The authenticated user's own sessions.
 	// (GET /auth/sessions)
 	ListSessions(w http.ResponseWriter, r *http.Request, params ListSessionsParams)
 	// RevokeSession Revoke one of the authenticated user's own sessions.
 	// (DELETE /auth/sessions/{id})
 	RevokeSession(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
+	// AuthenticateTelegram Authenticate via the Telegram Login Widget.
+	// (POST /auth/telegram)
+	AuthenticateTelegram(w http.ResponseWriter, r *http.Request)
+	// DeleteTelegramLink Unlink the caller's Telegram account.
+	// (DELETE /auth/telegram/link)
+	DeleteTelegramLink(w http.ResponseWriter, r *http.Request)
+	// GetTelegramLink The caller's current Telegram link status.
+	// (GET /auth/telegram/link)
+	GetTelegramLink(w http.ResponseWriter, r *http.Request)
+	// CreateTelegramLink Start linking the caller's account to a Telegram account.
+	// (POST /auth/telegram/link)
+	CreateTelegramLink(w http.ResponseWriter, r *http.Request)
+	// ListBotConversations List the shop's bot conversations.
+	// (GET /bot/conversations)
+	ListBotConversations(w http.ResponseWriter, r *http.Request, params ListBotConversationsParams)
+	// ListBotConversationMessages List one conversation's messages.
+	// (GET /bot/conversations/{id}/messages)
+	ListBotConversationMessages(w http.ResponseWriter, r *http.Request, id openapi_types.UUID, params ListBotConversationMessagesParams)
+	// HandleBotWebhook Telegram webhook. Telegram-only — no client calls this.
+	// (POST /bot/webhook/{secret})
+	HandleBotWebhook(w http.ResponseWriter, r *http.Request, secret string)
 	// ListCategories List the shop's categories as a flat list.
 	// (GET /categories)
 	ListCategories(w http.ResponseWriter, r *http.Request, params ListCategoriesParams)
@@ -2616,6 +2857,48 @@ func (siw *ServerInterfaceWrapper) GetMe(w http.ResponseWriter, r *http.Request)
 	handler.ServeHTTP(w, r)
 }
 
+// RequestOtp operation middleware
+func (siw *ServerInterfaceWrapper) RequestOtp(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RequestOtp(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// VerifyOtp operation middleware
+func (siw *ServerInterfaceWrapper) VerifyOtp(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.VerifyOtp(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ResetPassword operation middleware
+func (siw *ServerInterfaceWrapper) ResetPassword(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ResetPassword(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListSessions operation middleware
 func (siw *ServerInterfaceWrapper) ListSessions(w http.ResponseWriter, r *http.Request) {
 
@@ -2679,6 +2962,189 @@ func (siw *ServerInterfaceWrapper) RevokeSession(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RevokeSession(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AuthenticateTelegram operation middleware
+func (siw *ServerInterfaceWrapper) AuthenticateTelegram(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AuthenticateTelegram(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteTelegramLink operation middleware
+func (siw *ServerInterfaceWrapper) DeleteTelegramLink(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteTelegramLink(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetTelegramLink operation middleware
+func (siw *ServerInterfaceWrapper) GetTelegramLink(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetTelegramLink(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateTelegramLink operation middleware
+func (siw *ServerInterfaceWrapper) CreateTelegramLink(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateTelegramLink(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListBotConversations operation middleware
+func (siw *ServerInterfaceWrapper) ListBotConversations(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListBotConversationsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListBotConversations(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListBotConversationMessages operation middleware
+func (siw *ServerInterfaceWrapper) ListBotConversationMessages(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListBotConversationMessagesParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListBotConversationMessages(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// HandleBotWebhook operation middleware
+func (siw *ServerInterfaceWrapper) HandleBotWebhook(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "secret" -------------
+	var secret string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "secret", r.PathValue("secret"), &secret, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "secret", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.HandleBotWebhook(w, r, secret)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -5254,6 +5720,13 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/auth/me", wrapper.GetMe)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/auth/sessions", wrapper.ListSessions)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/auth/sessions/{id}", wrapper.RevokeSession)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/auth/telegram", wrapper.AuthenticateTelegram)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/auth/otp/request", wrapper.RequestOtp)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/auth/otp/verify", wrapper.VerifyOtp)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/auth/password/reset", wrapper.ResetPassword)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/auth/telegram/link", wrapper.DeleteTelegramLink)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/auth/telegram/link", wrapper.GetTelegramLink)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/auth/telegram/link", wrapper.CreateTelegramLink)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/shop", wrapper.GetShop)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/shop", wrapper.UpdateShop)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/locations", wrapper.ListLocations)
@@ -5326,6 +5799,9 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/public/categories", wrapper.ListPublicCategories)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/public/products", wrapper.ListPublicProducts)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/public/products/{slug}", wrapper.GetPublicProductBySlug)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/bot/webhook/{secret}", wrapper.HandleBotWebhook)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/bot/conversations", wrapper.ListBotConversations)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/bot/conversations/{id}/messages", wrapper.ListBotConversationMessages)
 
 	return m
 }
@@ -5678,6 +6154,158 @@ func (response GetMe401JSONResponse) VisitGetMeResponse(w http.ResponseWriter) e
 	return err
 }
 
+type RequestOtpRequestObject struct {
+	Body *RequestOtpJSONRequestBody
+}
+
+type RequestOtpResponseObject interface {
+	VisitRequestOtpResponse(w http.ResponseWriter) error
+}
+
+type RequestOtp202Response struct {
+}
+
+func (response RequestOtp202Response) VisitRequestOtpResponse(w http.ResponseWriter) error {
+	w.WriteHeader(202)
+	return nil
+}
+
+type RequestOtp400JSONResponse struct{ ValidationFailedJSONResponse }
+
+func (response RequestOtp400JSONResponse) VisitRequestOtpResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RequestOtp429JSONResponse struct{ RateLimitedJSONResponse }
+
+func (response RequestOtp429JSONResponse) VisitRequestOtpResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VerifyOtpRequestObject struct {
+	Body *VerifyOtpJSONRequestBody
+}
+
+type VerifyOtpResponseObject interface {
+	VisitVerifyOtpResponse(w http.ResponseWriter) error
+}
+
+type VerifyOtp200JSONResponse OtpVerifyResponse
+
+func (response VerifyOtp200JSONResponse) VisitVerifyOtpResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VerifyOtp400JSONResponse struct{ ValidationFailedJSONResponse }
+
+func (response VerifyOtp400JSONResponse) VisitVerifyOtpResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VerifyOtp401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response VerifyOtp401JSONResponse) VisitVerifyOtpResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VerifyOtp429JSONResponse struct{ RateLimitedJSONResponse }
+
+func (response VerifyOtp429JSONResponse) VisitVerifyOtpResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResetPasswordRequestObject struct {
+	Body *ResetPasswordJSONRequestBody
+}
+
+type ResetPasswordResponseObject interface {
+	VisitResetPasswordResponse(w http.ResponseWriter) error
+}
+
+type ResetPassword204Response struct {
+}
+
+func (response ResetPassword204Response) VisitResetPasswordResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type ResetPassword400JSONResponse struct{ ValidationFailedJSONResponse }
+
+func (response ResetPassword400JSONResponse) VisitResetPasswordResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResetPassword401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ResetPassword401JSONResponse) VisitResetPasswordResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListSessionsRequestObject struct {
 	Params ListSessionsParams
 }
@@ -5747,6 +6375,315 @@ func (response RevokeSession401JSONResponse) VisitRevokeSessionResponse(w http.R
 type RevokeSession404JSONResponse struct{ NotFoundJSONResponse }
 
 func (response RevokeSession404JSONResponse) VisitRevokeSessionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthenticateTelegramRequestObject struct {
+	Body *AuthenticateTelegramJSONRequestBody
+}
+
+type AuthenticateTelegramResponseObject interface {
+	VisitAuthenticateTelegramResponse(w http.ResponseWriter) error
+}
+
+type AuthenticateTelegram200JSONResponse LoginResponse
+
+func (response AuthenticateTelegram200JSONResponse) VisitAuthenticateTelegramResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthenticateTelegram400JSONResponse struct{ ValidationFailedJSONResponse }
+
+func (response AuthenticateTelegram400JSONResponse) VisitAuthenticateTelegramResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthenticateTelegram401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response AuthenticateTelegram401JSONResponse) VisitAuthenticateTelegramResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AuthenticateTelegram429JSONResponse struct{ RateLimitedJSONResponse }
+
+func (response AuthenticateTelegram429JSONResponse) VisitAuthenticateTelegramResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteTelegramLinkRequestObject struct {
+}
+
+type DeleteTelegramLinkResponseObject interface {
+	VisitDeleteTelegramLinkResponse(w http.ResponseWriter) error
+}
+
+type DeleteTelegramLink204Response struct {
+}
+
+func (response DeleteTelegramLink204Response) VisitDeleteTelegramLinkResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteTelegramLink401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response DeleteTelegramLink401JSONResponse) VisitDeleteTelegramLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTelegramLinkRequestObject struct {
+}
+
+type GetTelegramLinkResponseObject interface {
+	VisitGetTelegramLinkResponse(w http.ResponseWriter) error
+}
+
+type GetTelegramLink200JSONResponse TelegramLinkStatus
+
+func (response GetTelegramLink200JSONResponse) VisitGetTelegramLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetTelegramLink401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response GetTelegramLink401JSONResponse) VisitGetTelegramLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateTelegramLinkRequestObject struct {
+}
+
+type CreateTelegramLinkResponseObject interface {
+	VisitCreateTelegramLinkResponse(w http.ResponseWriter) error
+}
+
+type CreateTelegramLink200JSONResponse TelegramLinkCode
+
+func (response CreateTelegramLink200JSONResponse) VisitCreateTelegramLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateTelegramLink401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CreateTelegramLink401JSONResponse) VisitCreateTelegramLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListBotConversationsRequestObject struct {
+	Params ListBotConversationsParams
+}
+
+type ListBotConversationsResponseObject interface {
+	VisitListBotConversationsResponse(w http.ResponseWriter) error
+}
+
+type ListBotConversations200JSONResponse BotConversationList
+
+func (response ListBotConversations200JSONResponse) VisitListBotConversationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListBotConversations401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListBotConversations401JSONResponse) VisitListBotConversationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListBotConversations403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListBotConversations403JSONResponse) VisitListBotConversationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListBotConversationMessagesRequestObject struct {
+	Id     openapi_types.UUID `json:"id"`
+	Params ListBotConversationMessagesParams
+}
+
+type ListBotConversationMessagesResponseObject interface {
+	VisitListBotConversationMessagesResponse(w http.ResponseWriter) error
+}
+
+type ListBotConversationMessages200JSONResponse BotMessageList
+
+func (response ListBotConversationMessages200JSONResponse) VisitListBotConversationMessagesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListBotConversationMessages401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListBotConversationMessages401JSONResponse) VisitListBotConversationMessagesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListBotConversationMessages403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListBotConversationMessages403JSONResponse) VisitListBotConversationMessagesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListBotConversationMessages404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListBotConversationMessages404JSONResponse) VisitListBotConversationMessagesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type HandleBotWebhookRequestObject struct {
+	Secret string `json:"secret"`
+	Body   *HandleBotWebhookJSONRequestBody
+}
+
+type HandleBotWebhookResponseObject interface {
+	VisitHandleBotWebhookResponse(w http.ResponseWriter) error
+}
+
+type HandleBotWebhook200Response struct {
+}
+
+func (response HandleBotWebhook200Response) VisitHandleBotWebhookResponse(w http.ResponseWriter) error {
+	w.WriteHeader(200)
+	return nil
+}
+
+type HandleBotWebhook404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response HandleBotWebhook404JSONResponse) VisitHandleBotWebhookResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -10503,12 +11440,42 @@ type StrictServerInterface interface {
 	// GetMe The authenticated user, their shop and their permissions.
 	// (GET /auth/me)
 	GetMe(ctx context.Context, request GetMeRequestObject) (GetMeResponseObject, error)
+	// RequestOtp Request an OTP code for a sensitive action.
+	// (POST /auth/otp/request)
+	RequestOtp(ctx context.Context, request RequestOtpRequestObject) (RequestOtpResponseObject, error)
+	// VerifyOtp Exchange a valid OTP code for a short-lived action token.
+	// (POST /auth/otp/verify)
+	VerifyOtp(ctx context.Context, request VerifyOtpRequestObject) (VerifyOtpResponseObject, error)
+	// ResetPassword Reset a password using an action token from `POST /auth/otp/verify`.
+	// (POST /auth/password/reset)
+	ResetPassword(ctx context.Context, request ResetPasswordRequestObject) (ResetPasswordResponseObject, error)
 	// ListSessions The authenticated user's own sessions.
 	// (GET /auth/sessions)
 	ListSessions(ctx context.Context, request ListSessionsRequestObject) (ListSessionsResponseObject, error)
 	// RevokeSession Revoke one of the authenticated user's own sessions.
 	// (DELETE /auth/sessions/{id})
 	RevokeSession(ctx context.Context, request RevokeSessionRequestObject) (RevokeSessionResponseObject, error)
+	// AuthenticateTelegram Authenticate via the Telegram Login Widget.
+	// (POST /auth/telegram)
+	AuthenticateTelegram(ctx context.Context, request AuthenticateTelegramRequestObject) (AuthenticateTelegramResponseObject, error)
+	// DeleteTelegramLink Unlink the caller's Telegram account.
+	// (DELETE /auth/telegram/link)
+	DeleteTelegramLink(ctx context.Context, request DeleteTelegramLinkRequestObject) (DeleteTelegramLinkResponseObject, error)
+	// GetTelegramLink The caller's current Telegram link status.
+	// (GET /auth/telegram/link)
+	GetTelegramLink(ctx context.Context, request GetTelegramLinkRequestObject) (GetTelegramLinkResponseObject, error)
+	// CreateTelegramLink Start linking the caller's account to a Telegram account.
+	// (POST /auth/telegram/link)
+	CreateTelegramLink(ctx context.Context, request CreateTelegramLinkRequestObject) (CreateTelegramLinkResponseObject, error)
+	// ListBotConversations List the shop's bot conversations.
+	// (GET /bot/conversations)
+	ListBotConversations(ctx context.Context, request ListBotConversationsRequestObject) (ListBotConversationsResponseObject, error)
+	// ListBotConversationMessages List one conversation's messages.
+	// (GET /bot/conversations/{id}/messages)
+	ListBotConversationMessages(ctx context.Context, request ListBotConversationMessagesRequestObject) (ListBotConversationMessagesResponseObject, error)
+	// HandleBotWebhook Telegram webhook. Telegram-only — no client calls this.
+	// (POST /bot/webhook/{secret})
+	HandleBotWebhook(ctx context.Context, request HandleBotWebhookRequestObject) (HandleBotWebhookResponseObject, error)
 	// ListCategories List the shop's categories as a flat list.
 	// (GET /categories)
 	ListCategories(ctx context.Context, request ListCategoriesRequestObject) (ListCategoriesResponseObject, error)
@@ -10930,6 +11897,99 @@ func (sh *strictHandler) GetMe(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// RequestOtp operation middleware
+func (sh *strictHandler) RequestOtp(w http.ResponseWriter, r *http.Request) {
+	var request RequestOtpRequestObject
+
+	var body RequestOtpJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RequestOtp(ctx, request.(RequestOtpRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RequestOtp")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RequestOtpResponseObject); ok {
+		if err := validResponse.VisitRequestOtpResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// VerifyOtp operation middleware
+func (sh *strictHandler) VerifyOtp(w http.ResponseWriter, r *http.Request) {
+	var request VerifyOtpRequestObject
+
+	var body VerifyOtpJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.VerifyOtp(ctx, request.(VerifyOtpRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "VerifyOtp")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(VerifyOtpResponseObject); ok {
+		if err := validResponse.VisitVerifyOtpResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ResetPassword operation middleware
+func (sh *strictHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
+	var request ResetPasswordRequestObject
+
+	var body ResetPasswordJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ResetPassword(ctx, request.(ResetPasswordRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ResetPassword")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ResetPasswordResponseObject); ok {
+		if err := validResponse.VisitResetPasswordResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListSessions operation middleware
 func (sh *strictHandler) ListSessions(w http.ResponseWriter, r *http.Request, params ListSessionsParams) {
 	var request ListSessionsRequestObject
@@ -10975,6 +12035,195 @@ func (sh *strictHandler) RevokeSession(w http.ResponseWriter, r *http.Request, i
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RevokeSessionResponseObject); ok {
 		if err := validResponse.VisitRevokeSessionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// AuthenticateTelegram operation middleware
+func (sh *strictHandler) AuthenticateTelegram(w http.ResponseWriter, r *http.Request) {
+	var request AuthenticateTelegramRequestObject
+
+	var body AuthenticateTelegramJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AuthenticateTelegram(ctx, request.(AuthenticateTelegramRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AuthenticateTelegram")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AuthenticateTelegramResponseObject); ok {
+		if err := validResponse.VisitAuthenticateTelegramResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteTelegramLink operation middleware
+func (sh *strictHandler) DeleteTelegramLink(w http.ResponseWriter, r *http.Request) {
+	var request DeleteTelegramLinkRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteTelegramLink(ctx, request.(DeleteTelegramLinkRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteTelegramLink")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteTelegramLinkResponseObject); ok {
+		if err := validResponse.VisitDeleteTelegramLinkResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetTelegramLink operation middleware
+func (sh *strictHandler) GetTelegramLink(w http.ResponseWriter, r *http.Request) {
+	var request GetTelegramLinkRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetTelegramLink(ctx, request.(GetTelegramLinkRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetTelegramLink")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetTelegramLinkResponseObject); ok {
+		if err := validResponse.VisitGetTelegramLinkResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateTelegramLink operation middleware
+func (sh *strictHandler) CreateTelegramLink(w http.ResponseWriter, r *http.Request) {
+	var request CreateTelegramLinkRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateTelegramLink(ctx, request.(CreateTelegramLinkRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateTelegramLink")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateTelegramLinkResponseObject); ok {
+		if err := validResponse.VisitCreateTelegramLinkResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListBotConversations operation middleware
+func (sh *strictHandler) ListBotConversations(w http.ResponseWriter, r *http.Request, params ListBotConversationsParams) {
+	var request ListBotConversationsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListBotConversations(ctx, request.(ListBotConversationsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListBotConversations")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListBotConversationsResponseObject); ok {
+		if err := validResponse.VisitListBotConversationsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListBotConversationMessages operation middleware
+func (sh *strictHandler) ListBotConversationMessages(w http.ResponseWriter, r *http.Request, id openapi_types.UUID, params ListBotConversationMessagesParams) {
+	var request ListBotConversationMessagesRequestObject
+
+	request.Id = id
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListBotConversationMessages(ctx, request.(ListBotConversationMessagesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListBotConversationMessages")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListBotConversationMessagesResponseObject); ok {
+		if err := validResponse.VisitListBotConversationMessagesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// HandleBotWebhook operation middleware
+func (sh *strictHandler) HandleBotWebhook(w http.ResponseWriter, r *http.Request, secret string) {
+	var request HandleBotWebhookRequestObject
+
+	request.Secret = secret
+
+	var body HandleBotWebhookJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.HandleBotWebhook(ctx, request.(HandleBotWebhookRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "HandleBotWebhook")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(HandleBotWebhookResponseObject); ok {
+		if err := validResponse.VisitHandleBotWebhookResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
