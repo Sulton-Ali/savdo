@@ -401,6 +401,10 @@ func createProduct(ctx context.Context, h *catalog.Handler, spec productSpec, ca
 		Translations: translations3Desc(spec.nameUz, spec.nameRu, spec.nameEn, spec.descUz, spec.descRu, spec.descEn),
 		Variants:     &variantCreates,
 	}
+	if spec.isFeatured {
+		featured := true
+		body.IsFeatured = &featured
+	}
 	if spec.costPrice != "" {
 		cp := spec.costPrice
 		body.CostPrice = &cp

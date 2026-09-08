@@ -60,6 +60,52 @@ func (ns NullAdjustmentReason) Value() (driver.Value, error) {
 	return string(ns.AdjustmentReason), nil
 }
 
+type ContentBlockKey string
+
+const (
+	ContentBlockKeyHero     ContentBlockKey = "hero"
+	ContentBlockKeyAbout    ContentBlockKey = "about"
+	ContentBlockKeyHours    ContentBlockKey = "hours"
+	ContentBlockKeyContacts ContentBlockKey = "contacts"
+	ContentBlockKeySocial   ContentBlockKey = "social"
+	ContentBlockKeySeo      ContentBlockKey = "seo"
+)
+
+func (e *ContentBlockKey) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = ContentBlockKey(s)
+	case string:
+		*e = ContentBlockKey(s)
+	default:
+		return fmt.Errorf("unsupported scan type for ContentBlockKey: %T", src)
+	}
+	return nil
+}
+
+type NullContentBlockKey struct {
+	ContentBlockKey ContentBlockKey `json:"content_block_key"`
+	Valid           bool            `json:"valid"` // Valid is true if ContentBlockKey is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullContentBlockKey) Scan(value interface{}) error {
+	if value == nil {
+		ns.ContentBlockKey, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.ContentBlockKey.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullContentBlockKey) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.ContentBlockKey), nil
+}
+
 type DiscountType string
 
 const (
@@ -491,6 +537,15 @@ type CategoryTranslation struct {
 	Locale      string    `json:"locale"`
 	Name        string    `json:"name"`
 	Description *string   `json:"description"`
+}
+
+type ContentBlock struct {
+	ShopID    uuid.UUID       `json:"shop_id"`
+	Key       ContentBlockKey `json:"key"`
+	Locale    string          `json:"locale"`
+	Data      json.RawMessage `json:"data"`
+	UpdatedBy *uuid.UUID      `json:"updated_by"`
+	UpdatedAt time.Time       `json:"updated_at"`
 }
 
 type Customer struct {

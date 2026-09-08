@@ -152,3 +152,37 @@ WITH RECURSIVE descendants AS (
     WHERE c.shop_id = sqlc.arg('shop_id') AND c.deleted_at IS NULL
 )
 SELECT COALESCE(max(d.height), 0)::int AS height FROM descendants d;
+
+-- name: ListPublicCategories :many
+-- Phase 6 public catalogue (D-99): active, non-deleted categories with a
+-- count of their active, non-deleted products, for the landing's category
+-- grid. Same locale-fallback + COALESCE pattern as ListCategories, active-
+-- only like ListProductsPublic (no include_inactive parameter at all).
+SELECT
+    c.id, c.shop_id, c.parent_id, c.slug, c.sort_order, c.is_active, c.image_id, c.created_at, c.updated_at,
+    COALESCE(t.locale, '') AS locale_used,
+    COALESCE(t.name, '') AS name,
+    t.description,
+    COALESCE(pc.product_count, 0)::bigint AS product_count
+FROM categories c
+LEFT JOIN LATERAL (
+    SELECT ct.locale, ct.name, ct.description
+    FROM category_translations ct
+    WHERE ct.category_id = c.id
+    ORDER BY
+        CASE
+            WHEN ct.locale = sqlc.arg('locale') THEN 0
+            WHEN ct.locale = 'uz' THEN 1
+            ELSE 2
+        END
+    LIMIT 1
+) t ON true
+LEFT JOIN LATERAL (
+    SELECT count(*) AS product_count
+    FROM products p
+    WHERE p.category_id = c.id AND p.shop_id = c.shop_id AND p.deleted_at IS NULL AND p.is_active
+) pc ON true
+WHERE c.shop_id = sqlc.arg('shop_id')
+    AND c.deleted_at IS NULL
+    AND c.is_active
+ORDER BY c.sort_order, c.slug;

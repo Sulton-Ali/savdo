@@ -185,6 +185,12 @@ func runSeed(args []string) error {
 		fmt.Printf("stock: %d suppliers, %d purchases, %d purchase items, %d transfers created\n",
 			stockReport.SuppliersCreated, stockReport.PurchasesCreated, stockReport.PurchaseItemsCreated, stockReport.TransfersCreated)
 	}
+
+	contentReport, err := runSeedContent(ctx, pool, report.ShopID)
+	if err != nil {
+		return fmt.Errorf("seed content: %w", err)
+	}
+	fmt.Printf("content: %d blocks created\n", contentReport.BlocksCreated)
 	return nil
 }
 
@@ -203,6 +209,22 @@ func runSeedStock(ctx context.Context, pool *pgxpool.Pool, shopID uuid.UUID) (se
 	stockHandler := stock.NewHandler(stock.NewService(pool, q))
 
 	return seed.Stock(ctx, pool, q, crmHandler, stockHandler, shopID, owner.ID)
+}
+
+// runSeedContent calls seed.Content — the demo landing-content pass
+// documented on seed.Content's own doc comment (Phase 6, D-99, D-104).
+// Idempotent per (key, locale) like runSeedStock's own seed.Stock call:
+// re-running `savdo seed` never overwrites a block the owner has since
+// edited through the admin content editor.
+func runSeedContent(ctx context.Context, pool *pgxpool.Pool, shopID uuid.UUID) (seed.ContentReport, error) {
+	q := apidb.New(pool)
+
+	owner, err := q.GetOwner(ctx, shopID)
+	if err != nil {
+		return seed.ContentReport{}, fmt.Errorf("get owner: %w", err)
+	}
+
+	return seed.Content(ctx, q, shopID, owner.ID)
 }
 
 // runSeedCatalog wires the catalog service and the media pipeline exactly

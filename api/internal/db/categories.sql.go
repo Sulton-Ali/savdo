@@ -350,6 +350,96 @@ func (q *Queries) ListCategoryTranslations(ctx context.Context, arg ListCategory
 	return items, nil
 }
 
+const listPublicCategories = `-- name: ListPublicCategories :many
+SELECT
+    c.id, c.shop_id, c.parent_id, c.slug, c.sort_order, c.is_active, c.image_id, c.created_at, c.updated_at,
+    COALESCE(t.locale, '') AS locale_used,
+    COALESCE(t.name, '') AS name,
+    t.description,
+    COALESCE(pc.product_count, 0)::bigint AS product_count
+FROM categories c
+LEFT JOIN LATERAL (
+    SELECT ct.locale, ct.name, ct.description
+    FROM category_translations ct
+    WHERE ct.category_id = c.id
+    ORDER BY
+        CASE
+            WHEN ct.locale = $1 THEN 0
+            WHEN ct.locale = 'uz' THEN 1
+            ELSE 2
+        END
+    LIMIT 1
+) t ON true
+LEFT JOIN LATERAL (
+    SELECT count(*) AS product_count
+    FROM products p
+    WHERE p.category_id = c.id AND p.shop_id = c.shop_id AND p.deleted_at IS NULL AND p.is_active
+) pc ON true
+WHERE c.shop_id = $2
+    AND c.deleted_at IS NULL
+    AND c.is_active
+ORDER BY c.sort_order, c.slug
+`
+
+type ListPublicCategoriesParams struct {
+	Locale string    `json:"locale"`
+	ShopID uuid.UUID `json:"shop_id"`
+}
+
+type ListPublicCategoriesRow struct {
+	ID           uuid.UUID  `json:"id"`
+	ShopID       uuid.UUID  `json:"shop_id"`
+	ParentID     *uuid.UUID `json:"parent_id"`
+	Slug         string     `json:"slug"`
+	SortOrder    int32      `json:"sort_order"`
+	IsActive     bool       `json:"is_active"`
+	ImageID      *uuid.UUID `json:"image_id"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+	LocaleUsed   string     `json:"locale_used"`
+	Name         string     `json:"name"`
+	Description  *string    `json:"description"`
+	ProductCount int64      `json:"product_count"`
+}
+
+// Phase 6 public catalogue (D-99): active, non-deleted categories with a
+// count of their active, non-deleted products, for the landing's category
+// grid. Same locale-fallback + COALESCE pattern as ListCategories, active-
+// only like ListProductsPublic (no include_inactive parameter at all).
+func (q *Queries) ListPublicCategories(ctx context.Context, arg ListPublicCategoriesParams) ([]ListPublicCategoriesRow, error) {
+	rows, err := q.db.Query(ctx, listPublicCategories, arg.Locale, arg.ShopID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPublicCategoriesRow
+	for rows.Next() {
+		var i ListPublicCategoriesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ShopID,
+			&i.ParentID,
+			&i.Slug,
+			&i.SortOrder,
+			&i.IsActive,
+			&i.ImageID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.LocaleUsed,
+			&i.Name,
+			&i.Description,
+			&i.ProductCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const softDeleteCategory = `-- name: SoftDeleteCategory :exec
 UPDATE categories
 SET deleted_at = now(), updated_at = now()
