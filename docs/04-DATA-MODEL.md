@@ -137,7 +137,7 @@ margin reports; **never returned to cashier or public**), `line_total`.
 
 **content_blocks** — `key text` (`hero|about|hours|contacts|social|seo`), `locale`,
 `data jsonb`, `updated_by`. PK `(shop_id, key, locale)`. Shapes validated against
-JSON Schemas defined in the OpenAPI contract. Shapes (O-19): `hero` { title, tagline?, imageMediaId? } · `about` { title?, body } · `hours` { days: 7 items { day, closed, open?, close? }, note? } — days mon–sun, closed boolean, open/close "HH:MM" (D-107); times ignored, calendar-day rule · `contacts` { phone, address, mapUrl? } · `social` { telegram?, instagram? } · `seo` { title, description }. Unknown fields rejected; fallback order requested → uz (D-104).
+JSON Schemas defined in the OpenAPI contract. Shapes (O-19): `hero` { title, tagline?, imageMediaId? } · `about` { title?, body } · `hours` { days: 7 items { day: mon–sun, closed: boolean, open?: "HH:MM", close?: "HH:MM" }, note? } (D-107; days are locale-independent, only the note is translated, ru/en fall back to uz per D-104) · `contacts` { phone, address, mapUrl? } · `social` { telegram?, instagram? } · `seo` { title, description }. Unknown fields rejected; fallback order requested → uz (D-104).
 
 **bot_conversations** — `telegram_chat_id bigint`, `telegram_user_id`, `customer_id
 null`, `mode` (`customer`), `message_count`, `last_message_at`. Unique `(shop_id,
