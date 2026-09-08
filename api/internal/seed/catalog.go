@@ -43,6 +43,14 @@ type CatalogReport struct {
 	// Its variants are never touched: an existing product's variant set
 	// is left exactly as it is, only a missing image set is repaired.
 	ImagesRepaired int
+
+	// FeaturedRepaired counts existing products (so seedProducts skipped
+	// creating them) whose stored is_featured was false while their spec
+	// says true — e.g. a database seeded before productSpec.isFeatured
+	// existed (D-101). Only the true direction is repaired: a product the
+	// spec does not mark as featured is left exactly as stored, so an
+	// owner's manual toggle in the admin survives a re-seed.
+	FeaturedRepaired int
 }
 
 // catalogAuthContext stands in for auth.Middleware: every catalog write
@@ -101,7 +109,7 @@ func Catalog(ctx context.Context, q *db.Queries, catalogHandler *catalog.Handler
 	}
 	report.CategoriesCreated = categoriesCreated
 
-	productsCreated, variantsCreated, imagesCreated, imagesRepaired, err := seedProducts(authCtx, q, shopID, ownerID, catalogHandler, mediaSvc, unitIDs, categoryIDs)
+	productsCreated, variantsCreated, imagesCreated, imagesRepaired, featuredRepaired, err := seedProducts(authCtx, q, shopID, ownerID, catalogHandler, mediaSvc, unitIDs, categoryIDs)
 	if err != nil {
 		return CatalogReport{}, fmt.Errorf("seed catalog: products: %w", err)
 	}
@@ -109,6 +117,7 @@ func Catalog(ctx context.Context, q *db.Queries, catalogHandler *catalog.Handler
 	report.VariantsCreated = variantsCreated
 	report.ImagesCreated = imagesCreated
 	report.ImagesRepaired = imagesRepaired
+	report.FeaturedRepaired = featuredRepaired
 
 	return report, nil
 }
@@ -232,21 +241,30 @@ func seedCategories(ctx context.Context, q *db.Queries, shopID uuid.UUID, h *cat
 	return ids, created, nil
 }
 
+// existingProduct is what seedProducts needs about a product that already
+// exists for shopID: its id, for repairing missing images, and its
+// currently stored is_featured, for repairFeaturedFlag to compare against
+// the spec without a second round-trip per product.
+type existingProduct struct {
+	id         uuid.UUID
+	isFeatured bool
+}
+
 // existingProducts maps shopID's current product slugs (active and
-// inactive alike) to their id, for seedProducts' skip-if-exists check and
-// for repairing a pre-existing product's missing images. Products are few
-// enough (dozens, not thousands) that one unpaginated
-// ListProductsForStaff call covers the whole catalogue.
-func existingProducts(ctx context.Context, q *db.Queries, shopID uuid.UUID) (map[string]uuid.UUID, error) {
+// inactive alike) to existingProduct, for seedProducts' skip-if-exists
+// check and for repairing a pre-existing product's missing images or
+// is_featured flag. Products are few enough (dozens, not thousands) that
+// one unpaginated ListProductsForStaff call covers the whole catalogue.
+func existingProducts(ctx context.Context, q *db.Queries, shopID uuid.UUID) (map[string]existingProduct, error) {
 	rows, err := q.ListProductsForStaff(ctx, db.ListProductsForStaffParams{
 		Locale: seedLocale, ShopID: shopID, IncludeInactive: true, Limit: 1000,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list products: %w", err)
 	}
-	bySlug := make(map[string]uuid.UUID, len(rows))
+	bySlug := make(map[string]existingProduct, len(rows))
 	for _, r := range rows {
-		bySlug[r.Slug] = r.ID
+		bySlug[r.Slug] = existingProduct{id: r.ID, isFeatured: r.IsFeatured}
 	}
 	return bySlug, nil
 }
@@ -256,39 +274,53 @@ func existingProducts(ctx context.Context, q *db.Queries, shopID uuid.UUID) (map
 // call carrying its variants, then attaches its generated placeholder
 // images through mediaSvc.Upload + catalogHandler.AddProductImage. A
 // product that already exists is never re-created and its variants are
-// never touched, but if it has zero images on file — e.g. it was created
-// some other way, or its images were lost from disk without the database
-// rows following — its spec's images are attached to it anyway
-// (repairProductImages), counted separately as ImagesRepaired.
-func seedProducts(ctx context.Context, q *db.Queries, shopID, ownerID uuid.UUID, h *catalog.Handler, mediaSvc *media.Service, unitIDs, categoryIDs map[string]uuid.UUID) (productsCreated, variantsCreated, imagesCreated, imagesRepaired int, err error) {
+// never touched, but two things about it are repaired if they drifted
+// from spec: zero images on file — e.g. it was created some other way, or
+// its images were lost from disk without the database rows following —
+// get spec's images attached anyway (repairProductImages, counted as
+// ImagesRepaired), and a spec.isFeatured=true product stored as
+// is_featured=false — e.g. seeded before productSpec.isFeatured existed
+// (D-101) — gets it set to true (repairFeaturedFlag, counted as
+// FeaturedRepaired). The reverse never happens: a product the spec does
+// not mark featured is never un-featured, so an owner's manual toggle in
+// the admin survives a re-seed.
+func seedProducts(ctx context.Context, q *db.Queries, shopID, ownerID uuid.UUID, h *catalog.Handler, mediaSvc *media.Service, unitIDs, categoryIDs map[string]uuid.UUID) (productsCreated, variantsCreated, imagesCreated, imagesRepaired, featuredRepaired int, err error) {
 	existing, err := existingProducts(ctx, q, shopID)
 	if err != nil {
-		return 0, 0, 0, 0, err
+		return 0, 0, 0, 0, 0, err
 	}
 
 	pcsUnitID, ok := unitIDs["pcs"]
 	if !ok {
-		return 0, 0, 0, 0, fmt.Errorf("unit %q was not seeded", "pcs")
+		return 0, 0, 0, 0, 0, fmt.Errorf("unit %q was not seeded", "pcs")
 	}
 
 	for _, spec := range productSpecs {
-		if existingID, ok := existing[spec.slug]; ok {
-			n, err := repairProductImages(ctx, q, h, mediaSvc, shopID, ownerID, spec, existingID)
+		if existingProd, ok := existing[spec.slug]; ok {
+			n, err := repairProductImages(ctx, q, h, mediaSvc, shopID, ownerID, spec, existingProd.id)
 			if err != nil {
-				return 0, 0, 0, 0, err
+				return 0, 0, 0, 0, 0, err
 			}
 			imagesRepaired += n
+
+			repaired, err := repairFeaturedFlag(ctx, h, spec, existingProd)
+			if err != nil {
+				return 0, 0, 0, 0, 0, err
+			}
+			if repaired {
+				featuredRepaired++
+			}
 			continue
 		}
 
 		categoryID, ok := categoryIDs[spec.categorySlug]
 		if !ok {
-			return 0, 0, 0, 0, fmt.Errorf("product %q: category %q was not seeded", spec.slug, spec.categorySlug)
+			return 0, 0, 0, 0, 0, fmt.Errorf("product %q: category %q was not seeded", spec.slug, spec.categorySlug)
 		}
 
 		created, err := createProduct(ctx, h, spec, categoryID, pcsUnitID)
 		if err != nil {
-			return 0, 0, 0, 0, err
+			return 0, 0, 0, 0, 0, err
 		}
 		productsCreated++
 		variantsCreated += len(spec.variants)
@@ -296,11 +328,35 @@ func seedProducts(ctx context.Context, q *db.Queries, shopID, ownerID uuid.UUID,
 		variantIDs := responseVariantIDsByAttributes(created)
 		n, err := attachImages(ctx, h, mediaSvc, shopID, ownerID, spec, created.Id, variantIDs)
 		if err != nil {
-			return 0, 0, 0, 0, err
+			return 0, 0, 0, 0, 0, err
 		}
 		imagesCreated += n
 	}
-	return productsCreated, variantsCreated, imagesCreated, imagesRepaired, nil
+	return productsCreated, variantsCreated, imagesCreated, imagesRepaired, featuredRepaired, nil
+}
+
+// repairFeaturedFlag sets productID's is_featured to true, through
+// catalogHandler.UpdateProduct exactly as an owner's admin toggle would
+// (D-101), when spec.isFeatured is true but existingProd.isFeatured is
+// stored false — the drift a database seeded before productSpec.isFeatured
+// existed is left in. It never does the opposite: spec.isFeatured=false
+// is not "unfeatured", it is "this seed has no opinion", so an existing
+// true (an owner's own manual toggle) is left exactly as stored.
+func repairFeaturedFlag(ctx context.Context, h *catalog.Handler, spec productSpec, existingProd existingProduct) (bool, error) {
+	if !spec.isFeatured || existingProd.isFeatured {
+		return false, nil
+	}
+
+	featured := true
+	body := gen.ProductPatch{IsFeatured: &featured}
+	resp, err := h.UpdateProduct(ctx, gen.UpdateProductRequestObject{Id: existingProd.id, Body: &body})
+	if err != nil {
+		return false, fmt.Errorf("repair is_featured for %q: %w", spec.slug, err)
+	}
+	if _, ok := resp.(gen.UpdateProduct200JSONResponse); !ok {
+		return false, fmt.Errorf("repair is_featured for %q: unexpected response type %T", spec.slug, resp)
+	}
+	return true, nil
 }
 
 // repairProductImages attaches spec's images to productID — a product

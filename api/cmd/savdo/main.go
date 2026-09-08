@@ -171,9 +171,10 @@ func runSeed(args []string) error {
 	if err != nil {
 		return fmt.Errorf("seed catalog: %w", err)
 	}
-	fmt.Printf("catalog: %d units, %d attribute definitions, %d categories, %d products, %d variants, %d images created, %d images repaired\n",
+	fmt.Printf("catalog: %d units, %d attribute definitions, %d categories, %d products, %d variants, %d images created, %d images repaired, %d featured flags repaired\n",
 		catalogReport.UnitsCreated, catalogReport.AttributesCreated, catalogReport.CategoriesCreated,
-		catalogReport.ProductsCreated, catalogReport.VariantsCreated, catalogReport.ImagesCreated, catalogReport.ImagesRepaired)
+		catalogReport.ProductsCreated, catalogReport.VariantsCreated, catalogReport.ImagesCreated, catalogReport.ImagesRepaired,
+		catalogReport.FeaturedRepaired)
 
 	stockReport, err := runSeedStock(ctx, pool, report.ShopID)
 	if err != nil {
