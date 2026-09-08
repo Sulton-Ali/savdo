@@ -46,9 +46,10 @@ function SaleHistoryRow({
  * (D-63: the sales side of this is not limited to the cashier's own
  * sales). Read-only; editing a customer stays admin-web scope for Phase 5
  * (not asked for here). `insets.bottom` (D-95) pads the list's bottom —
- * the Customers stack moved out of the bottom-tabs group in T12 (D-90, now
- * a drawer item), so its screens no longer sit above the tab bar's own
- * safe-area buffer and can reach the true bottom of the display.
+ * kept for consistency with every other list screen in this app
+ * (`(tabs)/sales/index.tsx` does the same), even though this stack sits
+ * inside the same `<Tabs>` navigator, tab bar included, as a hidden tab
+ * (T21, `../_layout.tsx`'s own doc comment has why).
  */
 export default function CustomerDetailScreen() {
   const { t } = useTranslation();

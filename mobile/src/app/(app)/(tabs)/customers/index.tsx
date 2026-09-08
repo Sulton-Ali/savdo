@@ -34,9 +34,10 @@ function CustomerRow({ customer, onPress }: { customer: Customer; onPress: () =>
  * Customers list (T4 deliverable 3): search by name/phone, cursor-
  * paginated, plus an "Add customer" entry to `customers/new.tsx` — every
  * `cashier+` role may browse and create (`docs/04-DATA-MODEL.md` § 7).
- * `insets.bottom` (D-95) pads the list — see `customers/[id].tsx`'s doc
- * comment for why this stack needs it now that it's a drawer item (T12)
- * rather than a bottom tab.
+ * `insets.bottom` (D-95) pads the list — this stack is a hidden tab (T21,
+ * `../_layout.tsx`'s own doc comment has why), reached from the drawer
+ * rather than the visible tab bar, but it still renders inside the same
+ * `<Tabs>` navigator as every other page, tab bar included.
  */
 export default function CustomersScreen() {
   const { t } = useTranslation();
