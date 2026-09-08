@@ -150,6 +150,7 @@ absolute (config.go L120-129).
 | `API_ADDR`          | `:8080`        | TCP address the API binds on                                                          |
 | `DATABASE_URL`      | (required)     | PostgreSQL connection string, e.g. `postgres://user:pass@host/dbname?sslmode=require` |
 | `SHOP_SLUG`         | `savdo-demo`   | Single-shop MVP identifier; resolved to `shop_id` at startup (ADR-004)                |
+| `PUBLIC_SHOP_SLUG`  | `savdo-demo`   | Public landing shop slug (Phase 6, D-105); Phase 8 resolves by hostname               |
 | `SESSION_WEB_TTL`   | `168h` (7 d)   | Web cookie sliding window (D-29)                                                      |
 | `SESSION_MOBILE_TTL`| `720h` (30 d)  | Mobile bearer token sliding window (D-29)                                             |
 | `LOGIN_RATE_IP_PER_MIN` | `10`       | Per-IP login attempts per minute                                                      |

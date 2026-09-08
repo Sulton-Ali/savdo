@@ -203,7 +203,7 @@ enforcement point. Public endpoints run with a `public` role that sees the least
 `web/` uses TanStack Start server functions to fetch `/public/*` and renders HTML with
 per-locale meta. Shop content (hero, about, hours, contacts, social) lives in
 `content_blocks` edited from the admin. The landing has no database access and no
-secrets.
+secrets. Amended 2026-09-08 (D-105): shop is resolved by `PUBLIC_SHOP_SLUG` environment variable (single-shop MVP); Phase 8 replaces with hostname-to-shop lookup when Q-09 is answered.
 
 ### ADR-012 — i18n: UI strings in JSON, data translations in DB
 
