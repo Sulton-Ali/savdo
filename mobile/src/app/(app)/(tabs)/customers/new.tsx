@@ -56,8 +56,8 @@ export default function NewCustomerScreen() {
       });
       if (returnTo === "sale") {
         // This screen was pushed onto the *Customers* tab's own stack
-        // (its file lives under `app/(app)/customers/`, regardless of
-        // which tab's button pushed it). `dismissAll` first pops that
+        // (its file lives under `app/(app)/(tabs)/customers/`, regardless
+        // of which tab's button pushed it). `dismissAll` first pops that
         // stack back to its root (`customers/index.tsx`) — a `POP_TO_TOP`
         // handled by the currently focused navigator, i.e. this same
         // stack, not a cross-tab navigation itself — so this "new
