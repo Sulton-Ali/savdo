@@ -10,33 +10,76 @@
 
 import { Route as rootRouteImport } from "./routes/__root";
 import { Route as IndexRouteImport } from "./routes/index";
+import { Route as LocaleRouteRouteImport } from "./routes/$locale/route";
+import { Route as LocaleIndexRouteImport } from "./routes/$locale/index";
+import { Route as LocaleCSlugRouteImport } from "./routes/$locale/c/$slug";
+import { Route as LocalePSlugRouteImport } from "./routes/$locale/p/$slug";
 
 const IndexRoute = IndexRouteImport.update({
   id: "/",
   path: "/",
   getParentRoute: () => rootRouteImport,
 } as any);
+const LocaleRouteRoute = LocaleRouteRouteImport.update({
+  id: "/$locale",
+  path: "/$locale",
+  getParentRoute: () => rootRouteImport,
+} as any);
+const LocaleIndexRoute = LocaleIndexRouteImport.update({
+  id: "/",
+  path: "/",
+  getParentRoute: () => LocaleRouteRoute,
+} as any);
+const LocaleCSlugRoute = LocaleCSlugRouteImport.update({
+  id: "/c/$slug",
+  path: "/c/$slug",
+  getParentRoute: () => LocaleRouteRoute,
+} as any);
+const LocalePSlugRoute = LocalePSlugRouteImport.update({
+  id: "/p/$slug",
+  path: "/p/$slug",
+  getParentRoute: () => LocaleRouteRoute,
+} as any);
 
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute;
+  "/$locale": typeof LocaleRouteRouteWithChildren;
+  "/$locale/": typeof LocaleIndexRoute;
+  "/$locale/c/$slug": typeof LocaleCSlugRoute;
+  "/$locale/p/$slug": typeof LocalePSlugRoute;
 }
 export interface FileRoutesByTo {
   "/": typeof IndexRoute;
+  "/$locale": typeof LocaleIndexRoute;
+  "/$locale/c/$slug": typeof LocaleCSlugRoute;
+  "/$locale/p/$slug": typeof LocalePSlugRoute;
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport;
   "/": typeof IndexRoute;
+  "/$locale": typeof LocaleRouteRouteWithChildren;
+  "/$locale/": typeof LocaleIndexRoute;
+  "/$locale/c/$slug": typeof LocaleCSlugRoute;
+  "/$locale/p/$slug": typeof LocalePSlugRoute;
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath;
-  fullPaths: "/";
+  fullPaths:
+    "/" | "/$locale" | "/$locale/" | "/$locale/c/$slug" | "/$locale/p/$slug";
   fileRoutesByTo: FileRoutesByTo;
-  to: "/";
-  id: "__root__" | "/";
+  to: "/" | "/$locale" | "/$locale/c/$slug" | "/$locale/p/$slug";
+  id:
+    | "__root__"
+    | "/"
+    | "/$locale"
+    | "/$locale/"
+    | "/$locale/c/$slug"
+    | "/$locale/p/$slug";
   fileRoutesById: FileRoutesById;
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute;
+  LocaleRouteRoute: typeof LocaleRouteRouteWithChildren;
 }
 
 declare module "@tanstack/react-router" {
@@ -48,11 +91,56 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof IndexRouteImport;
       parentRoute: typeof rootRouteImport;
     };
+    "/$locale": {
+      id: "/$locale";
+      path: "/$locale";
+      fullPath: "/$locale";
+      preLoaderRoute: typeof LocaleRouteRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/$locale/": {
+      id: "/$locale/";
+      path: "/";
+      fullPath: "/$locale/";
+      preLoaderRoute: typeof LocaleIndexRouteImport;
+      parentRoute: typeof LocaleRouteRoute;
+    };
+    "/$locale/c/$slug": {
+      id: "/$locale/c/$slug";
+      path: "/c/$slug";
+      fullPath: "/$locale/c/$slug";
+      preLoaderRoute: typeof LocaleCSlugRouteImport;
+      parentRoute: typeof LocaleRouteRoute;
+    };
+    "/$locale/p/$slug": {
+      id: "/$locale/p/$slug";
+      path: "/p/$slug";
+      fullPath: "/$locale/p/$slug";
+      preLoaderRoute: typeof LocalePSlugRouteImport;
+      parentRoute: typeof LocaleRouteRoute;
+    };
   }
 }
 
+interface LocaleRouteRouteChildren {
+  LocaleIndexRoute: typeof LocaleIndexRoute;
+  LocaleCSlugRoute: typeof LocaleCSlugRoute;
+  LocalePSlugRoute: typeof LocalePSlugRoute;
+}
+
+const LocaleRouteRouteChildren: LocaleRouteRouteChildren = {
+  LocaleIndexRoute: LocaleIndexRoute,
+  LocaleCSlugRoute: LocaleCSlugRoute,
+  LocalePSlugRoute: LocalePSlugRoute,
+};
+
+const LocaleRouteRouteWithChildren = LocaleRouteRoute._addFileChildren(
+  LocaleRouteRouteChildren,
+);
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  LocaleRouteRoute: LocaleRouteRouteWithChildren,
 };
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

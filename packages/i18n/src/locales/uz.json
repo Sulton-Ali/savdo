@@ -1018,5 +1018,52 @@
         "forSaleHint": "Bu mijoz joriy sotuvga biriktiriladi."
       }
     }
+  },
+  "web": {
+    "meta": {
+      "fallbackDescription": "Do'kon katalogi, ish vaqti va aloqalar."
+    },
+    "notFound": {
+      "title": "Sahifa topilmadi",
+      "description": "Siz qidirayotgan sahifa mavjud emas yoki ko'chirilgan.",
+      "homeLink": "Bosh sahifaga"
+    },
+    "footer": {
+      "rights": "© {{year}} {{shop}}"
+    },
+    "home": {
+      "categoriesTitle": "Kategoriyalar",
+      "featuredTitle": "Tavsiya etilgan mahsulotlar",
+      "hoursTitle": "Ish vaqti",
+      "contactsTitle": "Aloqa"
+    },
+    "category": {
+      "empty": "Bu kategoriyada hali mahsulot yo'q."
+    },
+    "product": {
+      "variantsTitle": "Variantlar",
+      "galleryImageAlt": "{{name}} rasmi"
+    },
+    "availability": {
+      "inStock": "Mavjud",
+      "low": "Kam qoldi",
+      "outOfStock": "Tugagan"
+    },
+    "hours": {
+      "mon": "Dushanba",
+      "tue": "Seshanba",
+      "wed": "Chorshanba",
+      "thu": "Payshanba",
+      "fri": "Juma",
+      "sat": "Shanba",
+      "sun": "Yakshanba",
+      "closed": "Dam olish kuni"
+    },
+    "contacts": {
+      "callAria": "{{phone}} raqamiga qo'ng'iroq qilish",
+      "telegramAria": "Telegramni ochish",
+      "instagramAria": "Instagramni ochish",
+      "mapAria": "Yandex Xaritada ko'rish"
+    }
   }
 }

@@ -4,6 +4,28 @@
  * Google Fonts request. */
 @import "@fontsource-variable/inter";
 
+/* Tailwind v4 CSS-first theme: map `packages/ui-tokens`'s CSS variables into
+ * Tailwind's own `--color-*`/`--radius-*`/`--font-*` namespace so utilities
+ * like `bg-primary`, `text-success`, `rounded-md` resolve to the shared
+ * tokens (D-25/D-36) instead of duplicating the palette here. */
+@theme {
+  --color-primary: var(--savdo-color-primary);
+  --color-primary-hover: var(--savdo-color-primary-hover);
+  --color-bg: var(--savdo-color-bg);
+  --color-surface: var(--savdo-color-surface);
+  --color-text: var(--savdo-color-text);
+  --color-muted: var(--savdo-color-muted);
+  --color-success: var(--savdo-color-success);
+  --color-warning: var(--savdo-color-warning);
+  --color-danger: var(--savdo-color-danger);
+
+  --radius-sm: var(--savdo-radius-sm);
+  --radius-md: var(--savdo-radius-md);
+  --radius-lg: var(--savdo-radius-lg);
+
+  --font-sans: var(--savdo-font-family);
+}
+
 * {
   box-sizing: border-box;
 }
