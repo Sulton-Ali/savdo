@@ -1018,5 +1018,49 @@
         "forSaleHint": "Этот клиент будет прикреплён к текущей продаже."
       }
     }
+  },
+  "web": {
+    "notFound": {
+      "title": "Страница не найдена",
+      "description": "Такой страницы не существует или она была перемещена.",
+      "homeLink": "На главную"
+    },
+    "footer": {
+      "rights": "© {{year}} {{shop}}"
+    },
+    "home": {
+      "categoriesTitle": "Категории",
+      "featuredTitle": "Популярные товары",
+      "hoursTitle": "Часы работы",
+      "contactsTitle": "Контакты"
+    },
+    "category": {
+      "empty": "В этой категории пока нет товаров."
+    },
+    "product": {
+      "variantsTitle": "Варианты",
+      "galleryImageAlt": "Фото {{name}}"
+    },
+    "availability": {
+      "inStock": "В наличии",
+      "low": "Мало",
+      "outOfStock": "Нет в наличии"
+    },
+    "hours": {
+      "mon": "Понедельник",
+      "tue": "Вторник",
+      "wed": "Среда",
+      "thu": "Четверг",
+      "fri": "Пятница",
+      "sat": "Суббота",
+      "sun": "Воскресенье",
+      "closed": "Выходной"
+    },
+    "contacts": {
+      "callAria": "Позвонить {{phone}}",
+      "telegramAria": "Открыть Telegram",
+      "instagramAria": "Открыть Instagram",
+      "mapAria": "Смотреть на Яндекс Картах"
+    }
   }
 }

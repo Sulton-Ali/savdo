@@ -1018,5 +1018,49 @@
         "forSaleHint": "This customer will be attached to the current sale."
       }
     }
+  },
+  "web": {
+    "notFound": {
+      "title": "Page not found",
+      "description": "The page you are looking for does not exist or has moved.",
+      "homeLink": "Back to home"
+    },
+    "footer": {
+      "rights": "© {{year}} {{shop}}"
+    },
+    "home": {
+      "categoriesTitle": "Categories",
+      "featuredTitle": "Featured products",
+      "hoursTitle": "Opening hours",
+      "contactsTitle": "Contacts"
+    },
+    "category": {
+      "empty": "No products in this category yet."
+    },
+    "product": {
+      "variantsTitle": "Options",
+      "galleryImageAlt": "{{name}} photo"
+    },
+    "availability": {
+      "inStock": "In stock",
+      "low": "Low stock",
+      "outOfStock": "Out of stock"
+    },
+    "hours": {
+      "mon": "Monday",
+      "tue": "Tuesday",
+      "wed": "Wednesday",
+      "thu": "Thursday",
+      "fri": "Friday",
+      "sat": "Saturday",
+      "sun": "Sunday",
+      "closed": "Closed"
+    },
+    "contacts": {
+      "callAria": "Call {{phone}}",
+      "telegramAria": "Open Telegram",
+      "instagramAria": "Open Instagram",
+      "mapAria": "View on Yandex Maps"
+    }
   }
 }

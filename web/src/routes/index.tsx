@@ -1,21 +1,12 @@
-import { resources } from "@savdo/i18n";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
-import { getHealthz } from "../lib/api.functions";
-import { healthLabel } from "../lib/health";
+import { defaultLocale } from "../lib/locale";
 
+/** `/` redirects to the default locale's home page (D-100 — uz is the
+ * default and canonical locale). A real HTTP 302 (the default would be
+ * 307): a temporary redirect the crawler should not cache as canonical. */
 export const Route = createFileRoute("/")({
-  loader: () => getHealthz(),
-  component: Home,
+  beforeLoad: () => {
+    throw redirect({ to: "/$locale", params: { locale: defaultLocale }, statusCode: 302 });
+  },
 });
-
-function Home() {
-  const health = Route.useLoaderData();
-
-  return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-4 bg-neutral-50 px-6 text-center">
-      <h1 className="text-4xl font-bold text-neutral-900">{resources.uz.app.name}</h1>
-      <p className="text-lg text-neutral-600">{healthLabel(health)}</p>
-    </main>
-  );
-}
