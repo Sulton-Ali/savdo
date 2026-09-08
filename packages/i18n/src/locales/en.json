@@ -1031,10 +1031,20 @@
       "about": "About"
     },
     "footer": {
-      "rights": "© {{year}} {{shop}}"
+      "rights": "© {{year}} {{shop}}",
+      "hoursClosed": "closed"
     },
     "hero": {
       "cta": "View catalogue"
+    },
+    "weekdayShort": {
+      "mon": "Mon",
+      "tue": "Tue",
+      "wed": "Wed",
+      "thu": "Thu",
+      "fri": "Fri",
+      "sat": "Sat",
+      "sun": "Sun"
     },
     "home": {
       "categoriesTitle": "Categories",

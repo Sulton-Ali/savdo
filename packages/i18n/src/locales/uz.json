@@ -1031,10 +1031,20 @@
       "about": "Biz haqimizda"
     },
     "footer": {
-      "rights": "© {{year}} {{shop}}"
+      "rights": "© {{year}} {{shop}}",
+      "hoursClosed": "dam olish"
     },
     "hero": {
       "cta": "Katalogni ko'rish"
+    },
+    "weekdayShort": {
+      "mon": "Du",
+      "tue": "Se",
+      "wed": "Chor",
+      "thu": "Pay",
+      "fri": "Ju",
+      "sat": "Sh",
+      "sun": "Ya"
     },
     "home": {
       "categoriesTitle": "Kategoriyalar",

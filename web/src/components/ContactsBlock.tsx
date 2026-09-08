@@ -10,8 +10,10 @@ type ContentSocial = components["schemas"]["ContentSocial"];
 /** D-102: the address links to Yandex Maps, either the admin-set `mapUrl`
  * or the plain default search-by-address link (no embedded map, keeps the
  * page fast). `null` when neither is a safe `https:` link (O-19 "https
- * only") — the caller renders the address as plain text instead. */
-function mapHref(contacts: ContentContacts): string | null {
+ * only") — the caller renders the address as plain text instead. Exported
+ * for `Footer`'s compact one-line address, so both places apply the exact
+ * same rule. */
+export function mapHref(contacts: ContentContacts): string | null {
   const href =
     contacts.mapUrl ?? `https://yandex.com/maps/?text=${encodeURIComponent(contacts.address)}`;
   return isSafeHttpsUrl(href) ? href : null;

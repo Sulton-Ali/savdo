@@ -85,24 +85,28 @@ function HomePage() {
         </section>
       )}
 
-      {blocks.hours != null && (
-        <section>
-          <h2 className="mb-4 flex items-center gap-2 font-semibold text-text text-xl">
-            <ClockIcon className="h-5 w-5 text-primary" />
-            {t("web.home.hoursTitle")}
-          </h2>
-          <HoursTable hours={blocks.hours} />
-        </section>
-      )}
+      {(blocks.hours != null || blocks.contacts != null) && (
+        <div className="grid gap-10 lg:grid-cols-2 lg:gap-8">
+          {blocks.hours != null && (
+            <section>
+              <h2 className="mb-4 flex items-center gap-2 font-semibold text-text text-xl">
+                <ClockIcon className="h-5 w-5 text-primary" />
+                {t("web.home.hoursTitle")}
+              </h2>
+              <HoursTable hours={blocks.hours} />
+            </section>
+          )}
 
-      {blocks.contacts != null && (
-        <section>
-          <h2 className="mb-4 flex items-center gap-2 font-semibold text-text text-xl">
-            <MapPinIcon className="h-5 w-5 text-primary" />
-            {t("web.home.contactsTitle")}
-          </h2>
-          <ContactsBlock contacts={blocks.contacts} social={blocks.social} />
-        </section>
+          {blocks.contacts != null && (
+            <section>
+              <h2 className="mb-4 flex items-center gap-2 font-semibold text-text text-xl">
+                <MapPinIcon className="h-5 w-5 text-primary" />
+                {t("web.home.contactsTitle")}
+              </h2>
+              <ContactsBlock contacts={blocks.contacts} social={blocks.social} />
+            </section>
+          )}
+        </div>
       )}
     </main>
   );

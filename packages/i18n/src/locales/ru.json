@@ -1031,10 +1031,20 @@
       "about": "О нас"
     },
     "footer": {
-      "rights": "© {{year}} {{shop}}"
+      "rights": "© {{year}} {{shop}}",
+      "hoursClosed": "выходной"
     },
     "hero": {
       "cta": "Смотреть каталог"
+    },
+    "weekdayShort": {
+      "mon": "Пн",
+      "tue": "Вт",
+      "wed": "Ср",
+      "thu": "Чт",
+      "fri": "Пт",
+      "sat": "Сб",
+      "sun": "Вс"
     },
     "home": {
       "categoriesTitle": "Категории",
