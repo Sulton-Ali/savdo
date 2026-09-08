@@ -35,7 +35,7 @@
   },
   "nav": {
     "dashboard": "Dashboard",
-    "drafts": "Drafts",
+    "drafts": "Sale drafts",
     "sales": "Sales",
     "products": "Products",
     "categories": "Categories",
@@ -50,7 +50,7 @@
     "stockMovements": "Stock movements",
     "stockLow": "Low stock",
     "quickSale": "Quick sale",
-    "salesDrafts": "Drafts",
+    "salesDrafts": "Sale drafts",
     "reports": "Reports"
   },
   "auth": {
@@ -682,7 +682,7 @@
       }
     },
     "drafts": {
-      "listTitle": "Drafts",
+      "listTitle": "Sale drafts",
       "empty": "No drafts yet.",
       "filters": {
         "mine": "My drafts only"
@@ -835,8 +835,8 @@
       "noLocations": "No locations available"
     },
     "purchases": {
-      "drafts": "Drafts",
-      "draftsEmpty": "No draft purchases",
+      "drafts": "Purchase drafts",
+      "draftsEmpty": "No purchase drafts",
       "saveAndReceive": "Save and receive"
     },
     "sale": {
@@ -920,7 +920,7 @@
       "errors": {
         "notFound": "This draft was already paid or deleted.",
         "lineUnavailable": "{{name}} is no longer available — edit the draft to remove it.",
-        "forbiddenEdit": "You can't edit this draft — pay it from the Drafts screen, or ask the creator or a manager.",
+        "forbiddenEdit": "You can't edit this draft — pay it from the Sale drafts screen, or ask the creator or a manager.",
         "itemNoLongerAvailable": "One of the items in this draft is no longer available. Remove it from the cart to continue."
       },
       "filter": {
