@@ -51,7 +51,8 @@
     "stockLow": "Kam qoldiq",
     "quickSale": "Tezkor sotuv",
     "salesDrafts": "Sotuv qoralamalari",
-    "reports": "Hisobotlar"
+    "reports": "Hisobotlar",
+    "bot": "Bot"
   },
   "auth": {
     "login": {
@@ -826,6 +827,29 @@
     "seo": {
       "title": "Meta sarlavha",
       "description": "Meta tavsif"
+    }
+  },
+  "bot": {
+    "listTitle": "Bot suhbatlari",
+    "empty": "Hozircha suhbatlar yo‘q.",
+    "columns": {
+      "chat": "Chat",
+      "messageCount": "Xabarlar",
+      "lastMessageAt": "Oxirgi xabar"
+    },
+    "detail": {
+      "title": "Bot bilan suhbat",
+      "notFound": "Bu suhbatni yuklab bo‘lmadi.",
+      "empty": "Hozircha xabarlar yo‘q.",
+      "role": {
+        "user": "Mijoz",
+        "assistant": "Bot",
+        "tool": "Vosita"
+      },
+      "toolCalls": "Vosita chaqiruvlari",
+      "tokens": "{{input}}→{{output}} token",
+      "latency": "{{ms}} ms",
+      "cost": "${{cost}}"
     }
   },
   "mobile": {

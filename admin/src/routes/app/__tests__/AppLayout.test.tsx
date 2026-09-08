@@ -156,4 +156,32 @@ describe("AppLayout navigation", () => {
     await waitFor(() => expect(screen.getByText("Test Shop")).toBeTruthy());
     expect(screen.queryByText("Landing content")).toBeNull();
   });
+
+  // Phase 7 T6: bot conversations nav entry (owner/manager, `bot.read`,
+  // `docs/04-DATA-MODEL.md` § 7).
+  it("shows Bot only with bot.read", async () => {
+    fetchMeMock.mockResolvedValueOnce(buildMe(["bot.read"]));
+    const { router, queryClient } = buildRouterAndClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByText("Test Shop")).toBeTruthy());
+    expect(screen.getByText("Bot")).toBeTruthy();
+  });
+
+  it("hides Bot without bot.read (e.g. a cashier)", async () => {
+    fetchMeMock.mockResolvedValueOnce(buildMe([]));
+    const { router, queryClient } = buildRouterAndClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByText("Test Shop")).toBeTruthy());
+    expect(screen.queryByText("Bot")).toBeNull();
+  });
 });

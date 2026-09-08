@@ -3,6 +3,7 @@ import { Button, Layout, Menu, Space, Tag, Typography } from "antd";
 import {
   AlertTriangle,
   BarChart3,
+  Bot,
   Boxes,
   ClipboardList,
   Contact,
@@ -178,6 +179,14 @@ function AppShell() {
       icon: <Image size={16} />,
       label: <Link to="/settings/landing">{t("content.nav")}</Link>,
       permission: "content.manage",
+    },
+    // Phase 7 T6: bot conversations (owner/manager, `bot.read`,
+    // `docs/04-DATA-MODEL.md` § 7).
+    {
+      key: "/bot/conversations",
+      icon: <Bot size={16} />,
+      label: <Link to="/bot/conversations">{t("nav.bot")}</Link>,
+      permission: "bot.read",
     },
   ];
 

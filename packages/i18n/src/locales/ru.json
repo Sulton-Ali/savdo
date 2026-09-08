@@ -51,7 +51,8 @@
     "stockLow": "Низкий остаток",
     "quickSale": "Быстрая продажа",
     "salesDrafts": "Черновики продаж",
-    "reports": "Отчёты"
+    "reports": "Отчёты",
+    "bot": "Бот"
   },
   "auth": {
     "login": {
@@ -826,6 +827,29 @@
     "seo": {
       "title": "Meta-заголовок",
       "description": "Meta-описание"
+    }
+  },
+  "bot": {
+    "listTitle": "Диалоги бота",
+    "empty": "Диалогов пока нет.",
+    "columns": {
+      "chat": "Чат",
+      "messageCount": "Сообщений",
+      "lastMessageAt": "Последнее сообщение"
+    },
+    "detail": {
+      "title": "Диалог с ботом",
+      "notFound": "Не удалось загрузить этот диалог.",
+      "empty": "Сообщений пока нет.",
+      "role": {
+        "user": "Клиент",
+        "assistant": "Бот",
+        "tool": "Инструмент"
+      },
+      "toolCalls": "Вызовы инструментов",
+      "tokens": "{{input}}→{{output}} токенов",
+      "latency": "{{ms}} мс",
+      "cost": "${{cost}}"
     }
   },
   "mobile": {
