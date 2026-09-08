@@ -15,7 +15,7 @@ import (
 // middleware — ever runs: a malformed body never reaches auth.Handler.Login
 // or auth.Service.Middleware at all.
 func TestMalformedRequestBody(t *testing.T) {
-	router := NewRouter(testLogger(), nil, testAuthService(), testShopService(), testMediaService(), nil, testCatalogService(), testStockService(), testCrmService(), testReportsService(), testSalesService())
+	router := NewRouter(testLogger(), nil, testAuthService(), testShopService(), testMediaService(), nil, testCatalogService(), testStockService(), testCrmService(), testReportsService(), testSalesService(), testContentService())
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/auth/login", strings.NewReader("{bad"))
 	req.Header.Set("Content-Type", "application/json")
@@ -45,7 +45,7 @@ func TestMalformedRequestBody(t *testing.T) {
 // via maxBytesBody (bodylimit.go) wrapping every request in
 // http.MaxBytesReader before the strict server's JSON decode ever sees it.
 func TestOversizedRequestBodyIsRejectedNotAServerError(t *testing.T) {
-	router := NewRouter(testLogger(), nil, testAuthService(), testShopService(), testMediaService(), nil, testCatalogService(), testStockService(), testCrmService(), testReportsService(), testSalesService())
+	router := NewRouter(testLogger(), nil, testAuthService(), testShopService(), testMediaService(), nil, testCatalogService(), testStockService(), testCrmService(), testReportsService(), testSalesService(), testContentService())
 
 	// Must be syntactically valid JSON up to the point it overruns the
 	// limit — a decoder that hits invalid syntax at byte 0 never needs to
