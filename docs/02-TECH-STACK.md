@@ -21,7 +21,7 @@ branch — with the reason.
 | golangci-lint         | v2.13.2  | Lint gate; binary pinned and installed by the Makefile into `api/bin/`; config `api/.golangci.yml`            |
 | testcontainers-go     | v0.44.0  | Real Postgres in integration tests (`modules/postgres`)                                                         |
 | go-telegram/bot       | v1.25.0  | Bot API 10.3; modern, maintained. **Not** `go-telegram-bot-api` (older design)                                |
-| anthropic-sdk-go      | v1.69.0  | First `internal/ai` provider (Claude). Tool use via Messages API                                              |
+| anthropic-sdk-go      | v1.69.0  | First `internal/ai` provider (Claude). Tool use via Messages API; verified 2026-09-08 (registry latest is v1.71.0, not approved) |
 | google.golang.org/genai | v1.71.0 | Second provider (Gemini), behind the same interface — only if Q-01 picks it                                    |
 | OpenAI-compatible     | stdlib   | `openai_compat` provider is a thin HTTP client for self-hosted (Ollama/vLLM) — no SDK, only if Q-01 picks it  |
 | golang.org/x/crypto   | v0.56.0  | **Direct** dependency: argon2id via `internal/auth` (`argon2.IDKey`, t=3, m=64 MiB, p=4, 32-byte hash, 16-byte salt)                                     |

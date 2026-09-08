@@ -103,6 +103,25 @@ type Config struct {
 	// whenever ADR-004's tenant-ready design actually goes multi-process
 	// or multi-shop-per-process — not needed now.
 	MediaQueue int `env:"MEDIA_QUEUE" envDefault:"8"`
+
+	// AIProvider names the internal/ai.Client implementation cmd/bot builds
+	// (ADR-009): "anthropic" (built), "openai_compat" (built, self-hosted
+	// endpoints) or "gemini" (registered but not built — O-29; internal/ai
+	// returns a typed "provider not built" error for it).
+	AIProvider string `env:"AI_PROVIDER" envDefault:"anthropic"`
+
+	// AIModel is the model id passed to the provider as-is (internal/ai's
+	// SDK usage note: model ids are plain strings, never a typed
+	// constant). Model choice is Q-01; the default is the current
+	// generation's cheaper/mid tier.
+	AIModel string `env:"AI_MODEL" envDefault:"claude-sonnet-5"`
+
+	// AIPriceInputPerMTok and AIPriceOutputPerMTok are USD per million
+	// tokens, decimal strings (ADR-007: no float money), that
+	// internal/ai.Usage.CostEstimate is computed from (O-28). Defaults are
+	// claude-sonnet-5's published per-token pricing.
+	AIPriceInputPerMTok  string `env:"AI_PRICE_INPUT_PER_MTOK" envDefault:"2.00"`
+	AIPriceOutputPerMTok string `env:"AI_PRICE_OUTPUT_PER_MTOK" envDefault:"10.00"`
 }
 
 // Load parses the environment into a Config, applying defaults. It fails
