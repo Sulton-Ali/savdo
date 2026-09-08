@@ -18,6 +18,14 @@ import {
  * Conventions — `.data.pages` flattens into one scrollable `FlatList`.
  * Mirrors `admin/src/lib/useCursorList.ts`'s shape (own copy: `mobile` has
  * no shared package with `admin` beyond the generated API client).
+ *
+ * The only hook that queries under `catalogKeys.products` — `VariantPicker`
+ * used to run its own plain `useQuery` under the same key expecting a
+ * `{ items }` shape instead of this hook's `{ pages, pageParams }`; since
+ * TanStack Query keeps one cache entry per key, whichever screen loaded
+ * last decided the other's shape and the loser saw an empty list. Every
+ * consumer of `catalogKeys.products` must go through this hook, then
+ * flatten `data.pages` via `productPages.ts`'s `flattenProductPages`.
  */
 export function useProductsSearch(q: string) {
   return useInfiniteQuery({
