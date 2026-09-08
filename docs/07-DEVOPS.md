@@ -186,8 +186,9 @@ Runs, in order, and stops at the first failure:
    stock_levels` outside `internal/stock`, hand-written response structs in handlers,
    `Co-authored-by` in the last commit message, `.env` tracked by git
 
-Playwright e2e (`pnpm -r test:e2e`) runs in CI and in `/phase-done`, not in every
-`verify`, because it needs the full stack up.
+Playwright e2e (`pnpm -r test:e2e`, or `make test-e2e`) runs in CI and in `/phase-done`,
+not in every `verify`, because it needs the full stack up: Postgres, the API on `:8080`
+with the seeded demo shop, and `API_URL`/`SITE_URL` for `web`'s own `webServer` build.
 
 **The gate stays local.** The merging session runs it itself; a green CI run does not
 replace it.
