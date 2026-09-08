@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -41,6 +44,23 @@ func newOpenAICompatClient(cfg Config) (Client, error) {
 	if baseURL == "" {
 		return nil, fmt.Errorf("ai: AI_BASE_URL is required for provider %q: %w", cfg.Provider, ErrBadRequest)
 	}
+	u, err := url.Parse(baseURL)
+	if err != nil || u.Host == "" {
+		return nil, fmt.Errorf("ai: AI_BASE_URL %q is not a valid absolute URL: %w", baseURL, ErrBadRequest)
+	}
+	switch u.Scheme {
+	case "https":
+		// Always fine.
+	case "http":
+		if !isLoopbackHost(u.Hostname()) {
+			return nil, fmt.Errorf("ai: AI_BASE_URL %q: %w: http is only allowed for a loopback host (localhost, 127.0.0.1, ::1); use https for anything else", baseURL, ErrBadRequest)
+		}
+	default:
+		return nil, fmt.Errorf("ai: AI_BASE_URL %q: %w: scheme must be http or https", baseURL, ErrBadRequest)
+	}
+	// Scheme and host only — never the API key (hard rule 9, D-112).
+	slog.Default().Info("ai: openai_compat provider configured", "scheme", u.Scheme, "host", u.Host)
+
 	return &openAICompatClient{
 		httpClient: &http.Client{Timeout: 60 * time.Second},
 		baseURL:    baseURL,
@@ -52,7 +72,42 @@ func newOpenAICompatClient(cfg Config) (Client, error) {
 	}, nil
 }
 
+// isLoopbackHost reports whether host (already stripped of any port by
+// url.URL.Hostname) is one of the loopback names/addresses this codebase
+// treats as "local, so plaintext http is acceptable" — the same set D-81
+// uses for the mobile app's server-URL rule, narrowed here to exact
+// loopback only (no private-network ranges): this provider is meant for a
+// self-hosted backend running on the same machine as the API, not a LAN
+// service.
+func isLoopbackHost(host string) bool {
+	switch host {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	default:
+		return false
+	}
+}
+
+// maxOpenAICompatResponseBytes bounds how much of a response body this
+// client reads into memory. A self-hosted endpoint (this provider's only
+// use case, O-29) is not a trusted upstream the way Anthropic's API is;
+// without a bound, a misbehaving or malicious backend could stream an
+// unbounded body at the process. Overflow classifies as
+// ErrProviderUnavailable: the provider did not give us a usable response.
+const maxOpenAICompatResponseBytes = 4 * 1024 * 1024 // 4 MiB
+
+// errUnsupportedToolCallType is logged, never returned, when a tool_calls
+// entry has a type other than "function" — this wire format defines no
+// other type, but a permissive self-hosted backend might send one; the
+// entry is skipped rather than derailing the whole response over one
+// unexpected item.
+var errUnsupportedToolCallType = errors.New("ai: openai_compat: unsupported tool_call type")
+
 func (c *openAICompatClient) Chat(ctx context.Context, req Request) (Response, error) {
+	if len(req.Messages) == 0 {
+		return Response{}, fmt.Errorf("ai: %w: request has no messages", ErrBadRequest)
+	}
+
 	body := openAIChatRequest{
 		Model:     c.model,
 		Messages:  toOpenAIMessages(req.System, req.Messages),
@@ -84,9 +139,12 @@ func (c *openAICompatClient) Chat(ctx context.Context, req Request) (Response, e
 	}
 	defer func() { _ = httpResp.Body.Close() }()
 
-	respBody, err := io.ReadAll(httpResp.Body)
+	respBody, err := io.ReadAll(io.LimitReader(httpResp.Body, maxOpenAICompatResponseBytes+1))
 	if err != nil {
 		return Response{Usage: usage}, fmt.Errorf("ai: %w: read response: %v", ErrProviderUnavailable, err)
+	}
+	if len(respBody) > maxOpenAICompatResponseBytes {
+		return Response{Usage: usage}, fmt.Errorf("ai: %w: response body exceeds %d bytes", ErrProviderUnavailable, maxOpenAICompatResponseBytes)
 	}
 
 	if httpResp.StatusCode != http.StatusOK {
@@ -101,13 +159,25 @@ func (c *openAICompatClient) Chat(ctx context.Context, req Request) (Response, e
 		return Response{Usage: usage}, fmt.Errorf("ai: %w: response had no choices", ErrProviderUnavailable)
 	}
 
-	usage.InputTokens = parsed.Usage.PromptTokens
-	usage.OutputTokens = parsed.Usage.CompletionTokens
-	usage.CostEstimate = costEstimate(c.priceIn, c.priceOut, int64(parsed.Usage.PromptTokens), int64(parsed.Usage.CompletionTokens))
+	usage.InputTokens = clampNonNegative(parsed.Usage.PromptTokens)
+	usage.OutputTokens = clampNonNegative(parsed.Usage.CompletionTokens)
+	usage.CostEstimate = costEstimate(c.priceIn, c.priceOut, int64(usage.InputTokens), int64(usage.OutputTokens))
 
 	choice := parsed.Choices[0]
+	if choice.FinishReason == "content_filter" || choice.Message.Refusal != "" {
+		// Refusal parity with the anthropic provider (StopReasonRefusal):
+		// a normal, successful HTTP response that the model declined to
+		// answer maps to ErrRefused with usage kept and content dropped,
+		// never partially served.
+		return Response{Usage: usage}, fmt.Errorf("ai: %w: finish_reason=%q", ErrRefused, choice.FinishReason)
+	}
+
 	out := Response{Text: choice.Message.Content, StopReason: choice.FinishReason, Usage: usage}
 	for _, tc := range choice.Message.ToolCalls {
+		if tc.Type != "" && tc.Type != "function" {
+			slog.Default().WarnContext(ctx, "ai: openai_compat: skipping unsupported tool_call type", "error", errUnsupportedToolCallType, "type", tc.Type)
+			continue
+		}
 		out.ToolCalls = append(out.ToolCalls, ToolCall{ID: tc.ID, Name: tc.Function.Name, Input: json.RawMessage(tc.Function.Arguments)})
 	}
 	return out, nil
@@ -126,10 +196,14 @@ type openAIChatRequest struct {
 }
 
 type openAIMessage struct {
-	Role       string           `json:"role"`
-	Content    string           `json:"content,omitempty"`
-	ToolCalls  []openAIToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string           `json:"tool_call_id,omitempty"`
+	Role      string           `json:"role"`
+	Content   string           `json:"content,omitempty"`
+	ToolCalls []openAIToolCall `json:"tool_calls,omitempty"`
+	// Refusal is set by the provider instead of Content when it declines
+	// to answer; this client never sends it, only reads it (mapped to
+	// ErrRefused).
+	Refusal    string `json:"refusal,omitempty"`
+	ToolCallID string `json:"tool_call_id,omitempty"`
 }
 
 type openAITool struct {
@@ -232,21 +306,27 @@ func toOpenAITools(tools []Tool) []openAITool {
 }
 
 // mapOpenAICompatError maps a non-200 response to this package's typed
-// errors by HTTP status — the OpenAI error envelope has no stable typed
-// Go representation to switch on the way the Anthropic SDK's errors do,
-// so status code is the only reliable signal; the parsed message (if any)
-// is included for logs, never matched on.
+// errors by HTTP status, via statusError so the status survives for
+// logging.go — the OpenAI error envelope has no stable typed Go
+// representation to switch on the way the Anthropic SDK's errors do, so
+// status code is the only reliable signal. class is the envelope's own
+// "type" (falling back to "code") — a short machine classification, never
+// the free-text "message", which is never read here or included in any
+// returned error (hard rule 9, D-112).
 func mapOpenAICompatError(status int, body []byte) error {
 	var parsed openAIErrorResponse
 	_ = json.Unmarshal(body, &parsed)
-	msg := parsed.Error.Message
+	class := parsed.Error.Type
+	if class == "" {
+		class = parsed.Error.Code
+	}
 
 	switch status {
 	case http.StatusTooManyRequests:
-		return fmt.Errorf("ai: %w: %s", ErrRateLimited, msg)
+		return newStatusError(ErrRateLimited, status, class)
 	case http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound, http.StatusUnprocessableEntity:
-		return fmt.Errorf("ai: %w: %s", ErrBadRequest, msg)
+		return newStatusError(ErrBadRequest, status, class)
 	default:
-		return fmt.Errorf("ai: %w: status %d: %s", ErrProviderUnavailable, status, msg)
+		return newStatusError(ErrProviderUnavailable, status, class)
 	}
 }

@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/shopspring/decimal"
@@ -189,5 +191,177 @@ func TestOpenAICompatClient_Chat_errorStatusMapsToTypedError(t *testing.T) {
 				t.Fatalf("Usage.Provider = %q, want openai_compat even on error", resp.Usage.Provider)
 			}
 		})
+	}
+}
+
+func TestNewOpenAICompatClient_validatesBaseURL(t *testing.T) {
+	basePrices := Config{Provider: "openai_compat", Model: "test-model", PriceInputPerMTok: "2.00", PriceOutputPerMTok: "10.00"}
+
+	t.Run("https any host is accepted", func(t *testing.T) {
+		t.Setenv("AI_BASE_URL", "https://api.example.com/v1")
+		if _, err := newOpenAICompatClient(basePrices); err != nil {
+			t.Fatalf("newOpenAICompatClient(https) = %v, want nil", err)
+		}
+	})
+
+	for _, host := range []string{"http://localhost:11434/v1", "http://127.0.0.1:11434/v1", "http://[::1]:11434/v1"} {
+		t.Run("http loopback "+host+" is accepted", func(t *testing.T) {
+			t.Setenv("AI_BASE_URL", host)
+			if _, err := newOpenAICompatClient(basePrices); err != nil {
+				t.Fatalf("newOpenAICompatClient(%q) = %v, want nil", host, err)
+			}
+		})
+	}
+
+	t.Run("http on a non-loopback host is rejected", func(t *testing.T) {
+		t.Setenv("AI_BASE_URL", "http://ollama.internal.example.com:11434/v1")
+		_, err := newOpenAICompatClient(basePrices)
+		if !errors.Is(err, ErrBadRequest) {
+			t.Fatalf("newOpenAICompatClient(http non-loopback) = %v, want errors.Is(_, ErrBadRequest)", err)
+		}
+	})
+
+	t.Run("a scheme other than http/https is rejected", func(t *testing.T) {
+		t.Setenv("AI_BASE_URL", "ftp://localhost/v1")
+		_, err := newOpenAICompatClient(basePrices)
+		if !errors.Is(err, ErrBadRequest) {
+			t.Fatalf("newOpenAICompatClient(ftp) = %v, want errors.Is(_, ErrBadRequest)", err)
+		}
+	})
+
+	t.Run("a URL with no host is rejected", func(t *testing.T) {
+		t.Setenv("AI_BASE_URL", "/just/a/path")
+		_, err := newOpenAICompatClient(basePrices)
+		if !errors.Is(err, ErrBadRequest) {
+			t.Fatalf("newOpenAICompatClient(no host) = %v, want errors.Is(_, ErrBadRequest)", err)
+		}
+	})
+}
+
+func TestOpenAICompatClient_Chat_noMessagesIsBadRequest(t *testing.T) {
+	client := newTestOpenAICompatClient(t, "http://unused.invalid")
+	if _, err := client.Chat(context.Background(), Request{}); !errors.Is(err, ErrBadRequest) {
+		t.Fatalf("Chat(no messages) error = %v, want errors.Is(_, ErrBadRequest)", err)
+	}
+}
+
+func TestOpenAICompatClient_Chat_refusalViaFinishReason(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(openAIChatResponse{
+			Choices: []openAIChoice{{Message: openAIMessage{Content: "partial before filter"}, FinishReason: "content_filter"}},
+			Usage:   openAIUsage{PromptTokens: 12, CompletionTokens: 3},
+		})
+	}))
+	defer server.Close()
+
+	client := newTestOpenAICompatClient(t, server.URL)
+	resp, err := client.Chat(context.Background(), Request{Messages: []Message{{Role: RoleUser, Text: "hi"}}})
+	if !errors.Is(err, ErrRefused) {
+		t.Fatalf("Chat error = %v, want errors.Is(_, ErrRefused)", err)
+	}
+	if resp.Text != "" {
+		t.Fatalf("Text = %q, want empty on a content_filter finish_reason", resp.Text)
+	}
+	if resp.Usage.InputTokens != 12 || resp.Usage.OutputTokens != 3 {
+		t.Fatalf("Usage = %+v, want real usage kept on refusal (12/3)", resp.Usage)
+	}
+}
+
+func TestOpenAICompatClient_Chat_refusalViaRefusalField(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(openAIChatResponse{
+			Choices: []openAIChoice{{Message: openAIMessage{Refusal: "I can't help with that."}, FinishReason: "stop"}},
+			Usage:   openAIUsage{PromptTokens: 8, CompletionTokens: 2},
+		})
+	}))
+	defer server.Close()
+
+	client := newTestOpenAICompatClient(t, server.URL)
+	resp, err := client.Chat(context.Background(), Request{Messages: []Message{{Role: RoleUser, Text: "hi"}}})
+	if !errors.Is(err, ErrRefused) {
+		t.Fatalf("Chat error = %v, want errors.Is(_, ErrRefused)", err)
+	}
+	if resp.Text != "" || len(resp.ToolCalls) != 0 {
+		t.Fatalf("resp = %+v, want empty Text/ToolCalls on a non-empty refusal field", resp)
+	}
+}
+
+func TestOpenAICompatClient_Chat_skipsNonFunctionToolCallType(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{
+				"message": map[string]any{
+					"tool_calls": []map[string]any{
+						{"id": "call_1", "type": "function", "function": map[string]any{"name": "variant_availability", "arguments": `{"sku":"X"}`}},
+						{"id": "call_2", "type": "code_interpreter", "function": map[string]any{"name": "run", "arguments": `{}`}},
+					},
+				},
+				"finish_reason": "tool_calls",
+			}},
+		})
+	}))
+	defer server.Close()
+
+	client := newTestOpenAICompatClient(t, server.URL)
+	resp, err := client.Chat(context.Background(), Request{Messages: []Message{{Role: RoleUser, Text: "hi"}}})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	if len(resp.ToolCalls) != 1 || resp.ToolCalls[0].ID != "call_1" {
+		t.Fatalf("ToolCalls = %+v, want only the function-typed call_1", resp.ToolCalls)
+	}
+}
+
+func TestOpenAICompatClient_Chat_responseBodyTooLargeIsProviderUnavailable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// One byte over the 4 MiB bound.
+		_, _ = io.Copy(w, io.LimitReader(zeroReader{}, maxOpenAICompatResponseBytes+1))
+	}))
+	defer server.Close()
+
+	client := newTestOpenAICompatClient(t, server.URL)
+	_, err := client.Chat(context.Background(), Request{Messages: []Message{{Role: RoleUser, Text: "hi"}}})
+	if !errors.Is(err, ErrProviderUnavailable) {
+		t.Fatalf("Chat(oversized body) error = %v, want errors.Is(_, ErrProviderUnavailable)", err)
+	}
+}
+
+// zeroReader streams zero bytes forever, so the oversized-body test above
+// does not need to build a 4 MiB buffer by hand.
+type zeroReader struct{}
+
+func (zeroReader) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = '0'
+	}
+	return len(p), nil
+}
+
+func TestMapOpenAICompatError_neverEmbedsProviderMessage(t *testing.T) {
+	const marker = "MARKER-provider-said-your-card-is-declined-do-not-log-me"
+	body, _ := json.Marshal(openAIErrorResponse{Error: struct {
+		Message string `json:"message"`
+		Type    string `json:"type"`
+		Code    string `json:"code"`
+	}{Message: marker, Type: "rate_limit_error"}})
+
+	err := mapOpenAICompatError(http.StatusTooManyRequests, body)
+	if !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("mapOpenAICompatError = %v, want errors.Is(_, ErrRateLimited)", err)
+	}
+	if strings.Contains(err.Error(), marker) {
+		t.Fatalf("mapOpenAICompatError().Error() = %q, must never contain the provider's free-text message", err.Error())
+	}
+
+	var se *statusError
+	if !errors.As(err, &se) {
+		t.Fatalf("mapOpenAICompatError = %v, want a *statusError in the chain", err)
+	}
+	if se.HTTPStatus() != http.StatusTooManyRequests {
+		t.Fatalf("HTTPStatus() = %d, want %d", se.HTTPStatus(), http.StatusTooManyRequests)
 	}
 }

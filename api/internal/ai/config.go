@@ -93,3 +93,15 @@ func maxTokensOrDefault(requestMaxTokens, configMaxTokens int) int {
 	}
 	return DefaultMaxTokens
 }
+
+// clampNonNegative floors a token count at zero. Neither provider is
+// expected to ever report a negative count, but Usage.InputTokens/
+// OutputTokens feed directly into costEstimate and O-28's NUMERIC(10,6)
+// cost column, so a malformed provider response must never be able to
+// produce a negative cost estimate.
+func clampNonNegative(n int) int {
+	if n < 0 {
+		return 0
+	}
+	return n
+}

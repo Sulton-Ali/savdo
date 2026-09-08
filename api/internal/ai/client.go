@@ -12,6 +12,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 )
 
 // Role identifies whose turn a Message represents.
@@ -136,3 +137,55 @@ var (
 	// a transient condition.
 	ErrBadRequest = errors.New("ai: bad request")
 )
+
+// statusError pairs one of the sentinel errors above with the HTTP status a
+// provider returned and a short classification string — never the
+// provider's own free-text error message (hard rule 9, D-112). Both
+// mapAnthropicError (anthropic.go) and mapOpenAICompatError
+// (openai_compat.go) build one instead of losing the status inside a plain
+// fmt.Errorf, so logging.go can log it via errors.As without depending on
+// either provider's own error type.
+type statusError struct {
+	sentinel error
+	status   int
+	// class is a short machine classification (e.g. the provider's own
+	// "type" or "code" field) — safe to log, unlike a free-text message.
+	class string
+}
+
+func newStatusError(sentinel error, status int, class string) *statusError {
+	return &statusError{sentinel: sentinel, status: status, class: class}
+}
+
+func (e *statusError) Error() string {
+	if e.class == "" {
+		return fmt.Sprintf("%s: status %d", e.sentinel, e.status)
+	}
+	return fmt.Sprintf("%s: status %d: %s", e.sentinel, e.status, e.class)
+}
+
+// Unwrap lets errors.Is/errors.As resolve through to the sentinel.
+func (e *statusError) Unwrap() error { return e.sentinel }
+
+// HTTPStatus is read by logging.go (via errors.As) to log the status
+// without ever touching a provider's free-text message.
+func (e *statusError) HTTPStatus() int { return e.status }
+
+// errorClass maps err to a short classification string via errors.Is
+// against the sentinels above. logging.go uses this instead of ever logging
+// err.Error() directly, since an inner Client's error may embed a
+// provider's free-text message (hard rule 9, D-112).
+func errorClass(err error) string {
+	switch {
+	case errors.Is(err, ErrRateLimited):
+		return "rate_limited"
+	case errors.Is(err, ErrRefused):
+		return "refused"
+	case errors.Is(err, ErrBadRequest):
+		return "bad_request"
+	case errors.Is(err, ErrProviderUnavailable):
+		return "provider_unavailable"
+	default:
+		return "unknown"
+	}
+}

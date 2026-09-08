@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 )
 
@@ -36,7 +37,17 @@ func (l *loggedClient) Chat(ctx context.Context, req Request) (Response, error) 
 		"stop_reason", resp.StopReason,
 	}
 	if err != nil {
-		l.logger.ErrorContext(ctx, "ai chat", append(attrs, "error", err)...)
+		// Never resp err.Error() directly — an inner Client's error may
+		// embed a provider's own free-text message (hard rule 9, D-112).
+		// Only the errors.Is classification, plus the HTTP status when the
+		// error carries one (statusError, built by mapAnthropicError and
+		// mapOpenAICompatError), is safe to log.
+		errAttrs := append(attrs, "error_class", errorClass(err))
+		var se *statusError
+		if errors.As(err, &se) {
+			errAttrs = append(errAttrs, "http_status", se.HTTPStatus())
+		}
+		l.logger.ErrorContext(ctx, "ai chat", errAttrs...)
 		return resp, err
 	}
 	l.logger.InfoContext(ctx, "ai chat", attrs...)

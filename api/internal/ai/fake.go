@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 )
 
@@ -17,9 +18,15 @@ type FakeResult struct {
 // (the bot's tool-loop tests, once built) can script and assert against
 // it without a real provider.
 type Fake struct {
-	mu       sync.Mutex
-	results  []FakeResult
-	next     int
+	mu      sync.Mutex
+	results []FakeResult
+	next    int
+	// Requests holds every Request Chat has been called with, in order.
+	// It is kept exported for the common case — a single-threaded test
+	// that reads it only after every Chat call has returned — but reading
+	// it while another goroutine may still be calling Chat is a data race:
+	// the mutex below guards writes to it but a direct field read bypasses
+	// that guard. A concurrent test must use RecordedRequests instead.
 	Requests []Request
 }
 
@@ -42,4 +49,57 @@ func (f *Fake) Chat(_ context.Context, req Request) (Response, error) {
 	r := f.results[f.next]
 	f.next++
 	return r.Response, r.Err
+}
+
+// RecordedRequests returns a deep copy of every Request Chat has been
+// called with, in order — safe to call concurrently with further Chat
+// calls, unlike reading the Requests field directly (see its doc comment).
+// Each Request's slices (Messages, Tools, and their own nested ToolCalls/
+// ToolResults/InputSchema) are copied so a caller mutating the result can
+// never race with or corrupt Fake's own state.
+func (f *Fake) RecordedRequests() []Request {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	out := make([]Request, len(f.Requests))
+	for i, req := range f.Requests {
+		out[i] = deepCopyRequest(req)
+	}
+	return out
+}
+
+func deepCopyRequest(req Request) Request {
+	out := Request{System: req.System, MaxTokens: req.MaxTokens}
+	if req.Messages != nil {
+		out.Messages = make([]Message, len(req.Messages))
+		for i, m := range req.Messages {
+			out.Messages[i] = deepCopyMessage(m)
+		}
+	}
+	if req.Tools != nil {
+		out.Tools = make([]Tool, len(req.Tools))
+		for i, t := range req.Tools {
+			out.Tools[i] = Tool{
+				Name:        t.Name,
+				Description: t.Description,
+				InputSchema: append(json.RawMessage(nil), t.InputSchema...),
+			}
+		}
+	}
+	return out
+}
+
+func deepCopyMessage(m Message) Message {
+	out := Message{Role: m.Role, Text: m.Text}
+	if m.ToolCalls != nil {
+		out.ToolCalls = make([]ToolCall, len(m.ToolCalls))
+		for i, tc := range m.ToolCalls {
+			out.ToolCalls[i] = ToolCall{ID: tc.ID, Name: tc.Name, Input: append(json.RawMessage(nil), tc.Input...)}
+		}
+	}
+	if m.ToolResults != nil {
+		out.ToolResults = make([]ToolResult, len(m.ToolResults))
+		copy(out.ToolResults, m.ToolResults) // ToolResult holds only string/bool fields.
+	}
+	return out
 }

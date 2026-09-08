@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
 	"testing"
 )
@@ -68,5 +70,42 @@ func TestLogged_logsUsageOnError(t *testing.T) {
 	}
 	if !strings.Contains(logged, `"provider":"anthropic"`) {
 		t.Fatalf("log line = %s, want it to still carry provider on error", logged)
+	}
+}
+
+// TestLogged_neverLogsProviderErrorText is the D-112/hard-rule-9 regression
+// test: even when the wrapped Client's error embeds provider free-text (as
+// a buggy provider or a lower layer might), the log line must carry only
+// the errors.Is classification and, when available, the HTTP status — never
+// that text.
+func TestLogged_neverLogsProviderErrorText(t *testing.T) {
+	const marker = "MARKER-provider-said-your-card-is-declined-do-not-log-me"
+
+	statusErr := newStatusError(ErrRateLimited, http.StatusTooManyRequests, "rate_limit_error")
+	wrapped := fmt.Errorf("ai: openai_compat: %w: %s", statusErr, marker)
+
+	fake := NewFake(FakeResult{
+		Response: Response{Usage: Usage{Provider: "openai_compat", Model: "test-model", LatencyMs: 5, CostEstimate: "0.000000"}},
+		Err:      wrapped,
+	})
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, nil))
+	client := Logged(fake, logger)
+
+	_, err := client.Chat(context.Background(), Request{Messages: []Message{{Role: RoleUser, Text: "hi"}}})
+	if !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("Chat error = %v, want errors.Is(_, ErrRateLimited)", err)
+	}
+
+	logged := buf.String()
+	if strings.Contains(logged, marker) {
+		t.Fatalf("log line = %s, must never contain the provider's free-text message %q", logged, marker)
+	}
+	if !strings.Contains(logged, `"error_class":"rate_limited"`) {
+		t.Fatalf("log line = %s, want error_class=rate_limited", logged)
+	}
+	if !strings.Contains(logged, `"http_status":429`) {
+		t.Fatalf("log line = %s, want http_status=429", logged)
 	}
 }
