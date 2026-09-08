@@ -40,3 +40,32 @@ body {
   margin: 0;
   font-family: var(--savdo-font-family);
 }
+
+/* Keyboard-focus ring, site-wide (deliverable 4 — "focus-visible styles").
+ * Mouse/touch activation never triggers `:focus-visible`, so this never
+ * shows a ring on a click. */
+a:focus-visible,
+button:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--savdo-color-primary);
+  outline-offset: 2px;
+}
+
+/* Availability badge tones (`lib/availability.ts`'s `TONE_CLASS`) —
+ * calibrated light-background/dark-text pairs for WCAG AA contrast at
+ * badge text size, not the raw `--savdo-color-*` tokens (see that file's
+ * doc comment for the measured contrast). */
+.badge-success {
+  background-color: #dcfce7;
+  color: #166534;
+}
+
+.badge-warning {
+  background-color: #fef3c7;
+  color: #92400e;
+}
+
+.badge-danger {
+  background-color: #fee2e2;
+  color: #991b1b;
+}

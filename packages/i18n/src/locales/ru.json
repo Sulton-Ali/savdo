@@ -1025,12 +1025,21 @@
       "description": "Такой страницы не существует или она была перемещена.",
       "homeLink": "На главную"
     },
+    "nav": {
+      "home": "Главная",
+      "catalog": "Каталог",
+      "about": "О нас"
+    },
     "footer": {
       "rights": "© {{year}} {{shop}}"
+    },
+    "hero": {
+      "cta": "Смотреть каталог"
     },
     "home": {
       "categoriesTitle": "Категории",
       "featuredTitle": "Популярные товары",
+      "newProductsTitle": "Новинки",
       "hoursTitle": "Часы работы",
       "contactsTitle": "Контакты"
     },

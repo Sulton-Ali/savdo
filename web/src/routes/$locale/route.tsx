@@ -40,7 +40,7 @@ function LocaleLayout() {
     <I18nextProvider i18n={i18n}>
       <Header shopName={shop.name} locale={locale} />
       <Outlet />
-      <Footer shopName={shop.name} />
+      <Footer shopName={shop.name} locale={locale} blocks={shop.blocks} />
     </I18nextProvider>
   );
 }

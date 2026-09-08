@@ -73,7 +73,9 @@ function CategoryPage() {
     <main className="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-8">
       <h1 className="font-bold text-2xl text-text">{category.name}</h1>
       {items.length === 0 ? (
-        <p className="text-muted">{t("web.category.empty")}</p>
+        <p className="rounded-md border border-bg border-dashed px-4 py-10 text-center text-muted">
+          {t("web.category.empty")}
+        </p>
       ) : (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
           {items.map((product) => (
