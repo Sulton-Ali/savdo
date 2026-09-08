@@ -193,7 +193,7 @@ Low stock: reuse `GET /stock/low` (Phase 3, D-55).
 | GET | `/public/shop` | public | Returns { name, slug, currency, defaultLocale, locale, translationFallback, blocks: { hero, about, hours, contacts, social, seo } } with fallback; `hero.image` resolves to media URL when `imageMediaId` set |
 | GET | `/public/categories` | public | Active categories: slug, name, product count |
 | GET | `/public/products` | public | Query `category` (slug), `featured` (bool), `q`, `cursor`, `limit`; items: id, slug, name, coverImage, price, availability, categorySlug (nullable, O-22); newest first (D-92) |
-| GET | `/public/products/{slug}` | public | Full product with variants (availability, price), images, description |
+| GET | `/public/products/{slug}` | public | Full product with variants (availability, price), images, description; promo fields only while active (D-109) |
 
 Content blocks: `about.body` is plain text; renderers must escape it (never treat as HTML).
 
