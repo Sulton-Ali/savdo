@@ -200,12 +200,14 @@ function LocationPickerModal({
   onPick: (location: Location) => void;
 }) {
   const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <Pressable className="flex-1 justify-end bg-black/40" onPress={onClose}>
         <Pressable
           onPress={(event) => event.stopPropagation()}
           className="rounded-t-xl bg-card p-4"
+          style={{ paddingBottom: insets.bottom + 16 }}
         >
           <Text variant="h4" className="mb-2">
             {t("mobile.sale.location.title")}
