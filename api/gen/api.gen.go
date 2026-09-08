@@ -990,16 +990,20 @@ type ProductPatch struct {
 	UnitId       *openapi_types.UUID `json:"unitId,omitempty"`
 }
 
-// ProductPublic Defined now for Phase 6's public catalogue (D-32/D-34); no path references it yet. Only active products/variants are ever returned this way; variants carry `availability`, never cost or quantity (hard rule 4/5).
+// ProductPublic Response body for `GET /public/products/{slug}` (Phase 6, D-32/D-34). Only active products/variants are ever returned this way; variants carry `availability`, never cost or quantity (hard rule 4/5). A product with no category has `categoryId`/ `categorySlug`/`categoryName` all `null` (O-22); one whose category is inactive is `404 NOT_FOUND` instead.
 type ProductPublic struct {
 	// BasePrice money and quantities as decimal strings (ADR-007)
-	BasePrice   Decimal                               `json:"basePrice"`
-	CategoryId  nullable.Nullable[openapi_types.UUID] `json:"categoryId"`
-	Description nullable.Nullable[string]             `json:"description"`
-	Id          openapi_types.UUID                    `json:"id"`
-	Images      *[]ProductImage                       `json:"images,omitempty"`
-	IsActive    bool                                  `json:"isActive"`
-	IsFeatured  bool                                  `json:"isFeatured"`
+	BasePrice  Decimal                               `json:"basePrice"`
+	CategoryId nullable.Nullable[openapi_types.UUID] `json:"categoryId"`
+
+	// CategoryName Resolved for the caller's `Accept-Language`, same fallback as `name`.
+	CategoryName nullable.Nullable[string] `json:"categoryName"`
+	CategorySlug nullable.Nullable[string] `json:"categorySlug"`
+	Description  nullable.Nullable[string] `json:"description"`
+	Id           openapi_types.UUID        `json:"id"`
+	Images       *[]ProductImage           `json:"images,omitempty"`
+	IsActive     bool                      `json:"isActive"`
+	IsFeatured   bool                      `json:"isFeatured"`
 
 	// Locale A UI/data locale (ADR-012).
 	Locale Locale `json:"locale"`
@@ -1014,6 +1018,108 @@ type ProductPublic struct {
 	TranslationFallback bool                         `json:"translationFallback"`
 	UnitId              openapi_types.UUID           `json:"unitId"`
 	Variants            *[]VariantPublic             `json:"variants,omitempty"`
+}
+
+// PublicCategory One row of `GET /public/categories` (O-21).
+type PublicCategory struct {
+	Id openapi_types.UUID `json:"id"`
+
+	// Name Resolved for the caller's `Accept-Language`, falling back to `uz` then any locale (ADR-012).
+	Name string `json:"name"`
+
+	// ProductCount Active, non-deleted products in this category (O-20).
+	ProductCount int    `json:"productCount"`
+	Slug         string `json:"slug"`
+}
+
+// PublicCategoryList Flat envelope for `GET /public/categories` (not cursor-paginated — a shop has few categories).
+type PublicCategoryList struct {
+	Items []PublicCategory `json:"items"`
+}
+
+// PublicHero `PublicShop.blocks.hero` — `ContentHero`'s fields plus `image`, `imageMediaId` resolved to its `MediaUrls` set (O-21). `image` is absent when `imageMediaId` is unset or names media that no longer exists.
+type PublicHero struct {
+	Image        *MediaUrls          `json:"image,omitempty"`
+	ImageMediaId *openapi_types.UUID `json:"imageMediaId,omitempty"`
+	Tagline      *string             `json:"tagline,omitempty"`
+	Title        string              `json:"title"`
+}
+
+// PublicPrice D-67/D-68 effective price, resolved server-side (Phase 6): a promo replaces the price entirely on every calendar day in the shop's timezone from `promoFrom`'s date to `promoTo`'s date inclusive, it is never combined with a price override.
+type PublicPrice struct {
+	// Current What a customer pays right now — the product `promoPrice` when `promoActive`, else `regular`.
+	Current     Decimal `json:"current"`
+	PromoActive bool    `json:"promoActive"`
+
+	// Regular The non-promo price (variant `priceOverride` when set, else the product `basePrice`).
+	Regular Decimal `json:"regular"`
+}
+
+// PublicProductList Cursor-paginated envelope for `GET /public/products`, newest first (D-92).
+type PublicProductList struct {
+	Items      []PublicProductListItem   `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"nextCursor"`
+}
+
+// PublicProductListItem One row of `GET /public/products` (O-21/O-22).
+type PublicProductListItem struct {
+	// Availability The best availability among the product's active variants (O-20).
+	Availability Availability `json:"availability"`
+
+	// CategorySlug `null` for an uncategorized product (O-22).
+	CategorySlug nullable.Nullable[string] `json:"categorySlug"`
+
+	// CoverImage The image flagged `isCover`, else the first by position, else absent (D-83).
+	CoverImage *ProductImage      `json:"coverImage,omitempty"`
+	Id         openapi_types.UUID `json:"id"`
+
+	// Name Resolved for the caller's `Accept-Language`, falling back to `uz` then any locale (ADR-012).
+	Name string `json:"name"`
+
+	// Price Product-level (`basePrice`/`promoPrice`), not per-variant — see `GET /public/products/{slug}` for per-variant pricing.
+	Price PublicPrice `json:"price"`
+	Slug  string      `json:"slug"`
+}
+
+// PublicShop Response body for `GET /public/shop` (O-21).
+type PublicShop struct {
+	// Blocks Each of the six landing sections (D-99), absent when that key has no saved content in any locale (D-104) — never present-but-empty.
+	Blocks PublicShopBlocks `json:"blocks"`
+
+	// Currency ISO 4217 currency code (ADR-007). `UZS` in MVP.
+	Currency string `json:"currency"`
+
+	// DefaultLocale A UI/data locale (ADR-012).
+	DefaultLocale Locale `json:"defaultLocale"`
+
+	// Locale The locale this response was resolved for (requested `Accept-Language`, falling back to `defaultLocale`).
+	Locale Locale `json:"locale"`
+	Name   string `json:"name"`
+	Slug   string `json:"slug"`
+
+	// TranslationFallback `true` when any block in `blocks` fell back to `uz` (D-104).
+	TranslationFallback bool `json:"translationFallback"`
+}
+
+// PublicShopBlocks Each of the six landing sections (D-99), absent when that key has no saved content in any locale (D-104) — never present-but-empty.
+type PublicShopBlocks struct {
+	// About O-19 shape for `key: about`. See `ContentHero`'s description for why this is unreferenced by any path.
+	About *ContentAbout `json:"about,omitempty"`
+
+	// Contacts O-19 shape for `key: contacts`. See `ContentHero`'s description for why this is unreferenced by any path.
+	Contacts *ContentContacts `json:"contacts,omitempty"`
+
+	// Hero `PublicShop.blocks.hero` — `ContentHero`'s fields plus `image`, `imageMediaId` resolved to its `MediaUrls` set (O-21). `image` is absent when `imageMediaId` is unset or names media that no longer exists.
+	Hero *PublicHero `json:"hero,omitempty"`
+
+	// Hours O-19/D-107 shape for `key: hours`. See `ContentHero`'s description for why this is unreferenced by any path. `days` must have exactly 7 rows, one per distinct weekday (validated in Go — JSON Schema's `minItems`/`maxItems` catch the count but not the "distinct, all seven" rule).
+	Hours *ContentHours `json:"hours,omitempty"`
+
+	// Seo O-19 shape for `key: seo`. See `ContentHero`'s description for why this is unreferenced by any path.
+	Seo *ContentSeo `json:"seo,omitempty"`
+
+	// Social O-19 shape for `key: social`. See `ContentHero`'s description for why this is unreferenced by any path.
+	Social *ContentSocial `json:"social,omitempty"`
 }
 
 // Purchase `number` and `totalCost` are server-computed, never client-supplied (D-45, hard rule 8).
@@ -1779,15 +1885,18 @@ type VariantPatch struct {
 	Sku           nullable.Nullable[string] `json:"sku,omitempty"`
 }
 
-// VariantPublic Defined now for Phase 6's public catalogue (D-32/D-34); no path references it yet. No cost, no `isActive` (only active variants are ever returned publicly); `availability` replaces any quantity (hard rule 4/5).
+// VariantPublic Referenced by `GET /public/products/{slug}` (Phase 6, D-32/D-34). No cost, no `isActive` (only active variants are ever returned publicly); `availability` replaces any quantity (hard rule 4/5).
 type VariantPublic struct {
 	// Attributes A variant's attribute values, keyed by `attribute_definitions.code` (e.g. `{"size": "L", "color": "blue"}`, D-32).
 	Attributes AttributeValues `json:"attributes"`
 
 	// Availability Public/bot-facing stock signal — never a quantity (ADR-010, hard rule 4/5).
-	Availability  Availability              `json:"availability"`
-	Barcode       nullable.Nullable[string] `json:"barcode"`
-	Id            openapi_types.UUID        `json:"id"`
+	Availability Availability              `json:"availability"`
+	Barcode      nullable.Nullable[string] `json:"barcode"`
+	Id           openapi_types.UUID        `json:"id"`
+
+	// Price D-67/D-68 effective price, resolved server-side (Phase 6): a promo replaces the price entirely on every calendar day in the shop's timezone from `promoFrom`'s date to `promoTo`'s date inclusive, it is never combined with a price override.
+	Price         PublicPrice               `json:"price"`
 	PriceOverride nullable.Nullable[string] `json:"priceOverride"`
 	Sku           nullable.Nullable[string] `json:"sku"`
 }
@@ -1866,6 +1975,22 @@ type ListProductsParams struct {
 	Q               *string             `form:"q,omitempty" json:"q,omitempty"`
 	CategoryId      *openapi_types.UUID `form:"categoryId,omitempty" json:"categoryId,omitempty"`
 	IncludeInactive *bool               `form:"includeInactive,omitempty" json:"includeInactive,omitempty"`
+
+	// Limit Maximum number of items to return.
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque cursor from a previous page's `nextCursor`.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// ListPublicProductsParams defines parameters for ListPublicProducts.
+type ListPublicProductsParams struct {
+	// Category Filter to one category's slug.
+	Category *string `form:"category,omitempty" json:"category,omitempty"`
+	Featured *bool   `form:"featured,omitempty" json:"featured,omitempty"`
+
+	// Q Free-text search over product name (Postgres ILIKE/trigram).
+	Q *string `form:"q,omitempty" json:"q,omitempty"`
 
 	// Limit Maximum number of items to return.
 	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
@@ -2243,6 +2368,18 @@ type ServerInterface interface {
 	// CreateVariant Add a variant to a product.
 	// (POST /products/{id}/variants)
 	CreateVariant(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
+	// ListPublicCategories Active categories with their public product count.
+	// (GET /public/categories)
+	ListPublicCategories(w http.ResponseWriter, r *http.Request)
+	// ListPublicProducts Browse the public catalogue.
+	// (GET /public/products)
+	ListPublicProducts(w http.ResponseWriter, r *http.Request, params ListPublicProductsParams)
+	// GetPublicProductBySlug One public product by slug.
+	// (GET /public/products/{slug})
+	GetPublicProductBySlug(w http.ResponseWriter, r *http.Request, slug string)
+	// GetPublicShop Shop identity and landing content blocks.
+	// (GET /public/shop)
+	GetPublicShop(w http.ResponseWriter, r *http.Request)
 	// ListPurchases List the shop's purchases.
 	// (GET /purchases)
 	ListPurchases(w http.ResponseWriter, r *http.Request, params ListPurchasesParams)
@@ -3323,6 +3460,145 @@ func (siw *ServerInterfaceWrapper) CreateVariant(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreateVariant(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListPublicCategories operation middleware
+func (siw *ServerInterfaceWrapper) ListPublicCategories(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListPublicCategories(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListPublicProducts operation middleware
+func (siw *ServerInterfaceWrapper) ListPublicProducts(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListPublicProductsParams
+
+	// ------------- Optional query parameter "category" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "category", r.URL.Query(), &params.Category, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "category"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "category", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "featured" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "featured", r.URL.Query(), &params.Featured, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "featured"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "featured", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "q" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "q", r.URL.Query(), &params.Q, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "q"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "q", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListPublicProducts(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPublicProductBySlug operation middleware
+func (siw *ServerInterfaceWrapper) GetPublicProductBySlug(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "slug" -------------
+	var slug string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "slug", r.PathValue("slug"), &slug, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "slug", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPublicProductBySlug(w, r, slug)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPublicShop operation middleware
+func (siw *ServerInterfaceWrapper) GetPublicShop(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPublicShop(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -5034,6 +5310,10 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/reports/sales/by-product", wrapper.ListSalesByProduct)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/content/{key}", wrapper.GetContent)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/content/{key}", wrapper.PutContent)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/public/shop", wrapper.GetPublicShop)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/public/categories", wrapper.ListPublicCategories)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/public/products", wrapper.ListPublicProducts)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/public/products/{slug}", wrapper.GetPublicProductBySlug)
 
 	return m
 }
@@ -7366,6 +7646,162 @@ func (response CreateVariant409JSONResponse) VisitCreateVariantResponse(w http.R
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListPublicCategoriesRequestObject struct {
+}
+
+type ListPublicCategoriesResponseObject interface {
+	VisitListPublicCategoriesResponse(w http.ResponseWriter) error
+}
+
+type ListPublicCategories200JSONResponse PublicCategoryList
+
+func (response ListPublicCategories200JSONResponse) VisitListPublicCategoriesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListPublicCategories404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListPublicCategories404JSONResponse) VisitListPublicCategoriesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListPublicProductsRequestObject struct {
+	Params ListPublicProductsParams
+}
+
+type ListPublicProductsResponseObject interface {
+	VisitListPublicProductsResponse(w http.ResponseWriter) error
+}
+
+type ListPublicProducts200JSONResponse PublicProductList
+
+func (response ListPublicProducts200JSONResponse) VisitListPublicProductsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListPublicProducts400JSONResponse struct{ ValidationFailedJSONResponse }
+
+func (response ListPublicProducts400JSONResponse) VisitListPublicProductsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListPublicProducts404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListPublicProducts404JSONResponse) VisitListPublicProductsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPublicProductBySlugRequestObject struct {
+	Slug string `json:"slug"`
+}
+
+type GetPublicProductBySlugResponseObject interface {
+	VisitGetPublicProductBySlugResponse(w http.ResponseWriter) error
+}
+
+type GetPublicProductBySlug200JSONResponse ProductPublic
+
+func (response GetPublicProductBySlug200JSONResponse) VisitGetPublicProductBySlugResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPublicProductBySlug404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetPublicProductBySlug404JSONResponse) VisitGetPublicProductBySlugResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPublicShopRequestObject struct {
+}
+
+type GetPublicShopResponseObject interface {
+	VisitGetPublicShopResponse(w http.ResponseWriter) error
+}
+
+type GetPublicShop200JSONResponse PublicShop
+
+func (response GetPublicShop200JSONResponse) VisitGetPublicShopResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPublicShop404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetPublicShop404JSONResponse) VisitGetPublicShopResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -10145,6 +10581,18 @@ type StrictServerInterface interface {
 	// CreateVariant Add a variant to a product.
 	// (POST /products/{id}/variants)
 	CreateVariant(ctx context.Context, request CreateVariantRequestObject) (CreateVariantResponseObject, error)
+	// ListPublicCategories Active categories with their public product count.
+	// (GET /public/categories)
+	ListPublicCategories(ctx context.Context, request ListPublicCategoriesRequestObject) (ListPublicCategoriesResponseObject, error)
+	// ListPublicProducts Browse the public catalogue.
+	// (GET /public/products)
+	ListPublicProducts(ctx context.Context, request ListPublicProductsRequestObject) (ListPublicProductsResponseObject, error)
+	// GetPublicProductBySlug One public product by slug.
+	// (GET /public/products/{slug})
+	GetPublicProductBySlug(ctx context.Context, request GetPublicProductBySlugRequestObject) (GetPublicProductBySlugResponseObject, error)
+	// GetPublicShop Shop identity and landing content blocks.
+	// (GET /public/shop)
+	GetPublicShop(ctx context.Context, request GetPublicShopRequestObject) (GetPublicShopResponseObject, error)
 	// ListPurchases List the shop's purchases.
 	// (GET /purchases)
 	ListPurchases(ctx context.Context, request ListPurchasesRequestObject) (ListPurchasesResponseObject, error)
@@ -11331,6 +11779,106 @@ func (sh *strictHandler) CreateVariant(w http.ResponseWriter, r *http.Request, i
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(CreateVariantResponseObject); ok {
 		if err := validResponse.VisitCreateVariantResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListPublicCategories operation middleware
+func (sh *strictHandler) ListPublicCategories(w http.ResponseWriter, r *http.Request) {
+	var request ListPublicCategoriesRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListPublicCategories(ctx, request.(ListPublicCategoriesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListPublicCategories")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListPublicCategoriesResponseObject); ok {
+		if err := validResponse.VisitListPublicCategoriesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListPublicProducts operation middleware
+func (sh *strictHandler) ListPublicProducts(w http.ResponseWriter, r *http.Request, params ListPublicProductsParams) {
+	var request ListPublicProductsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListPublicProducts(ctx, request.(ListPublicProductsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListPublicProducts")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListPublicProductsResponseObject); ok {
+		if err := validResponse.VisitListPublicProductsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetPublicProductBySlug operation middleware
+func (sh *strictHandler) GetPublicProductBySlug(w http.ResponseWriter, r *http.Request, slug string) {
+	var request GetPublicProductBySlugRequestObject
+
+	request.Slug = slug
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetPublicProductBySlug(ctx, request.(GetPublicProductBySlugRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetPublicProductBySlug")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetPublicProductBySlugResponseObject); ok {
+		if err := validResponse.VisitGetPublicProductBySlugResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetPublicShop operation middleware
+func (sh *strictHandler) GetPublicShop(w http.ResponseWriter, r *http.Request) {
+	var request GetPublicShopRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetPublicShop(ctx, request.(GetPublicShopRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetPublicShop")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetPublicShopResponseObject); ok {
+		if err := validResponse.VisitGetPublicShopResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
