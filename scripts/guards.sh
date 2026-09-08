@@ -85,4 +85,22 @@ else
   check_fail "fetch() found outside packages/api-client:$fetch_hits"
 fi
 
+# 6. internal/ai (the LLM adapter, ADR-009) may only be imported by
+# internal/bot (the one caller allowed to call an LLM, hard rule 12) and
+# the cmd binaries that wire it in (cmd/bot, cmd/api's webhook wiring).
+# internal/ai's own external test package (live_test.go) importing itself
+# is expected, not a boundary violation.
+ai_import_hits="$(grep -rlE '"github.com/Sulton-Ali/savdo/api/internal/ai"' --include='*.go' api 2>/dev/null || true)"
+if [ -z "$ai_import_hits" ]; then
+  check_pass "internal/ai import boundary (no importers found)"
+else
+  bad_ai_hits="$(printf '%s\n' "$ai_import_hits" | grep -vE '^api/internal/bot/|^api/cmd/|^api/internal/ai/' || true)"
+  if [ -z "$bad_ai_hits" ]; then
+    check_pass "internal/ai imported only by internal/bot and cmd/* wiring"
+  else
+    check_fail "internal/ai imported outside internal/bot and cmd/* wiring:
+$bad_ai_hits"
+  fi
+fi
+
 exit $failed
