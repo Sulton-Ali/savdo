@@ -7,6 +7,7 @@ import (
 
 	"github.com/Sulton-Ali/savdo/api/gen"
 	"github.com/Sulton-Ali/savdo/api/internal/auth"
+	"github.com/Sulton-Ali/savdo/api/internal/bot"
 	"github.com/Sulton-Ali/savdo/api/internal/catalog"
 	"github.com/Sulton-Ali/savdo/api/internal/content"
 	"github.com/Sulton-Ali/savdo/api/internal/crm"
@@ -27,14 +28,15 @@ import (
 // product-image operations, crm's five `/suppliers` operations, stock's
 // `/stock/*` and `/purchases*` operations, reports' two
 // `/reports/sales/*` operations, sales' GetSale/ListSales and content's
-// GetContent/PutContent are forwarded to their named *shop.Handler /
-// *media.Handler / *catalog.Handler / *crm.Handler / *stock.Handler /
-// *reports.Handler / *sales.Handler / *content.Handler fields (shop.go,
-// media.go, catalog.go, crm.go, stock.go, purchases.go, reports.go,
-// sales.go, content.go) — named, not embedded, because every one of these
-// handler types is called "Handler" and an anonymous field's name is its
-// type name, so embedding more than one would collide; GetHealthz/GetReadyz
-// are defined directly on server (below and in readyz.go).
+// GetContent/PutContent and bot's `/bot/*` operations are forwarded to
+// their named *shop.Handler / *media.Handler / *catalog.Handler /
+// *crm.Handler / *stock.Handler / *reports.Handler / *sales.Handler /
+// *content.Handler / *bot.Handler fields (shop.go, media.go, catalog.go,
+// crm.go, stock.go, purchases.go, reports.go, sales.go, content.go,
+// bot.go) — named, not embedded, because every one of these handler types
+// is called "Handler" and an anonymous field's name is its type name, so
+// embedding more than one would collide; GetHealthz/GetReadyz are defined
+// directly on server (below and in readyz.go).
 // CreateStockAdjustment, ReceivePurchase and CreateSale are the three
 // operations server implements itself rather than forwarding
 // (stock.go's/purchases.go's/sales.go's own doc comments): they need pool
@@ -57,6 +59,7 @@ type server struct {
 	sales   *sales.Handler
 	content *content.Handler
 	public  *public.Handler
+	bot     *bot.Handler
 }
 
 // GetHealthz reports the process is up. It does not touch the database —

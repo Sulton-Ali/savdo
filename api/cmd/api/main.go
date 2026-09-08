@@ -12,9 +12,12 @@ import (
 	"syscall"
 	"time"
 
+	telegram "github.com/go-telegram/bot"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/Sulton-Ali/savdo/api/internal/ai"
 	"github.com/Sulton-Ali/savdo/api/internal/auth"
+	"github.com/Sulton-Ali/savdo/api/internal/bot"
 	"github.com/Sulton-Ali/savdo/api/internal/catalog"
 	"github.com/Sulton-Ali/savdo/api/internal/config"
 	"github.com/Sulton-Ali/savdo/api/internal/content"
@@ -145,9 +148,57 @@ func run() error {
 		devMedia = media.DevHandler(mediaStorage)
 	}
 
+	// botSvc backs the two admin `/bot/conversations*` operations
+	// unconditionally (they only ever touch the database, never
+	// Telegram/the LLM) and `POST /bot/webhook/{secret}` only once the
+	// owner sets BOT_WEBHOOK_SECRET (Phase 7 ships polling only via
+	// cmd/bot, docs/00-DECISIONS.md D-114's own note; the default empty
+	// secret makes that route 404 for every request regardless of
+	// whether aiClient/botSender below are fully wired). aiClient is
+	// built the same way cmd/bot/main.go builds its own — a config
+	// error (a bad AI_PROVIDER/AI_PRICE_* value) fails startup the same
+	// way an unreachable database does, since it is a real
+	// misconfiguration, not "the bot isn't set up yet".
+	aiClient, err := ai.New(ai.Config{
+		Provider: cfg.AIProvider, Model: cfg.AIModel,
+		PriceInputPerMTok: cfg.AIPriceInputPerMTok, PriceOutputPerMTok: cfg.AIPriceOutputPerMTok,
+	})
+	if err != nil {
+		return fmt.Errorf("init ai client: %w", err)
+	}
+	// botShopRow resolves PUBLIC_SHOP_SLUG (bot.Config.ShopID's own doc
+	// comment: the bot answers for the same shop the public landing
+	// does) — best-effort like publicSvc.WarmShop above: a bad
+	// PUBLIC_SHOP_SLUG only degrades /bot/webhook/*, which is unreachable
+	// anyway until BOT_WEBHOOK_SECRET is set, never the whole API.
+	botShopRow, err := queries.GetShopBySlug(ctx, cfg.PublicShopSlug)
+	if err != nil {
+		logger.Warn("PUBLIC_SHOP_SLUG did not resolve to a shop; POST /bot/webhook/* will error until fixed",
+			"slug", cfg.PublicShopSlug, "error", err)
+	}
+	// botSender only does outgoing Telegram Bot API calls (send message/
+	// photo) — cmd/api never polls or registers a webhook itself
+	// (cmd/bot's own doc comment: "polling stays in cmd/bot"). Built
+	// with WithSkipGetMe so an unreachable/invalid TELEGRAM_BOT_TOKEN
+	// degrades only the not-yet-enabled webhook route, never cmd/api's
+	// own startup, unlike cmd/bot's own readiness check (main.go there),
+	// which must fail fast because sending replies is its only job.
+	var botSender bot.Sender
+	if cfg.TelegramBotToken != "" {
+		tgBot, err := telegram.New(cfg.TelegramBotToken, telegram.WithSkipGetMe())
+		if err != nil {
+			logger.Warn("failed to init the Telegram Bot API client; POST /bot/webhook/* will fail to send replies until fixed", "error", err)
+		} else {
+			botSender = bot.TelegramSender{Bot: tgBot}
+		}
+	}
+	botSvc := bot.NewService(pool, queries, aiClient, public.NewHandler(publicSvc), contentSvc, botSender, nil,
+		bot.Config{ShopID: botShopRow.ID, SiteURL: cfg.SiteURL}, nil, logger)
+
 	srv := &http.Server{
-		Addr:              cfg.Addr,
-		Handler:           httpx.NewRouter(logger, pool, authSvc, shopSvc, mediaSvc, devMedia, catalogSvc, stockSvc, crmSvc, reportsSvc, salesSvc, contentSvc, publicSvc),
+		Addr: cfg.Addr,
+		Handler: httpx.NewRouter(logger, pool, authSvc, shopSvc, mediaSvc, devMedia, catalogSvc, stockSvc, crmSvc, reportsSvc, salesSvc, contentSvc, publicSvc,
+			botSvc, cfg.BotWebhookSecret),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      15 * time.Second,
