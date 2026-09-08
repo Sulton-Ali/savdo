@@ -1099,7 +1099,7 @@ export interface paths {
         };
         /**
          * Active categories with their public product count.
-         * @description No auth. Not cursor-paginated (a shop has few categories). `productCount` counts only active, non-deleted products in that category (O-20). Cached 60 s per resolved locale.
+         * @description No auth. Not cursor-paginated (a shop has few categories). `productCount` counts active, non-deleted products in the category itself and, for a parent, in every one of its active, non-deleted descendants too (T7) — see `PublicCategory`. Sort order is stable: parents sort immediately before their own children (by `sortOrder` then slug at each level), so the flat `items` array can be grouped by `parentSlug` without a second pass. Cached 60 s per resolved locale.
          */
         get: operations["listPublicCategories"];
         put?: never;
@@ -1613,14 +1613,18 @@ export interface components {
             translationFallback: boolean;
             blocks: components["schemas"]["PublicShopBlocks"];
         };
-        /** @description One row of `GET /public/categories` (O-21). */
+        /** @description One row of `GET /public/categories` (O-21, T7). `parentSlug`/ `parentName` are both `null` for a top-level (root) category, and set for a child, letting the web group children under their parent without a second call. */
         PublicCategory: {
             /** Format: uuid */
             id: string;
             slug: string;
             /** @description Resolved for the caller's `Accept-Language`, falling back to `uz` then any locale (ADR-012). */
             name: string;
-            /** @description Active, non-deleted products in this category (O-20). */
+            /** @description The immediate parent category's slug, or `null` for a root category (T7). */
+            parentSlug: string | null;
+            /** @description The immediate parent category's name, same locale fallback as `name`, or `null` for a root category (T7). */
+            parentName: string | null;
+            /** @description Active, non-deleted products in this category and, for a parent category, in every one of its active, non-deleted descendants too (T7) — a pure grouping category with no products of its own reports its children's total. */
             productCount: number;
         };
         /** @description Flat envelope for `GET /public/categories` (not cursor-paginated — a shop has few categories). */
@@ -4709,7 +4713,7 @@ export interface operations {
     listPublicProducts: {
         parameters: {
             query?: {
-                /** @description Filter to one category's slug. */
+                /** @description Filter to one category's slug. Matches products in that category AND in every one of its active, non-deleted descendant categories (T7) — filtering by a parent slug (e.g. "erkaklar") includes its children's products. */
                 category?: string;
                 featured?: boolean;
                 /** @description Free-text search over product name (Postgres ILIKE/trigram). */
