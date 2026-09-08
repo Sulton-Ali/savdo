@@ -1,7 +1,7 @@
 import { displayPrice, type PriceLike } from "../lib/money";
 
-export function PriceTag({ price }: { price: PriceLike }) {
-  const { current, strikethrough } = displayPrice(price);
+export function PriceTag({ price, currency }: { price: PriceLike; currency: string }) {
+  const { current, strikethrough } = displayPrice(price, currency);
   return (
     <span className="flex items-baseline gap-2">
       <span className="font-semibold text-text">{current}</span>

@@ -27,6 +27,7 @@ export const Route = createFileRoute("/$locale/p/$slug")({
 
 function ProductPage() {
   const { t } = useTranslation();
+  const { shop } = Route.useRouteContext();
   const product = Route.useLoaderData();
   const images = product.images ?? [];
   const [activeImage, setActiveImage] = useState(0);
@@ -58,8 +59,9 @@ function ProductPage() {
 
         {product.description != null && product.description !== "" && (
           <div className="flex flex-col gap-2 text-text">
-            {splitParagraphs(product.description).map((paragraph) => (
-              <p key={paragraph} className="whitespace-pre-line">
+            {splitParagraphs(product.description).map((paragraph, index) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: a static, never-reordered list of paragraphs split from one string (per review).
+              <p key={index} className="whitespace-pre-line">
                 {paragraph}
               </p>
             ))}
@@ -85,7 +87,7 @@ function ProductPage() {
                       )
                       .join(", ")}
                   </span>
-                  <PriceTag price={variant.price} />
+                  <PriceTag price={variant.price} currency={shop.currency} />
                   <AvailabilityBadge value={variant.availability} />
                 </li>
               ))}

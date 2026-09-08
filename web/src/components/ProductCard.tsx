@@ -11,9 +11,11 @@ type PublicProductListItem = components["schemas"]["PublicProductListItem"];
 export function ProductCard({
   product,
   locale,
+  currency,
 }: {
   product: PublicProductListItem;
   locale: Locale;
+  currency: string;
 }) {
   return (
     <Link
@@ -23,7 +25,7 @@ export function ProductCard({
     >
       <CoverImage image={product.coverImage?.urls} size="card" alt={product.name} />
       <span className="font-medium text-text">{product.name}</span>
-      <PriceTag price={product.price} />
+      <PriceTag price={product.price} currency={currency} />
       <AvailabilityBadge value={product.availability} />
     </Link>
   );

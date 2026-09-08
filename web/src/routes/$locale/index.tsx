@@ -57,7 +57,12 @@ function HomePage() {
           <h2 className="mb-4 font-semibold text-text text-xl">{t("web.home.featuredTitle")}</h2>
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
             {featured.items.map((product) => (
-              <ProductCard key={product.id} product={product} locale={locale} />
+              <ProductCard
+                key={product.id}
+                product={product}
+                locale={locale}
+                currency={shop.currency}
+              />
             ))}
           </div>
         </section>

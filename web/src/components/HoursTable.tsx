@@ -1,7 +1,7 @@
 import type { components } from "@savdo/api-client";
 import { useTranslation } from "react-i18next";
 
-import { formatHoursRange, weekdayTranslationKey } from "../lib/hours";
+import { formatHoursRange, sortHoursDays, weekdayTranslationKey } from "../lib/hours";
 
 type ContentHours = components["schemas"]["ContentHours"];
 
@@ -11,7 +11,7 @@ export function HoursTable({ hours }: { hours: ContentHours }) {
     <div>
       <table className="w-full text-sm">
         <tbody>
-          {hours.days.map((day) => {
+          {sortHoursDays(hours.days).map((day) => {
             const range = formatHoursRange(day);
             return (
               <tr key={day.day} className="border-bg border-t first:border-t-0">

@@ -29,7 +29,7 @@ export const Route = createFileRoute("/$locale/c/$slug")({
 
 function CategoryPage() {
   const { t } = useTranslation();
-  const { locale } = Route.useRouteContext();
+  const { locale, shop } = Route.useRouteContext();
   const { slug } = Route.useParams();
   const { category, products } = Route.useLoaderData();
   const loadMore = useServerFn(listPublicProducts);
@@ -60,7 +60,12 @@ function CategoryPage() {
       ) : (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
           {items.map((product) => (
-            <ProductCard key={product.id} product={product} locale={locale} />
+            <ProductCard
+              key={product.id}
+              product={product}
+              locale={locale}
+              currency={shop.currency}
+            />
           ))}
         </div>
       )}
