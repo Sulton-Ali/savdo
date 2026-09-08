@@ -91,13 +91,10 @@ api:
 	@set -a; . infra/.env; set +a; \
 	cd api && go run ./cmd/api
 
-## bot: run the Telegram bot.
+## bot: run the Telegram bot (long polling, Phase 7).
 bot:
-	@if [ -d api/cmd/bot ]; then \
-		cd api && go run ./cmd/bot; \
-	else \
-		echo "skip: cmd/bot not implemented yet (Phase 7)"; \
-	fi
+	@set -a; . infra/.env; set +a; \
+	cd api && go run ./cmd/bot
 
 ## apk: build the local Android release APK (D-72; needs the Android SDK + JDK 21 — see 07-DEVOPS.md).
 apk:
