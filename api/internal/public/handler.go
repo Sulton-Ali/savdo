@@ -234,17 +234,12 @@ func (h *Handler) coverImages(ctx context.Context, shopID uuid.UUID, ids []uuid.
 // listAvailability batches per-variant qty/threshold for a whole page of
 // product ids in one query (SumVariantQtyForProducts), grouped by
 // product id — ListPublicProducts.availability is then
-// bestAvailability(...) of each product's group. This does not filter
-// SumVariantQtyForProducts' rows to active variants — that query has no
-// is_active column to filter on (it exists only to answer "does this
-// product/page have any stock at all", stock.sql.go's own doc comment)
-// and there is no batched query that pairs qty with is_active per
-// variant across a whole page without an N+1 — so a product whose only
-// in-stock row belongs to an inactive variant can show a slightly
-// optimistic list-level availability; GET /public/products/{slug} (which
-// does have per-variant is_active, via ListVariantsForCashier) is exact.
-// Flagged in the T3 report as a follow-up worth a dedicated query if this
-// precision ever matters.
+// bestAvailability(...) of each product's group. SumVariantQtyForProducts
+// itself filters to active, non-deleted variants (its own doc comment,
+// stock.sql), so a product whose only in-stock variant has since been
+// deactivated contributes no row here — bestAvailability's empty-input
+// fallback (out_of_stock) then agrees with GET /public/products/{slug}'s
+// own empty `variants` array for the same product (O-20).
 func (h *Handler) listAvailability(ctx context.Context, shopID uuid.UUID, ids []uuid.UUID) (map[uuid.UUID][]gen.Availability, error) {
 	out := make(map[uuid.UUID][]gen.Availability, len(ids))
 	if len(ids) == 0 {

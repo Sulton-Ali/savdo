@@ -557,6 +557,7 @@ LEFT JOIN locations l ON l.id = sl.location_id AND l.shop_id = pv.shop_id
 WHERE pv.shop_id = $1
     AND pv.product_id = $2
     AND pv.deleted_at IS NULL
+    AND pv.is_active
 GROUP BY pv.id, p.low_stock_threshold, s.low_stock_threshold
 `
 
@@ -579,10 +580,17 @@ type SumVariantQtyByProductRow struct {
 // means untracked, not necessarily low/out" reasoning ListLow's own doc
 // comment uses — unlike ListLow, these do not require at least one
 // stock_levels row to exist, since "does this product/page have any
-// availability data at all" needs every variant represented, tracked or
-// not. The threshold returned is the product's own low_stock_threshold
-// override, else the shop's default (D-44) — there is no per-variant
-// threshold column.
+// availability data at all" needs every ACTIVE variant represented,
+// tracked or not. Both filter pv.is_active (O-20: "only active variants"
+// — a product whose only in-stock variant has since been deactivated
+// must not read as available): a product with zero active variants
+// simply has zero rows here, and every caller's fold of "no rows" is
+// out_of_stock (public.bestAvailability's empty-input default, and
+// GET /public/products/{slug}'s own empty `variants` array for the same
+// product) — the two endpoints agree without either one special-casing
+// "no active variants" itself. The threshold returned is the product's
+// own low_stock_threshold override, else the shop's default (D-44) —
+// there is no per-variant threshold column.
 func (q *Queries) SumVariantQtyByProduct(ctx context.Context, arg SumVariantQtyByProductParams) ([]SumVariantQtyByProductRow, error) {
 	rows, err := q.db.Query(ctx, sumVariantQtyByProduct, arg.ShopID, arg.ProductID)
 	if err != nil {
@@ -617,6 +625,7 @@ LEFT JOIN locations l ON l.id = sl.location_id AND l.shop_id = pv.shop_id
 WHERE pv.shop_id = $1
     AND pv.product_id = ANY($2::uuid[])
     AND pv.deleted_at IS NULL
+    AND pv.is_active
 GROUP BY pv.product_id, pv.id, p.low_stock_threshold, s.low_stock_threshold
 `
 

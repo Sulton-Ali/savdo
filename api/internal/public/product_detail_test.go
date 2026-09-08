@@ -84,6 +84,42 @@ func TestGetPublicProductBySlug_variantsExcludeInactiveAndCarryPrice(t *testing.
 	}
 }
 
+// TestGetPublicProductBySlug_emptyVariantsWhenNoneActive is the detail
+// half of TestListPublicProducts_availabilityIgnoresInactiveVariants
+// (products_test.go): the same two products must show an empty `variants`
+// array here — the list's out_of_stock and the detail's empty array are
+// the two ways this contract expresses "nothing sellable", and T3 keeps
+// them in agreement (there is no product-level availability field in
+// ProductPublic; O-20's product-level rule applies to the list response
+// only, gen.PublicProductListItem.Availability).
+func TestGetPublicProductBySlug_emptyVariantsWhenNoneActive(t *testing.T) {
+	h, _, _, q, pool := newTestHandler(t, "shop-a")
+	ctx := context.Background()
+	shopRow := seedShop(ctx, t, q, "shop-a")
+	unit := seedUnit(ctx, t, q, shopRow.ID)
+	loc := seedLocation(ctx, t, q, shopRow.ID, "Main", true)
+
+	onlyInactiveVariant := seedProduct(ctx, t, q, shopRow.ID, unit.ID, productSpec{
+		Slug: "detail-only-inactive-variant", Name: "OnlyInactiveVariant", BasePrice: "1.00", IsActive: true,
+	})
+	inactiveVariant := seedVariant(ctx, t, q, shopRow.ID, onlyInactiveVariant.ID, variantSpec{IsActive: false})
+	stockIn(ctx, t, pool, q, shopRow.ID, inactiveVariant.ID, loc.ID, "50")
+
+	noVariants := seedProduct(ctx, t, q, shopRow.ID, unit.ID, productSpec{
+		Slug: "detail-no-variants", Name: "NoVariants", BasePrice: "1.00", IsActive: true,
+	})
+
+	for _, slug := range []string{onlyInactiveVariant.Slug, noVariants.Slug} {
+		out, err := getPublicProduct(ctxWithAcceptLanguage("uz"), t, h, slug)
+		if err != nil {
+			t.Fatalf("GetPublicProductBySlug(%s): %v", slug, err)
+		}
+		if out.Variants == nil || len(*out.Variants) != 0 {
+			t.Errorf("GetPublicProductBySlug(%s).Variants = %+v, want an empty slice", slug, out.Variants)
+		}
+	}
+}
+
 func TestGetPublicProductBySlug_promoAcrossCalendarDayBoundary(t *testing.T) {
 	h, _, _, q, _ := newTestHandler(t, "shop-a")
 	ctx := context.Background()

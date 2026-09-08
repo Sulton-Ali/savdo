@@ -177,6 +177,53 @@ func TestListPublicProducts_availabilityThresholds(t *testing.T) {
 	check("stock only at an inactive location", ignoredLocation.ID.String(), gen.OutOfStock)
 }
 
+// TestListPublicProducts_availabilityIgnoresInactiveVariants pins the T3
+// fix: SumVariantQtyForProducts (stock.sql) now filters pv.is_active, so a
+// product whose only stocked variant has since been deactivated — or that
+// has no active variant at all — must never read as available on the list
+// (O-20: "best of its active variants"), matching
+// GET /public/products/{slug}, whose `variants` array already excludes
+// inactive variants (handler.go's publicVariants).
+func TestListPublicProducts_availabilityIgnoresInactiveVariants(t *testing.T) {
+	h, _, _, q, pool := newTestHandler(t, "shop-a")
+	ctx := context.Background()
+	shopRow := seedShop(ctx, t, q, "shop-a")
+	unit := seedUnit(ctx, t, q, shopRow.ID)
+	loc := seedLocation(ctx, t, q, shopRow.ID, "Main", true)
+
+	// Only variant is inactive but well stocked: must not read as
+	// available.
+	onlyInactiveVariant := seedProduct(ctx, t, q, shopRow.ID, unit.ID, productSpec{
+		Slug: "only-inactive-variant", Name: "OnlyInactiveVariant", BasePrice: "1.00", IsActive: true,
+	})
+	inactiveVariant := seedVariant(ctx, t, q, shopRow.ID, onlyInactiveVariant.ID, variantSpec{IsActive: false})
+	stockIn(ctx, t, pool, q, shopRow.ID, inactiveVariant.ID, loc.ID, "50")
+
+	// No variant at all.
+	noVariants := seedProduct(ctx, t, q, shopRow.ID, unit.ID, productSpec{
+		Slug: "no-variants", Name: "NoVariants", BasePrice: "1.00", IsActive: true,
+	})
+
+	list := listPublicProducts(ctxWithAcceptLanguage("uz"), t, h, gen.ListPublicProductsParams{})
+	byID := map[string]gen.PublicProductListItem{}
+	for _, item := range list.Items {
+		byID[item.Id.String()] = item
+	}
+
+	check := func(label, id string, want gen.Availability) {
+		t.Helper()
+		got, ok := byID[id]
+		if !ok {
+			t.Fatalf("%s: product not in list at all", label)
+		}
+		if got.Availability != want {
+			t.Errorf("%s: Availability = %q, want %q", label, got.Availability, want)
+		}
+	}
+	check("stock only on an inactive variant", onlyInactiveVariant.ID.String(), gen.OutOfStock)
+	check("no variant at all", noVariants.ID.String(), gen.OutOfStock)
+}
+
 // publicHandler is the *public.Handler type alias this file's helpers use
 // — declared once here since it is the only file that needs it as a
 // parameter type (categories_test.go/shop_test.go call methods directly
