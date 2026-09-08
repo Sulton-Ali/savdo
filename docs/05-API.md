@@ -112,6 +112,11 @@ Phase numbers refer to `06-ROADMAP.md`.
 | POST   | `/auth/otp/request`          | —      | purpose + username → code via bot (P7)  |
 | POST   | `/auth/otp/verify`           | —      | code → action token (P7)                |
 | POST   | `/auth/password/reset`       | —      | action token + new password (P7)        |
+| POST   | `/auth/telegram/link`        | any    | logged-in user requests Telegram link: returns `{ code, deepLink }` where `deepLink` is `https://t.me/<bot>?start=link_<code>`; code is single use, 10 min (P7) |
+| DELETE | `/auth/telegram/link`        | any    | unlink own Telegram (P7)                |
+| GET    | `/auth/telegram/link`        | any    | current link status: `{ linked, telegramUsername? }` (P7) |
+
+`/auth/telegram` verifies the Login Widget HMAC (ADR-005) and creates a session only for a Telegram id already linked to a user; it never creates users. OTP request answers 202 whether or not the username exists (no enumeration); codes are delivered by the bot only to a linked account; per-IP and per-username limits apply (ADR-005 § rate limits).
 
 ### Shop, locations, staff (Phase 1)
 
@@ -201,11 +206,11 @@ Public responses: availability only (`in_stock|low|out_of_stock` per O-20 rules)
 
 ### Bot (Phase 7)
 
-| Method | Path                                | Role      |
-| ------ | ----------------------------------- | --------- |
-| POST   | `/bot/webhook/{secret}`             | Telegram  |
-| GET    | `/bot/conversations`                | manager+  |
-| GET    | `/bot/conversations/{id}/messages`  | manager+  |
+| Method | Path                                | Role      | Notes |
+| ------ | ----------------------------------- | --------- | ----- |
+| POST   | `/bot/webhook/{secret}`             | Telegram  | Telegram webhook endpoint |
+| GET    | `/bot/conversations`                | manager+  | Cursor page newest activity first; fields: chat id, telegram username (if known), message count, last message at |
+| GET    | `/bot/conversations/{id}/messages`  | manager+  | Oldest first; fields: role, content, provider, model, tokens, latency, cost |
 
 ### Ops
 
