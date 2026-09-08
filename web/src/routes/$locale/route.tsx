@@ -8,14 +8,16 @@ import { Header } from "../../components/Header";
 import { createI18nInstance } from "../../lib/i18n";
 import { isLocale } from "../../lib/locale";
 import { getPublicShop } from "../../lib/publicApi.functions";
+import { getSiteUrl } from "../../lib/site.functions";
 
 /**
  * The `$locale` layout: validates the locale segment (404 for anything
- * outside uz/ru/en), fetches `PublicShop` once per request and shares it
- * with every child route via router context (deliverable 2 — one call per
- * request), and wraps the page in a per-request `I18nextProvider` (SSR-safe
- * — see `lib/i18n.ts`'s doc comment for why this is never the global
- * `i18next` singleton).
+ * outside uz/ru/en), fetches `PublicShop` and this site's own `SITE_URL`
+ * once per request and shares them with every child route via router
+ * context (deliverable 2 — one call per request; `siteUrl` feeds every
+ * page's canonical/`hreflang`/OG tags, see `lib/seo.ts`), and wraps the
+ * page in a per-request `I18nextProvider` (SSR-safe — see `lib/i18n.ts`'s
+ * doc comment for why this is never the global `i18next` singleton).
  */
 export const Route = createFileRoute("/$locale")({
   beforeLoad: async ({ params }) => {
@@ -23,8 +25,8 @@ export const Route = createFileRoute("/$locale")({
       throw notFound();
     }
     const locale = params.locale;
-    const shop = await getPublicShop({ data: { locale } });
-    return { locale, shop };
+    const [shop, siteUrl] = await Promise.all([getPublicShop({ data: { locale } }), getSiteUrl()]);
+    return { locale, shop, siteUrl };
   },
   component: LocaleLayout,
   notFoundComponent: LocaleNotFound,

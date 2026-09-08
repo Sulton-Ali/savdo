@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 
 import { ProductCard } from "../../../components/ProductCard";
 import { listPublicCategories, listPublicProducts } from "../../../lib/publicApi.functions";
+import { absoluteUrl, asRouteMatchHead, buildSeoHead, chooseOgImage } from "../../../lib/seo";
 
 type PublicProductListItem = components["schemas"]["PublicProductListItem"];
 
@@ -21,9 +22,25 @@ export const Route = createFileRoute("/$locale/c/$slug")({
     }
     return { category, products };
   },
-  head: ({ loaderData }) => ({
-    meta: loaderData ? [{ title: loaderData.category.name }] : [],
-  }),
+  head: ({ match, loaderData }) => {
+    if (!loaderData) {
+      return {};
+    }
+    const { shop, locale, siteUrl } = match.context;
+    const { category } = loaderData;
+    // D-99: category pages have no per-category description or image this
+    // phase, so title/description/image all fall back to the shop's own.
+    const title = `${category.name} — ${shop.name}`;
+    const description = shop.blocks.seo?.description ?? shop.name;
+    const image = chooseOgImage({
+      siteUrl,
+      heroImage: shop.blocks.hero?.image,
+      fallbackUrl: absoluteUrl(siteUrl, "/og-default.png"),
+    });
+    return asRouteMatchHead(
+      buildSeoHead({ siteUrl, locale, path: `/c/${category.slug}`, title, description, image }),
+    );
+  },
   component: CategoryPage,
 });
 
