@@ -2,9 +2,13 @@ package public_test
 
 import (
 	"context"
+	"fmt"
+	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/Sulton-Ali/savdo/api/gen"
+	"github.com/Sulton-Ali/savdo/api/internal/db"
 )
 
 func listPublicProducts(ctx context.Context, t *testing.T, h publicHandler, params gen.ListPublicProductsParams) gen.PublicProductList {
@@ -222,6 +226,166 @@ func TestListPublicProducts_availabilityIgnoresInactiveVariants(t *testing.T) {
 	}
 	check("stock only on an inactive variant", onlyInactiveVariant.ID.String(), gen.OutOfStock)
 	check("no variant at all", noVariants.ID.String(), gen.OutOfStock)
+}
+
+// TestListPublicProducts_qSpecialCharactersEscapedNotWildcards pins T3
+// review round 2, MINOR 9: `%`, `_` and `\` in `?q=` must be treated as
+// literal characters to search for (escapeLikePattern, convert.go), never
+// as ILIKE wildcards — a search for a literal "%" must not match every
+// product.
+func TestListPublicProducts_qSpecialCharactersEscapedNotWildcards(t *testing.T) {
+	h, _, _, q, _ := newTestHandler(t, "shop-a")
+	ctx := context.Background()
+	shopRow := seedShop(ctx, t, q, "shop-a")
+	unit := seedUnit(ctx, t, q, shopRow.ID)
+
+	percent := seedProduct(ctx, t, q, shopRow.ID, unit.ID, productSpec{Slug: "percent", Name: "50% off", BasePrice: "1.00", IsActive: true})
+	seedProduct(ctx, t, q, shopRow.ID, unit.ID, productSpec{Slug: "unrelated", Name: "Unrelated Item", BasePrice: "1.00", IsActive: true})
+
+	qv := "50%"
+	byPercent := listPublicProducts(ctxWithAcceptLanguage("uz"), t, h, gen.ListPublicProductsParams{Q: &qv})
+	if len(byPercent.Items) != 1 || byPercent.Items[0].Id != percent.ID {
+		t.Fatalf("q=%q Items = %+v, want only %q — a literal %% must not act as an ILIKE wildcard matching everything", qv, byPercent.Items, percent.Slug)
+	}
+
+	// _, \ must not error/500 either, whether or not anything matches.
+	for _, qv := range []string{"under_score", `back\slash`, "50%_\\mixed"} {
+		qCopy := qv
+		if _, err := h.ListPublicProducts(ctxWithAcceptLanguage("uz"), gen.ListPublicProductsRequestObject{
+			Params: gen.ListPublicProductsParams{Q: &qCopy},
+		}); err != nil {
+			t.Errorf("q=%q: %v, want no error", qv, err)
+		}
+	}
+}
+
+// TestListPublicProducts_qOverlyLong_cappedNotRejected pins MINOR 9: a
+// pathologically long `?q=` (searchParam/maxSearchLength, convert.go)
+// must be capped, never a 500 or an unbounded query.
+func TestListPublicProducts_qOverlyLong_cappedNotRejected(t *testing.T) {
+	h, _, _, q, _ := newTestHandler(t, "shop-a")
+	ctx := context.Background()
+	shopRow := seedShop(ctx, t, q, "shop-a")
+	unit := seedUnit(ctx, t, q, shopRow.ID)
+	seedProduct(ctx, t, q, shopRow.ID, unit.ID, productSpec{Slug: "p", Name: "P", BasePrice: "1.00", IsActive: true})
+
+	huge := strings.Repeat("a", 10000)
+	if _, err := h.ListPublicProducts(ctxWithAcceptLanguage("uz"), gen.ListPublicProductsRequestObject{
+		Params: gen.ListPublicProductsParams{Q: &huge},
+	}); err != nil {
+		t.Fatalf("q=<10000 chars>: %v, want no error (capped, not rejected)", err)
+	}
+}
+
+// TestListPublicProducts_limitEdgeCases pins MINOR 9's limit=0/-1/9999
+// cases: clampLimit (pagination.go) must never let any of these panic or
+// 500 — 0 and -1 fall back to the default, 9999 is capped to maxLimit,
+// and every one of them still returns however many products actually
+// exist when that is fewer than the effective limit.
+func TestListPublicProducts_limitEdgeCases(t *testing.T) {
+	h, _, _, q, _ := newTestHandler(t, "shop-a")
+	ctx := context.Background()
+	shopRow := seedShop(ctx, t, q, "shop-a")
+	unit := seedUnit(ctx, t, q, shopRow.ID)
+	for i := 0; i < 3; i++ {
+		seedProduct(ctx, t, q, shopRow.ID, unit.ID, productSpec{
+			Slug: fmt.Sprintf("limit-edge-%d", i), Name: fmt.Sprintf("Limit Edge %d", i), BasePrice: "1.00", IsActive: true,
+		})
+	}
+
+	for _, limit := range []int{0, -1, 9999} {
+		l := limit
+		out, err := h.ListPublicProducts(ctxWithAcceptLanguage("uz"), gen.ListPublicProductsRequestObject{
+			Params: gen.ListPublicProductsParams{Limit: &l},
+		})
+		if err != nil {
+			t.Fatalf("limit=%d: %v, want no error", limit, err)
+		}
+		items := gen.PublicProductList(out.(gen.ListPublicProducts200JSONResponse)).Items
+		if len(items) != 3 {
+			t.Errorf("limit=%d: Items = %+v, want all 3 products (fewer than any effective clamp)", limit, items)
+		}
+	}
+}
+
+// TestListPublicProducts_tamperedCursor_400NotPanic pins MINOR 9: a
+// client-tampered cursor is a 400 VALIDATION_FAILED (pagination.Decode's
+// own contract), never a panic or a 500.
+func TestListPublicProducts_tamperedCursor_400NotPanic(t *testing.T) {
+	h, _, _, q, _ := newTestHandler(t, "shop-a")
+	seedShop(context.Background(), t, q, "shop-a")
+
+	bogus := "not-a-valid-cursor!!!"
+	_, err := h.ListPublicProducts(ctxWithAcceptLanguage("uz"), gen.ListPublicProductsRequestObject{
+		Params: gen.ListPublicProductsParams{Cursor: &bogus},
+	})
+	if err == nil {
+		t.Fatal("want an error for a tampered cursor, got none")
+	}
+	code, status := errCodeStatus(err)
+	if status != http.StatusBadRequest || code != string(gen.VALIDATIONFAILED) {
+		t.Fatalf("error = %v (code=%s, status=%d), want 400 VALIDATION_FAILED", err, code, status)
+	}
+}
+
+// TestListPublicProducts_negativeAndFractionalQtyAndZeroThreshold pins
+// MINOR 9's remaining availability edge cases: a negative qty (the shop
+// allows going negative — shops.allow_negative_stock) still reads as
+// out_of_stock, not some undefined fourth state; a fractional qty just
+// above/below the shop's integer default threshold (2) still classifies
+// correctly; and a product-level threshold override of exactly 0 means
+// "low" never applies — only out_of_stock (qty <= 0) or in_stock.
+func TestListPublicProducts_negativeAndFractionalQtyAndZeroThreshold(t *testing.T) {
+	h, _, _, q, pool := newTestHandler(t, "shop-a")
+	ctx := context.Background()
+	shopRow := seedShop(ctx, t, q, "shop-a")
+	unit := seedUnit(ctx, t, q, shopRow.ID)
+	loc := seedLocation(ctx, t, q, shopRow.ID, "Main", true)
+
+	allow := true
+	if _, err := q.UpdateShop(ctx, db.UpdateShopParams{ID: shopRow.ID, AllowNegativeStock: &allow}); err != nil {
+		t.Fatalf("UpdateShop(allow_negative_stock): %v", err)
+	}
+
+	negative := seedProduct(ctx, t, q, shopRow.ID, unit.ID, productSpec{Slug: "negative-qty", Name: "NegativeQty", BasePrice: "1.00", IsActive: true})
+	negativeVariant := seedVariant(ctx, t, q, shopRow.ID, negative.ID, variantSpec{IsActive: true})
+	stockIn(ctx, t, pool, q, shopRow.ID, negativeVariant.ID, loc.ID, "2")
+	stockIn(ctx, t, pool, q, shopRow.ID, negativeVariant.ID, loc.ID, "-5") // net -3
+
+	fractionalLow := seedProduct(ctx, t, q, shopRow.ID, unit.ID, productSpec{Slug: "fractional-low", Name: "FractionalLow", BasePrice: "1.00", IsActive: true})
+	fractionalLowVariant := seedVariant(ctx, t, q, shopRow.ID, fractionalLow.ID, variantSpec{IsActive: true})
+	stockIn(ctx, t, pool, q, shopRow.ID, fractionalLowVariant.ID, loc.ID, "1.999") // just under the shop default threshold (2)
+
+	fractionalIn := seedProduct(ctx, t, q, shopRow.ID, unit.ID, productSpec{Slug: "fractional-in", Name: "FractionalIn", BasePrice: "1.00", IsActive: true})
+	fractionalInVariant := seedVariant(ctx, t, q, shopRow.ID, fractionalIn.ID, variantSpec{IsActive: true})
+	stockIn(ctx, t, pool, q, shopRow.ID, fractionalInVariant.ID, loc.ID, "2.001") // just over
+
+	zeroThreshold := int32(0)
+	zeroThresholdProduct := seedProduct(ctx, t, q, shopRow.ID, unit.ID, productSpec{
+		Slug: "zero-threshold", Name: "ZeroThreshold", BasePrice: "1.00", IsActive: true, LowStockThreshold: &zeroThreshold,
+	})
+	zeroThresholdVariant := seedVariant(ctx, t, q, shopRow.ID, zeroThresholdProduct.ID, variantSpec{IsActive: true})
+	stockIn(ctx, t, pool, q, shopRow.ID, zeroThresholdVariant.ID, loc.ID, "1") // > 0 == threshold, so in_stock, never low
+
+	list := listPublicProducts(ctxWithAcceptLanguage("uz"), t, h, gen.ListPublicProductsParams{})
+	byID := map[string]gen.PublicProductListItem{}
+	for _, item := range list.Items {
+		byID[item.Id.String()] = item
+	}
+	check := func(label, id string, want gen.Availability) {
+		t.Helper()
+		got, ok := byID[id]
+		if !ok {
+			t.Fatalf("%s: product not in list at all", label)
+		}
+		if got.Availability != want {
+			t.Errorf("%s: Availability = %q, want %q", label, got.Availability, want)
+		}
+	}
+	check("net negative qty", negative.ID.String(), gen.OutOfStock)
+	check("qty just under the shop default threshold", fractionalLow.ID.String(), gen.Low)
+	check("qty just over the shop default threshold", fractionalIn.ID.String(), gen.InStock)
+	check("qty 1 with a threshold override of 0", zeroThresholdProduct.ID.String(), gen.InStock)
 }
 
 // publicHandler is the *public.Handler type alias this file's helpers use

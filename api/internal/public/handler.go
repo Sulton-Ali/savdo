@@ -278,12 +278,10 @@ func (h *Handler) GetPublicProductBySlug(ctx context.Context, req gen.GetPublicP
 		}
 		return nil, fmt.Errorf("public: get product: %w", err)
 	}
-
-	translations, err := h.svc.q.ListProductTranslations(ctx, db.ListProductTranslationsParams{ProductID: row.ID, ShopID: shop.ID})
-	if err != nil {
-		return nil, fmt.Errorf("public: list product translations: %w", err)
-	}
-	name, description, localeUsed := resolveProductTranslation(translations, locale)
+	// name/description/locale_used already come resolved from the same
+	// LATERAL-joined row (products.sql's GetPublicProductBySlug), the
+	// ADR-012 requested->uz->any fallback applied once, at the database,
+	// as one atomic pick — no second ListProductTranslations query.
 
 	var categoryName *string
 	if row.CategoryID != nil {
@@ -306,7 +304,7 @@ func (h *Handler) GetPublicProductBySlug(ctx context.Context, req gen.GetPublicP
 		return nil, fmt.Errorf("public: product promo price: %w", err)
 	}
 
-	variants, err := h.publicVariants(ctx, shop, row)
+	variants, activeVariantIDs, err := h.publicVariants(ctx, shop, row)
 	if err != nil {
 		return nil, err
 	}
@@ -317,7 +315,16 @@ func (h *Handler) GetPublicProductBySlug(ctx context.Context, req gen.GetPublicP
 	}
 	images := make([]gen.ProductImage, len(imageRows))
 	for i, r := range imageRows {
-		images[i] = toProductImage(h.svc.mediaBaseURL, r.ID, r.MediaID, r.VariantID, r.SortOrder, r.IsCover, r.StorageKey)
+		img := toProductImage(h.svc.mediaBaseURL, r.ID, r.MediaID, r.VariantID, r.SortOrder, r.IsCover, r.StorageKey)
+		// An image tagged to a variant that is no longer active (or was
+		// deleted) must not name a variant this response otherwise never
+		// mentions — variantId is nulled rather than dropping the image
+		// itself, so a product's cover/gallery still shows a since-
+		// deactivated variant's photo, just no longer attributed to it.
+		if r.VariantID != nil && !activeVariantIDs[*r.VariantID] {
+			img.VariantId = nullableUUID(nil)
+		}
+		images[i] = img
 	}
 
 	resp := gen.ProductPublic{
@@ -327,8 +334,15 @@ func (h *Handler) GetPublicProductBySlug(ctx context.Context, req gen.GetPublicP
 		// IsActive is always true: GetPublicProductBySlug's own WHERE
 		// clause (p.is_active) guarantees it, the same way ADR-010 keeps
 		// this schema active-only.
-		IsActive: true, IsFeatured: row.IsFeatured, Name: name, Description: nullableString(description),
-		Locale: gen.Locale(locale), TranslationFallback: localeUsed != locale,
+		IsActive: true, IsFeatured: row.IsFeatured, Name: row.Name, Description: nullableString(row.Description),
+		// Locale is the locale the name/description actually came from
+		// (effectiveLocale), never the raw requested locale, matching
+		// every other single-translated-entity producer (catalog's own
+		// products/categories/units) — PublicShop.locale is deliberately
+		// different (its own doc comment/tests): it composes six
+		// independently-resolved blocks, so "the locale the data came
+		// from" has no single answer there.
+		Locale: effectiveLocale(row.LocaleUsed, locale), TranslationFallback: row.LocaleUsed != locale,
 		Variants: &variants, Images: &images,
 	}
 	return gen.GetPublicProductBySlug200JSONResponse(resp), nil
@@ -336,11 +350,16 @@ func (h *Handler) GetPublicProductBySlug(ctx context.Context, req gen.GetPublicP
 
 // publicVariants lists product's active variants as VariantPublic, each
 // with its own D-67/D-68 price and O-20 availability — never an
-// inactive variant (O-20's own "only active variants" rule).
-func (h *Handler) publicVariants(ctx context.Context, shop db.Shop, product db.GetPublicProductBySlugRow) ([]gen.VariantPublic, error) {
+// inactive variant (O-20's own "only active variants" rule). The second
+// return value is the same set's variant ids, for the caller (images) to
+// tell an active-variant image from one whose variant has since gone
+// inactive or been deleted (ListVariantsForCashier already excludes a
+// deleted variant's row entirely; the !v.IsActive skip below excludes an
+// inactive one).
+func (h *Handler) publicVariants(ctx context.Context, shop db.Shop, product db.GetPublicProductBySlugRow) ([]gen.VariantPublic, map[uuid.UUID]bool, error) {
 	sums, err := h.svc.q.SumVariantQtyByProduct(ctx, db.SumVariantQtyByProductParams{ShopID: shop.ID, ProductID: product.ID})
 	if err != nil {
-		return nil, fmt.Errorf("public: sum variant qty: %w", err)
+		return nil, nil, fmt.Errorf("public: sum variant qty: %w", err)
 	}
 	qtyByVariant := make(map[uuid.UUID]db.SumVariantQtyByProductRow, len(sums))
 	for _, s := range sums {
@@ -349,33 +368,35 @@ func (h *Handler) publicVariants(ctx context.Context, shop db.Shop, product db.G
 
 	rows, err := h.svc.q.ListVariantsForCashier(ctx, db.ListVariantsForCashierParams{ShopID: shop.ID, ProductID: product.ID})
 	if err != nil {
-		return nil, fmt.Errorf("public: list variants: %w", err)
+		return nil, nil, fmt.Errorf("public: list variants: %w", err)
 	}
 
 	now := time.Now()
 	loc := shopLocation(shop)
 	variants := make([]gen.VariantPublic, 0, len(rows))
+	activeVariantIDs := make(map[uuid.UUID]bool, len(rows))
 	for _, v := range rows {
 		if !v.IsActive {
 			continue
 		}
+		activeVariantIDs[v.ID] = true
 		attrs, err := attributesFrom(v.Attributes)
 		if err != nil {
-			return nil, fmt.Errorf("public: variant attributes: %w", err)
+			return nil, nil, fmt.Errorf("public: variant attributes: %w", err)
 		}
 		price, err := effectivePrice(product.BasePrice, product.PromoPrice, product.PromoFrom, product.PromoTo, v.PriceOverride, now, loc)
 		if err != nil {
-			return nil, fmt.Errorf("public: variant price: %w", err)
+			return nil, nil, fmt.Errorf("public: variant price: %w", err)
 		}
 		priceOverride, err := nullableNumeric(v.PriceOverride)
 		if err != nil {
-			return nil, fmt.Errorf("public: variant price override: %w", err)
+			return nil, nil, fmt.Errorf("public: variant price override: %w", err)
 		}
 		availability := gen.OutOfStock
 		if s, ok := qtyByVariant[v.ID]; ok {
 			qty, err := money.FromNumeric(s.Qty)
 			if err != nil {
-				return nil, fmt.Errorf("public: variant qty: %w", err)
+				return nil, nil, fmt.Errorf("public: variant qty: %w", err)
 			}
 			availability = classifyAvailability(qty, decimal.NewFromInt32(s.Threshold))
 		}
@@ -384,5 +405,5 @@ func (h *Handler) publicVariants(ctx context.Context, shop db.Shop, product db.G
 			Attributes: attrs, PriceOverride: priceOverride, Availability: availability, Price: price,
 		})
 	}
-	return variants, nil
+	return variants, activeVariantIDs, nil
 }

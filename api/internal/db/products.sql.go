@@ -318,11 +318,12 @@ SELECT
     p.is_featured, p.created_at,
     c.slug AS category_slug,
     COALESCE(t.locale, '') AS locale_used,
-    COALESCE(t.name, '') AS name
+    COALESCE(t.name, '') AS name,
+    t.description
 FROM products p
 LEFT JOIN categories c ON c.id = p.category_id AND c.shop_id = p.shop_id
 LEFT JOIN LATERAL (
-    SELECT pt.locale, pt.name
+    SELECT pt.locale, pt.name, pt.description
     FROM product_translations pt
     WHERE pt.product_id = p.id
     ORDER BY
@@ -362,6 +363,7 @@ type GetPublicProductBySlugRow struct {
 	CategorySlug *string        `json:"category_slug"`
 	LocaleUsed   string         `json:"locale_used"`
 	Name         string         `json:"name"`
+	Description  *string        `json:"description"`
 }
 
 func (q *Queries) GetPublicProductBySlug(ctx context.Context, arg GetPublicProductBySlugParams) (GetPublicProductBySlugRow, error) {
@@ -383,6 +385,7 @@ func (q *Queries) GetPublicProductBySlug(ctx context.Context, arg GetPublicProdu
 		&i.CategorySlug,
 		&i.LocaleUsed,
 		&i.Name,
+		&i.Description,
 	)
 	return i, err
 }
@@ -889,8 +892,14 @@ type ListPublicProductsRow struct {
 // handler reuses ListCoverImagesForProducts (D-83, same one-query-per-page
 // pattern ListProducts already uses) against this query's page of product
 // ids instead of duplicating that selection logic (flagged cover else
-// first by position) in another LATERAL here. Translations, variants and
-// images for the product-detail page reuse ListProductTranslations,
+// first by position) in another LATERAL here. GetPublicProductBySlug's
+// own LATERAL (below) resolves name+description+locale in the same
+// pass as the product row (T3 review round 1: previously the handler
+// discarded that LATERAL's name/locale_used and ran a second
+// ListProductTranslations query, redoing the same fallback in Go for
+// name+description together — now description is selected alongside
+// name so the LATERAL is the single source, no second query). Variants
+// and images for the product-detail page still reuse
 // ListVariantsForCashier (filtered to is_active in the handler — its
 // column set already excludes cost_override, the only thing rule 8
 // requires a separate query for) and ListProductImages.

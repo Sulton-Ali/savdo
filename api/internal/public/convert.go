@@ -11,7 +11,6 @@ import (
 	"github.com/oapi-codegen/nullable"
 
 	"github.com/Sulton-Ali/savdo/api/gen"
-	"github.com/Sulton-Ali/savdo/api/internal/db"
 	"github.com/Sulton-Ali/savdo/api/internal/media"
 	"github.com/Sulton-Ali/savdo/api/internal/money"
 )
@@ -139,30 +138,23 @@ func attributesFrom(raw json.RawMessage) (gen.AttributeValues, error) {
 	return attrs, nil
 }
 
-// resolveProductTranslation picks name+description from rows by the
-// ADR-012 fallback order (requested -> uz -> any) as one atomic pick —
-// name and description of the same locale, never a name from one locale
-// and a description from another. Returns ("", nil, "") when rows is
-// empty (no translation saved in any locale yet).
-func resolveProductTranslation(rows []db.ProductTranslation, requested string) (name string, description *string, localeUsed string) {
-	var uz, anyRow db.ProductTranslation
-	haveUZ, haveAny := false, false
-	for _, r := range rows {
-		if r.Locale == requested {
-			return r.Name, r.Description, r.Locale
-		}
-		if r.Locale == "uz" {
-			uz, haveUZ = r, true
-		}
-		if !haveAny {
-			anyRow, haveAny = r, true
-		}
+// effectiveLocale is what the `locale` response field reports for a
+// single translated entity: the resolved localeUsed when a translation
+// exists, or the requested locale itself when none does yet (localeUsed
+// == "") — never an empty string, which is not a member of gen.Locale's
+// uz/ru/en vocabulary. Duplicates catalog's own unexported
+// effectiveLocale (internal/catalog/locale.go) byte-for-byte, for the
+// same reason as nullableString above (no dependency on catalog.Service)
+// — GetPublicProductBySlug is this package's only caller, the same
+// single-translated-row shape catalog.Handler.toGenProduct/toGenCategory
+// already apply this to. PublicShop.locale does NOT use this: it
+// composes six independently-resolved content blocks, so its own doc
+// comment (contracts/openapi.yaml) and tests instead pin it to "the
+// locale this response was resolved for", unconditionally — there is no
+// single row for it to have "come from".
+func effectiveLocale(localeUsed, requested string) gen.Locale {
+	if localeUsed == "" {
+		return gen.Locale(requested)
 	}
-	if haveUZ {
-		return uz.Name, uz.Description, uz.Locale
-	}
-	if haveAny {
-		return anyRow.Name, anyRow.Description, anyRow.Locale
-	}
-	return "", nil, ""
+	return gen.Locale(localeUsed)
 }

@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/Sulton-Ali/savdo/api/gen"
 	"github.com/Sulton-Ali/savdo/api/internal/db"
 )
@@ -120,6 +122,66 @@ func TestGetPublicProductBySlug_emptyVariantsWhenNoneActive(t *testing.T) {
 	}
 }
 
+// TestGetPublicProductBySlug_imageVariantIdNulledForInactiveVariant pins
+// T3 review round 2, MINOR 5: an image tagged to a variant that has since
+// gone inactive must not name that variant in the response — variantId
+// is nulled (the chosen fix, over dropping the image outright), so the
+// product's photo for that variant still shows in the gallery, just no
+// longer attributed to a variant this response otherwise never mentions.
+func TestGetPublicProductBySlug_imageVariantIdNulledForInactiveVariant(t *testing.T) {
+	h, _, _, q, _ := newTestHandler(t, "shop-a")
+	ctx := context.Background()
+	shopRow := seedShop(ctx, t, q, "shop-a")
+	unit := seedUnit(ctx, t, q, shopRow.ID)
+
+	product := seedProduct(ctx, t, q, shopRow.ID, unit.ID, productSpec{
+		Slug: "image-variant", Name: "ImageVariant", BasePrice: "1.00", IsActive: true,
+	})
+	activeVariant := seedVariant(ctx, t, q, shopRow.ID, product.ID, variantSpec{Attributes: `{"size":"M"}`, IsActive: true})
+	inactiveVariant := seedVariant(ctx, t, q, shopRow.ID, product.ID, variantSpec{Attributes: `{"size":"L"}`, IsActive: false})
+
+	media := seedMedia(ctx, t, q, shopRow.ID, "shop-a/image-variant")
+	if _, err := q.AddProductImage(ctx, db.AddProductImageParams{
+		ID: uuid.New(), ShopID: shopRow.ID, ProductID: product.ID, VariantID: &inactiveVariant.ID,
+		MediaID: media.ID, SortOrder: 0, IsCover: true,
+	}); err != nil {
+		t.Fatalf("AddProductImage(inactive variant): %v", err)
+	}
+	activeMedia := seedMedia(ctx, t, q, shopRow.ID, "shop-a/image-variant-active")
+	if _, err := q.AddProductImage(ctx, db.AddProductImageParams{
+		ID: uuid.New(), ShopID: shopRow.ID, ProductID: product.ID, VariantID: &activeVariant.ID,
+		MediaID: activeMedia.ID, SortOrder: 1, IsCover: false,
+	}); err != nil {
+		t.Fatalf("AddProductImage(active variant): %v", err)
+	}
+
+	out, err := getPublicProduct(ctxWithAcceptLanguage("uz"), t, h, "image-variant")
+	if err != nil {
+		t.Fatalf("GetPublicProductBySlug: %v", err)
+	}
+	if out.Images == nil || len(*out.Images) != 2 {
+		t.Fatalf("Images = %+v, want both images present (nulling variantId never drops the image)", out.Images)
+	}
+	byMediaID := map[uuid.UUID]gen.ProductImage{}
+	for _, img := range *out.Images {
+		byMediaID[img.MediaId] = img
+	}
+	inactiveImg, ok := byMediaID[media.ID]
+	if !ok {
+		t.Fatal("the inactive-variant image is missing entirely")
+	}
+	if inactiveImg.VariantId.IsSpecified() && !inactiveImg.VariantId.IsNull() {
+		t.Errorf("inactive-variant image VariantId = %+v, want null", inactiveImg.VariantId)
+	}
+	activeImg, ok := byMediaID[activeMedia.ID]
+	if !ok {
+		t.Fatal("the active-variant image is missing entirely")
+	}
+	if !activeImg.VariantId.IsSpecified() || activeImg.VariantId.IsNull() || activeImg.VariantId.MustGet() != activeVariant.ID {
+		t.Errorf("active-variant image VariantId = %+v, want %v", activeImg.VariantId, activeVariant.ID)
+	}
+}
+
 func TestGetPublicProductBySlug_promoAcrossCalendarDayBoundary(t *testing.T) {
 	h, _, _, q, _ := newTestHandler(t, "shop-a")
 	ctx := context.Background()
@@ -130,8 +192,17 @@ func TestGetPublicProductBySlug_promoAcrossCalendarDayBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadLocation: %v", err)
 	}
-	todayStart := time.Now().In(loc).Truncate(24 * time.Hour)
-	yesterday := todayStart.Add(-24 * time.Hour)
+	// T3 review round 2, MAJOR 4: build today's local midnight with
+	// time.Date, never time.Now().Truncate(24*time.Hour) — Truncate rounds
+	// to a multiple of its duration since the Unix epoch (UTC), not since
+	// this loc's own midnight, so for Asia/Tashkent (UTC+5) that "today"
+	// would actually be 05:00 local, not 00:00: running this test between
+	// local 00:00 and 05:00 would see "todayStart" in the future and the
+	// promo windows below shift by a day, flaking exactly in that window.
+	now := time.Now().In(loc)
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	yesterday := todayStart.AddDate(0, 0, -1)
+	tomorrow := todayStart.AddDate(0, 0, 1)
 
 	// Active promo: from yesterday to today (inclusive, D-68) — active
 	// right now regardless of the time of day within today.
@@ -143,13 +214,24 @@ func TestGetPublicProductBySlug_promoAcrossCalendarDayBoundary(t *testing.T) {
 	seedVariant(ctx, t, q, shopRow.ID, activeProduct.ID, variantSpec{IsActive: true})
 
 	// Expired promo: ended yesterday — never active today.
-	expiredFrom := yesterday.Add(-24 * time.Hour)
+	expiredFrom := yesterday.AddDate(0, 0, -1)
 	expiredTo := yesterday
 	expiredProduct := seedProduct(ctx, t, q, shopRow.ID, unit.ID, productSpec{
 		Slug: "expired-promo", Name: "ExpiredPromo", BasePrice: "100000.00", PromoPrice: "80000.00",
 		PromoFrom: &expiredFrom, PromoTo: &expiredTo, IsActive: true,
 	})
 	seedVariant(ctx, t, q, shopRow.ID, expiredProduct.ID, variantSpec{IsActive: true})
+
+	// Future promo: starts tomorrow — not active yet, even though it will
+	// be tomorrow (T3 review round 2, MAJOR 4's "add the promo-starts-
+	// tomorrow case").
+	futureFrom := tomorrow
+	futureTo := tomorrow.AddDate(0, 0, 1)
+	futureProduct := seedProduct(ctx, t, q, shopRow.ID, unit.ID, productSpec{
+		Slug: "future-promo", Name: "FuturePromo", BasePrice: "100000.00", PromoPrice: "80000.00",
+		PromoFrom: &futureFrom, PromoTo: &futureTo, IsActive: true,
+	})
+	seedVariant(ctx, t, q, shopRow.ID, futureProduct.ID, variantSpec{IsActive: true})
 
 	onPromo, err := getPublicProduct(ctxWithAcceptLanguage("uz"), t, h, "on-promo")
 	if err != nil {
@@ -167,6 +249,15 @@ func TestGetPublicProductBySlug_promoAcrossCalendarDayBoundary(t *testing.T) {
 	ev := (*expired.Variants)[0]
 	if ev.Price.PromoActive || ev.Price.Current != "100000.00" {
 		t.Errorf("expired-promo price = %+v, want current=regular=100000.00, promoActive=false", ev.Price)
+	}
+
+	future, err := getPublicProduct(ctxWithAcceptLanguage("uz"), t, h, "future-promo")
+	if err != nil {
+		t.Fatalf("GetPublicProductBySlug(future-promo): %v", err)
+	}
+	fv := (*future.Variants)[0]
+	if fv.Price.PromoActive || fv.Price.Current != "100000.00" {
+		t.Errorf("future-promo price = %+v, want current=regular=100000.00, promoActive=false (starts tomorrow)", fv.Price)
 	}
 }
 
@@ -196,7 +287,11 @@ func TestGetPublicProductBySlug_descriptionTranslationFallback(t *testing.T) {
 	if !out.TranslationFallback {
 		t.Errorf("TranslationFallback = false, want true (no ru translation)")
 	}
-	if out.Locale != gen.LocaleRu {
-		t.Errorf("Locale = %v, want ru (the requested locale)", out.Locale)
+	// T3 review round 2, MAJOR 3: locale reports where the data actually
+	// came from (effectiveLocale), not the raw requested locale — a ru
+	// request answered from a uz-only translation reports uz, consistent
+	// with catalog's own products/categories/units.
+	if out.Locale != gen.LocaleUz {
+		t.Errorf("Locale = %v, want uz (the locale the name/description actually came from)", out.Locale)
 	}
 }

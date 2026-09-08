@@ -51,8 +51,9 @@ type Service struct {
 	shopResolved  bool
 	shopExpiresAt time.Time
 
-	respMu sync.RWMutex
-	resp   map[string]cacheEntry
+	respMu    sync.RWMutex
+	resp      map[string]cacheEntry
+	respBytes int // running total of len(entry.body) across resp; see cacheSet/evictLocked
 }
 
 // NewService builds the public Service.
@@ -119,13 +120,37 @@ func (s *Service) WarmShop(ctx context.Context) error {
 
 // Invalidate clears every cached response for shopID — content.Invalidator
 // and catalog.Invalidator's single method, so *Service satisfies both
-// interfaces structurally without either package importing this one.
+// interfaces structurally without either package importing this one. It
+// also drops the memoised shop row (resolveShop's own shopMu/shop/
+// shopResolved/shopExpiresAt) when it names the same shop, so a shop
+// identity write (name, currency, defaultLocale, timezone —
+// shop.Service.UpdateShop) is picked up by the very next request rather
+// than waiting out resolveShop's own cacheTTL on top of the response
+// cache's — the two TTLs would otherwise stack, doubling the worst-case
+// staleness this method exists to bound.
+//
+// shop.Service itself is deliberately NOT wired to call this (unlike
+// content.Service/catalog.Service, wired in cmd/api/main.go): doing so
+// would need internal/shop to depend on an Invalidator interface the way
+// content/catalog do, touching a third module for a task scoped to
+// internal/public (and internal/db's stock/products queries) — a shop
+// identity edit is rare, administrative, and already bounded by
+// resolveShop's own cacheTTL (60 s, the same staleness budget O-20
+// already accepts for every other public response); this comment
+// documents that choice rather than making it silently.
 func (s *Service) Invalidate(shopID uuid.UUID) {
 	s.respMu.Lock()
-	defer s.respMu.Unlock()
 	for key, entry := range s.resp {
 		if entry.shopID == shopID {
+			s.respBytes -= len(entry.body)
 			delete(s.resp, key)
 		}
 	}
+	s.respMu.Unlock()
+
+	s.shopMu.Lock()
+	if s.shopResolved && s.shop.ID == shopID {
+		s.shopResolved = false
+	}
+	s.shopMu.Unlock()
 }
