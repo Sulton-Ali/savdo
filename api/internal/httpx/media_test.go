@@ -86,7 +86,7 @@ func newMediaTestFixture(t *testing.T, maxBytes int64) mediaTestFixture {
 	mediaSvc := media.NewService(q, storage, "/media", maxBytes, 2, 10)
 
 	return mediaTestFixture{
-		router:          NewRouter(testLogger(), pool, authSvc, shopSvc, mediaSvc, media.DevHandler(storage), testCatalogService(), testStockService(), testCrmService(), testReportsService(), testSalesService(), testContentService()),
+		router:          NewRouter(testLogger(), pool, authSvc, shopSvc, mediaSvc, media.DevHandler(storage), testCatalogService(), testStockService(), testCrmService(), testReportsService(), testSalesService(), testContentService(), testPublicService()),
 		shopID:          shopRow.ID,
 		ownerUsername:   "owner1",
 		ownerPassword:   password,

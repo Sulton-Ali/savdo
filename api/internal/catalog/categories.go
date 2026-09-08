@@ -334,6 +334,7 @@ func (h *Handler) CreateCategory(ctx context.Context, req gen.CreateCategoryRequ
 	// full translations map is always included (unlike GetCategory/
 	// ListCategories, gated per-request since any role can read).
 	resp := toGenCategory(created.ID, created.ParentID, created.Slug, created.SortOrder, created.IsActive, created.ImageID, name, localeUsed, locale, entries[localeUsed].Description, buildTranslations(entries))
+	h.svc.invalidatePublic(authCtx.ShopID)
 	return gen.CreateCategory201JSONResponse(resp), nil
 }
 
@@ -467,6 +468,7 @@ func (h *Handler) UpdateCategory(ctx context.Context, req gen.UpdateCategoryRequ
 	if err != nil {
 		return nil, fmt.Errorf("catalog: list category translations: %w", err)
 	}
+	h.svc.invalidatePublic(authCtx.ShopID)
 	return gen.UpdateCategory200JSONResponse(toGenCategory(fresh.ID, fresh.ParentID, fresh.Slug, fresh.SortOrder, fresh.IsActive, fresh.ImageID, fresh.Name, fresh.LocaleUsed, locale, fresh.Description, buildTranslations(entries))), nil
 }
 
@@ -511,5 +513,6 @@ func (h *Handler) DeleteCategory(ctx context.Context, req gen.DeleteCategoryRequ
 	if err := h.svc.q.SoftDeleteCategory(ctx, db.SoftDeleteCategoryParams{ShopID: authCtx.ShopID, ID: req.Id}); err != nil {
 		return nil, fmt.Errorf("catalog: soft delete category: %w", err)
 	}
+	h.svc.invalidatePublic(authCtx.ShopID)
 	return gen.DeleteCategory204Response{}, nil
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/Sulton-Ali/savdo/api/internal/content"
 	"github.com/Sulton-Ali/savdo/api/internal/crm"
 	"github.com/Sulton-Ali/savdo/api/internal/media"
+	"github.com/Sulton-Ali/savdo/api/internal/public"
 	"github.com/Sulton-Ali/savdo/api/internal/reports"
 	"github.com/Sulton-Ali/savdo/api/internal/sales"
 	"github.com/Sulton-Ali/savdo/api/internal/shop"
@@ -94,6 +95,15 @@ func testContentService() *content.Service {
 	return content.NewService(nil)
 }
 
+// testPublicService builds a public.Service safe to wire into NewRouter
+// for tests that never exercise a `/public/*` route — a nil *db.Queries
+// is never dereferenced in that case (resolveShop is the first thing
+// every public.Handler method calls, and it always queries before
+// touching anything else).
+func testPublicService() *public.Service {
+	return public.NewService(nil, testContentService(), "savdo-demo", "/media")
+}
+
 func TestHealthz(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -119,7 +129,7 @@ func TestHealthz(t *testing.T) {
 		},
 	}
 
-	router := NewRouter(testLogger(), nil, testAuthService(), testShopService(), testMediaService(), nil, testCatalogService(), testStockService(), testCrmService(), testReportsService(), testSalesService(), testContentService())
+	router := NewRouter(testLogger(), nil, testAuthService(), testShopService(), testMediaService(), nil, testCatalogService(), testStockService(), testCrmService(), testReportsService(), testSalesService(), testContentService(), testPublicService())
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

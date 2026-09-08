@@ -21,17 +21,50 @@ import (
 	"github.com/Sulton-Ali/savdo/api/internal/db"
 )
 
+// Invalidator is the public-cache-clearing side effect a content write
+// triggers (O-20: "cleared for the shop on any content PUT"). Declared
+// here, the consumer, rather than in internal/public, the producer, so
+// wiring *public.Service in (main.go, via SetInvalidator) never makes
+// this package import internal/public — internal/public already imports
+// internal/content for Resolve, and a content -> public edge too would
+// be a cycle (docs/08-AI-WORKFLOW.md § Known failure modes).
+type Invalidator interface {
+	Invalidate(shopID uuid.UUID)
+}
+
 // Service holds content's dependencies. Every operation is a single
 // statement (no multi-table write needs a transaction), so unlike
 // stock.Service/shop.Service there is no pool field here — q is enough
-// (mirrors crm.Service).
+// (mirrors crm.Service). invalidator is nil until SetInvalidator runs
+// (cmd/api/main.go, after both content.Service and public.Service exist)
+// — every call site checks it via invalidatePublic, so a test or a
+// caller that never wires one behaves exactly as before this field
+// existed.
 type Service struct {
-	q *db.Queries
+	q           *db.Queries
+	invalidator Invalidator
 }
 
 // NewService builds the content Service.
 func NewService(q *db.Queries) *Service {
 	return &Service{q: q}
+}
+
+// SetInvalidator wires inv as the public-cache invalidator Upsert calls
+// after a successful write. Optional: cmd/api's own wiring is the only
+// caller today; tests that never call it get the pre-Phase-6 behaviour
+// (no invalidation attempted).
+func (s *Service) SetInvalidator(inv Invalidator) {
+	s.invalidator = inv
+}
+
+// invalidatePublic clears shopID's public-response cache, when an
+// Invalidator is wired at all — a no-op otherwise, so this is safe to
+// call unconditionally from every write path.
+func (s *Service) invalidatePublic(shopID uuid.UUID) {
+	if s.invalidator != nil {
+		s.invalidator.Invalidate(shopID)
+	}
 }
 
 // Handler implements content's slice of gen.StrictServerInterface
@@ -121,6 +154,7 @@ func (s *Service) Upsert(ctx context.Context, shopID uuid.UUID, key gen.ContentK
 		u := openapi_types.UUID(*row.UpdatedBy)
 		block.UpdatedBy = &u
 	}
+	s.invalidatePublic(shopID)
 	return block, nil
 }
 

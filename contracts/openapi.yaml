@@ -76,8 +76,19 @@ tags:
       Landing page content blocks (Phase 6, D-99). `manager+` reads and
       writes one key (hero/about/hours/contacts/social/seo) per locale;
       each key's `data` is validated server-side against its O-19 shape.
-      `GET /public/shop` (a later task) composes these with fallback
-      (D-104) for the public landing.
+      `GET /public/shop` composes these with fallback (D-104) for the
+      public landing.
+  - name: public
+    description: >
+      Unauthenticated landing endpoints (Phase 6, D-99, D-103, D-105,
+      D-106, O-20/O-21/O-22): shop + content blocks, active categories,
+      products (filterable, paginated) and one product by slug, resolved
+      for `PUBLIC_SHOP_SLUG`. Prices and availability only — never cost,
+      margin or quantities (ADR-010). `security: []`; responses carry
+      `Cache-Control: public, max-age=60` and a strong `ETag`
+      (`If-None-Match` → `304`), served from an in-process cache keyed by
+      shop + path + query + resolved locale, cleared on a content `PUT`
+      or a catalogue product/category/variant/image write.
 
 paths:
   /healthz:
@@ -2567,6 +2578,126 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /public/shop:
+    get:
+      operationId: getPublicShop
+      tags: [public]
+      summary: Shop identity and landing content blocks.
+      description: >
+        No auth (`security: []`). Resolves the shop named by
+        `PUBLIC_SHOP_SLUG` (D-105); `404 NOT_FOUND` if it does not exist.
+        `blocks.*` is absent for a key with no saved content in any
+        locale; a key with content in some locale but not the requested
+        one falls back to `uz` (D-104) and sets `translationFallback`.
+        `blocks.hero.image` resolves `imageMediaId` to its `MediaUrls`
+        set when the media exists. Cached 60 s per resolved locale;
+        `Cache-Control: public, max-age=60`, strong `ETag`,
+        `If-None-Match` → `304` (O-20).
+      security: []
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicShop"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /public/categories:
+    get:
+      operationId: listPublicCategories
+      tags: [public]
+      summary: Active categories with their public product count.
+      description: >
+        No auth. Not cursor-paginated (a shop has few categories).
+        `productCount` counts only active, non-deleted products in that
+        category (O-20). Cached 60 s per resolved locale.
+      security: []
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicCategoryList"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /public/products:
+    get:
+      operationId: listPublicProducts
+      tags: [public]
+      summary: Browse the public catalogue.
+      description: >
+        No auth. Cursor-paginated, newest first (D-92). Only active
+        products; a product with no category is included with
+        `categorySlug: null`, one whose category is inactive is excluded
+        (O-22). `price`/`availability` are product-level (D-103/O-20),
+        not per-variant — see `GET /public/products/{slug}` for that.
+        Cached 60 s per resolved locale and query.
+      security: []
+      parameters:
+        - name: category
+          in: query
+          description: Filter to one category's slug.
+          required: false
+          schema:
+            type: string
+            maxLength: 100
+        - name: featured
+          in: query
+          required: false
+          schema:
+            type: boolean
+        - name: q
+          in: query
+          description: Free-text search over product name (Postgres ILIKE/trigram).
+          required: false
+          schema:
+            type: string
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicProductList"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /public/products/{slug}:
+    get:
+      operationId: getPublicProductBySlug
+      tags: [public]
+      summary: One public product by slug.
+      description: >
+        No auth. `404 NOT_FOUND` for an unknown, inactive, or
+        inactive-category product (same visibility rule as the list,
+        O-22). Each variant carries its own `price`/`availability`
+        (D-67/D-68/O-20); only active variants are listed. Cached 60 s
+        per resolved locale.
+      security: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductPublic"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
 components:
   securitySchemes:
     cookieAuth:
@@ -3292,10 +3423,9 @@ components:
     VariantPublic:
       type: object
       description: >
-        Defined now for Phase 6's public catalogue (D-32/D-34); no path
-        references it yet. No cost, no `isActive` (only active variants
-        are ever returned publicly); `availability` replaces any quantity
-        (hard rule 4/5).
+        Referenced by `GET /public/products/{slug}` (Phase 6, D-32/D-34).
+        No cost, no `isActive` (only active variants are ever returned
+        publicly); `availability` replaces any quantity (hard rule 4/5).
       required:
         - id
         - sku
@@ -3303,6 +3433,7 @@ components:
         - attributes
         - priceOverride
         - availability
+        - price
       properties:
         id:
           type: string
@@ -3319,6 +3450,8 @@ components:
           pattern: '^-?\d+(\.\d+)?$'
         availability:
           $ref: "#/components/schemas/Availability"
+        price:
+          $ref: "#/components/schemas/PublicPrice"
 
     VariantCreate:
       type: object
@@ -3468,13 +3601,17 @@ components:
     ProductPublic:
       type: object
       description: >
-        Defined now for Phase 6's public catalogue (D-32/D-34); no path
-        references it yet. Only active products/variants are ever
-        returned this way; variants carry `availability`, never cost or
-        quantity (hard rule 4/5).
+        Response body for `GET /public/products/{slug}` (Phase 6,
+        D-32/D-34). Only active products/variants are ever returned this
+        way; variants carry `availability`, never cost or quantity (hard
+        rule 4/5). A product with no category has `categoryId`/
+        `categorySlug`/`categoryName` all `null` (O-22); one whose
+        category is inactive is `404 NOT_FOUND` instead.
       required:
         - id
         - categoryId
+        - categorySlug
+        - categoryName
         - slug
         - sku
         - unitId
@@ -3495,6 +3632,11 @@ components:
         categoryId:
           type: ["string", "null"]
           format: uuid
+        categorySlug:
+          type: ["string", "null"]
+        categoryName:
+          type: ["string", "null"]
+          description: Resolved for the caller's `Accept-Language`, same fallback as `name`.
         slug:
           type: string
         sku:
@@ -3508,12 +3650,22 @@ components:
           type: ["string", "null"]
           format: decimal
           pattern: '^-?\d+(\.\d+)?$'
+          description: >
+            `null` unless a promo is active right now, per the D-68
+            calendar-day rule in the shop's timezone (D-109: a future
+            promo is hidden from the public site until it starts). Use
+            `price.current`/`price.promoActive` to know what a customer
+            actually pays; this field and `promoFrom`/`promoTo` are only
+            for showing an active promo's own window, never a preview of
+            one still to come.
         promoFrom:
           type: ["string", "null"]
           format: date-time
+          description: "`null` unless a promo is active right now (see `promoPrice`)."
         promoTo:
           type: ["string", "null"]
           format: date-time
+          description: "`null` unless a promo is active right now (see `promoPrice`)."
         isActive:
           type: boolean
         isFeatured:
@@ -3535,6 +3687,176 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ProductImage"
+
+    PublicPrice:
+      type: object
+      description: >
+        D-67/D-68 effective price, resolved server-side (Phase 6): a
+        promo replaces the price entirely on every calendar day in the
+        shop's timezone from `promoFrom`'s date to `promoTo`'s date
+        inclusive, it is never combined with a price override.
+      required:
+        - regular
+        - current
+        - promoActive
+      properties:
+        regular:
+          $ref: "#/components/schemas/Decimal"
+          description: The non-promo price (variant `priceOverride` when set, else the product `basePrice`).
+        current:
+          $ref: "#/components/schemas/Decimal"
+          description: What a customer pays right now — the product `promoPrice` when `promoActive`, else `regular`.
+        promoActive:
+          type: boolean
+
+    PublicHero:
+      type: object
+      description: >
+        `PublicShop.blocks.hero` — `ContentHero`'s fields plus `image`,
+        `imageMediaId` resolved to its `MediaUrls` set (O-21). `image` is
+        absent when `imageMediaId` is unset or names media that no
+        longer exists.
+      required:
+        - title
+      properties:
+        title:
+          type: string
+          maxLength: 200
+        tagline:
+          type: string
+          maxLength: 300
+        imageMediaId:
+          type: string
+          format: uuid
+        image:
+          $ref: "#/components/schemas/MediaUrls"
+
+    PublicShopBlocks:
+      type: object
+      description: >
+        Each of the six landing sections (D-99), absent when that key has
+        no saved content in any locale (D-104) — never present-but-empty.
+      properties:
+        hero:
+          $ref: "#/components/schemas/PublicHero"
+        about:
+          $ref: "#/components/schemas/ContentAbout"
+        hours:
+          $ref: "#/components/schemas/ContentHours"
+        contacts:
+          $ref: "#/components/schemas/ContentContacts"
+        social:
+          $ref: "#/components/schemas/ContentSocial"
+        seo:
+          $ref: "#/components/schemas/ContentSeo"
+
+    PublicShop:
+      type: object
+      description: Response body for `GET /public/shop` (O-21).
+      required:
+        - name
+        - slug
+        - currency
+        - defaultLocale
+        - locale
+        - translationFallback
+        - blocks
+      properties:
+        name:
+          type: string
+        slug:
+          type: string
+        currency:
+          type: string
+          description: ISO 4217 currency code (ADR-007). `UZS` in MVP.
+        defaultLocale:
+          $ref: "#/components/schemas/Locale"
+        locale:
+          $ref: "#/components/schemas/Locale"
+          description: The locale this response was resolved for (requested `Accept-Language`, falling back to `defaultLocale`).
+        translationFallback:
+          type: boolean
+          description: "`true` when any block in `blocks` fell back to `uz` (D-104)."
+        blocks:
+          $ref: "#/components/schemas/PublicShopBlocks"
+
+    PublicCategory:
+      type: object
+      description: One row of `GET /public/categories` (O-21).
+      required:
+        - id
+        - slug
+        - name
+        - productCount
+      properties:
+        id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+        name:
+          type: string
+          description: Resolved for the caller's `Accept-Language`, falling back to `uz` then any locale (ADR-012).
+        productCount:
+          type: integer
+          description: Active, non-deleted products in this category (O-20).
+
+    PublicCategoryList:
+      type: object
+      description: Flat envelope for `GET /public/categories` (not cursor-paginated — a shop has few categories).
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PublicCategory"
+
+    PublicProductListItem:
+      type: object
+      description: One row of `GET /public/products` (O-21/O-22).
+      required:
+        - id
+        - slug
+        - name
+        - price
+        - availability
+        - categorySlug
+      properties:
+        id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+        name:
+          type: string
+          description: Resolved for the caller's `Accept-Language`, falling back to `uz` then any locale (ADR-012).
+        coverImage:
+          $ref: "#/components/schemas/ProductImage"
+          description: The image flagged `isCover`, else the first by position, else absent (D-83).
+        price:
+          $ref: "#/components/schemas/PublicPrice"
+          description: Product-level (`basePrice`/`promoPrice`), not per-variant — see `GET /public/products/{slug}` for per-variant pricing.
+        availability:
+          $ref: "#/components/schemas/Availability"
+          description: The best availability among the product's active variants (O-20).
+        categorySlug:
+          type: ["string", "null"]
+          description: "`null` for an uncategorized product (O-22)."
+
+    PublicProductList:
+      type: object
+      description: Cursor-paginated envelope for `GET /public/products`, newest first (D-92).
+      required:
+        - items
+        - nextCursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PublicProductListItem"
+        nextCursor:
+          type: ["string", "null"]
 
     ProductCreate:
       type: object

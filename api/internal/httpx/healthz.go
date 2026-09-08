@@ -11,6 +11,7 @@ import (
 	"github.com/Sulton-Ali/savdo/api/internal/content"
 	"github.com/Sulton-Ali/savdo/api/internal/crm"
 	"github.com/Sulton-Ali/savdo/api/internal/media"
+	"github.com/Sulton-Ali/savdo/api/internal/public"
 	"github.com/Sulton-Ali/savdo/api/internal/reports"
 	"github.com/Sulton-Ali/savdo/api/internal/sales"
 	"github.com/Sulton-Ali/savdo/api/internal/shop"
@@ -55,6 +56,7 @@ type server struct {
 	reports *reports.Handler
 	sales   *sales.Handler
 	content *content.Handler
+	public  *public.Handler
 }
 
 // GetHealthz reports the process is up. It does not touch the database —

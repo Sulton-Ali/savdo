@@ -303,6 +303,50 @@ func TestSumVariantQtyByProduct_ignoresInactiveLocationsAndHandlesAbsence(t *tes
 	}
 }
 
+// TestSumVariantQtyByProduct_excludesInactiveVariants pins the T3 fix: a
+// deactivated variant must never contribute a row, however well stocked —
+// public.listAvailability/publicVariants fold "no row" to out_of_stock
+// (O-20: list-level availability is the best of a product's *active*
+// variants only).
+func TestSumVariantQtyByProduct_excludesInactiveVariants(t *testing.T) {
+	pool := testdb.New(t)
+	testdb.Truncate(t, pool)
+	ctx := context.Background()
+	q := db.New(pool)
+
+	shop := catalogShop(ctx, t, q, "shop-qty-sum-inactive")
+	unit := catalogUnit(ctx, t, q, shop.ID, "pcs")
+	product := catalogProduct(ctx, t, q, shop.ID, unit.ID, "qty-sum-inactive-product")
+	loc := stockLocation(ctx, t, q, shop.ID, "Main")
+
+	active := stockVariant(ctx, t, q, shop.ID, product.ID, `{"size":"S"}`)
+	inactive, err := q.CreateVariant(ctx, db.CreateVariantParams{
+		ID: uuid.New(), ShopID: shop.ID, ProductID: product.ID, Attributes: []byte(`{"size":"M"}`), IsActive: false,
+	})
+	if err != nil {
+		t.Fatalf("CreateVariant (inactive): %v", err)
+	}
+
+	applyDelta(ctx, t, pool, shop.ID, active.ID, loc.ID, db.StockMovementKindPurchaseIn, "5.000")
+	applyDelta(ctx, t, pool, shop.ID, inactive.ID, loc.ID, db.StockMovementKindPurchaseIn, "50.000")
+
+	byProductRows, err := q.SumVariantQtyByProduct(ctx, db.SumVariantQtyByProductParams{ShopID: shop.ID, ProductID: product.ID})
+	if err != nil {
+		t.Fatalf("SumVariantQtyByProduct: %v", err)
+	}
+	if len(byProductRows) != 1 || byProductRows[0].VariantID != active.ID {
+		t.Fatalf("SumVariantQtyByProduct = %+v, want exactly the active variant's row", byProductRows)
+	}
+
+	forProductsRows, err := q.SumVariantQtyForProducts(ctx, db.SumVariantQtyForProductsParams{ShopID: shop.ID, ProductIds: []uuid.UUID{product.ID}})
+	if err != nil {
+		t.Fatalf("SumVariantQtyForProducts: %v", err)
+	}
+	if len(forProductsRows) != 1 || forProductsRows[0].VariantID != active.ID {
+		t.Fatalf("SumVariantQtyForProducts = %+v, want exactly the active variant's row", forProductsRows)
+	}
+}
+
 func TestSumVariantQtyForProducts_noNPlusOneAcrossProducts(t *testing.T) {
 	pool := testdb.New(t)
 	testdb.Truncate(t, pool)

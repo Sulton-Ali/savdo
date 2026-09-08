@@ -173,6 +173,7 @@ func (h *Handler) AddProductImage(ctx context.Context, req gen.AddProductImageRe
 		Id: created.ID, MediaId: created.MediaID, VariantId: nullableUUID(created.VariantID),
 		SortOrder: int(created.SortOrder), IsCover: created.IsCover, Urls: media.URLs(h.svc.mediaBaseURL, mediaFile.StorageKey),
 	}
+	h.svc.invalidatePublic(authCtx.ShopID)
 	return gen.AddProductImage201JSONResponse(resp), nil
 }
 
@@ -280,6 +281,7 @@ func (h *Handler) UpdateProductImage(ctx context.Context, req gen.UpdateProductI
 		Id: updated.ID, MediaId: updated.MediaID, VariantId: nullableUUID(updated.VariantID),
 		SortOrder: int(updated.SortOrder), IsCover: updated.IsCover, Urls: media.URLs(h.svc.mediaBaseURL, target.StorageKey),
 	}
+	h.svc.invalidatePublic(authCtx.ShopID)
 	return gen.UpdateProductImage200JSONResponse(resp), nil
 }
 
@@ -325,6 +327,7 @@ func (h *Handler) RemoveProductImage(ctx context.Context, req gen.RemoveProductI
 		return nil, fmt.Errorf("catalog: commit remove product image: %w", err)
 	}
 
+	h.svc.invalidatePublic(authCtx.ShopID)
 	return gen.RemoveProductImage204Response{}, nil
 }
 
@@ -390,6 +393,7 @@ func (h *Handler) ReorderProductImages(ctx context.Context, req gen.ReorderProdu
 	if err != nil {
 		return nil, fmt.Errorf("catalog: list product images after reorder: %w", err)
 	}
+	h.svc.invalidatePublic(authCtx.ShopID)
 	return gen.ReorderProductImages200JSONResponse(gen.ProductImageList{Items: items}), nil
 }
 

@@ -22,6 +22,7 @@ import (
 	"github.com/Sulton-Ali/savdo/api/internal/db"
 	"github.com/Sulton-Ali/savdo/api/internal/httpx"
 	"github.com/Sulton-Ali/savdo/api/internal/media"
+	"github.com/Sulton-Ali/savdo/api/internal/public"
 	"github.com/Sulton-Ali/savdo/api/internal/reports"
 	"github.com/Sulton-Ali/savdo/api/internal/sales"
 	"github.com/Sulton-Ali/savdo/api/internal/shop"
@@ -83,6 +84,28 @@ func run() error {
 	salesSvc := sales.NewService(queries)
 	contentSvc := content.NewService(queries)
 
+	// publicSvc serves GET /public/* (Phase 6, D-105) for whatever shop
+	// Config.PublicShopSlug names — resolved per request (cached), not
+	// once here like shopRow above, since Phase 8 replaces this with a
+	// hostname lookup and the resolution point should not move again
+	// (public.Service's own doc comment). Wired as the invalidator for
+	// content and catalog writes (content.Invalidator/catalog.Invalidator
+	// — see those types' doc comments for why the interface is declared
+	// there, not in internal/public) so a content PUT or a catalogue
+	// product/category/variant/image write clears the affected shop's
+	// cached public responses.
+	publicSvc := public.NewService(queries, contentSvc, cfg.PublicShopSlug, cfg.MediaBaseURL)
+	contentSvc.SetInvalidator(publicSvc)
+	catalogSvc.SetInvalidator(publicSvc)
+	// Best-effort startup check: unlike ShopSlug above, a bad
+	// PUBLIC_SHOP_SLUG never fails startup — it only degrades the public
+	// landing (every GET /public/* 404s until it is fixed), not the
+	// authenticated API.
+	if err := publicSvc.WarmShop(ctx); err != nil {
+		logger.Warn("PUBLIC_SHOP_SLUG did not resolve to a shop; GET /public/* will 404 until fixed",
+			"slug", cfg.PublicShopSlug, "error", err)
+	}
+
 	// LocalStorage writes under Config.MediaDir (ADR-008); mediaSvc caps
 	// an upload's file part at Config.MediaMaxBytes, bounds concurrent
 	// decode/derive work at Config.MediaConcurrency, and builds derivative
@@ -114,7 +137,7 @@ func run() error {
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           httpx.NewRouter(logger, pool, authSvc, shopSvc, mediaSvc, devMedia, catalogSvc, stockSvc, crmSvc, reportsSvc, salesSvc, contentSvc),
+		Handler:           httpx.NewRouter(logger, pool, authSvc, shopSvc, mediaSvc, devMedia, catalogSvc, stockSvc, crmSvc, reportsSvc, salesSvc, contentSvc, publicSvc),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      15 * time.Second,

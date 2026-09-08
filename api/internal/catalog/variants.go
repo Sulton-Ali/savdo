@@ -293,6 +293,7 @@ func (h *Handler) CreateVariant(ctx context.Context, req gen.CreateVariantReques
 	if err != nil {
 		return nil, fmt.Errorf("catalog: %w", err)
 	}
+	h.svc.invalidatePublic(authCtx.ShopID)
 	return gen.CreateVariant201JSONResponse(resp), nil
 }
 
@@ -435,6 +436,7 @@ func (h *Handler) UpdateVariant(ctx context.Context, req gen.UpdateVariantReques
 	if err != nil {
 		return nil, fmt.Errorf("catalog: %w", err)
 	}
+	h.svc.invalidatePublic(authCtx.ShopID)
 	return gen.UpdateVariant200JSONResponse(resp), nil
 }
 
@@ -506,5 +508,6 @@ func (h *Handler) DeleteVariant(ctx context.Context, req gen.DeleteVariantReques
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("catalog: commit delete variant: %w", err)
 	}
+	h.svc.invalidatePublic(authCtx.ShopID)
 	return gen.DeleteVariant204Response{}, nil
 }

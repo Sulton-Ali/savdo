@@ -1070,6 +1070,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/public/shop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Shop identity and landing content blocks.
+         * @description No auth (`security: []`). Resolves the shop named by `PUBLIC_SHOP_SLUG` (D-105); `404 NOT_FOUND` if it does not exist. `blocks.*` is absent for a key with no saved content in any locale; a key with content in some locale but not the requested one falls back to `uz` (D-104) and sets `translationFallback`. `blocks.hero.image` resolves `imageMediaId` to its `MediaUrls` set when the media exists. Cached 60 s per resolved locale; `Cache-Control: public, max-age=60`, strong `ETag`, `If-None-Match` → `304` (O-20).
+         */
+        get: operations["getPublicShop"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/public/categories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Active categories with their public product count.
+         * @description No auth. Not cursor-paginated (a shop has few categories). `productCount` counts only active, non-deleted products in that category (O-20). Cached 60 s per resolved locale.
+         */
+        get: operations["listPublicCategories"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/public/products": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Browse the public catalogue.
+         * @description No auth. Cursor-paginated, newest first (D-92). Only active products; a product with no category is included with `categorySlug: null`, one whose category is inactive is excluded (O-22). `price`/`availability` are product-level (D-103/O-20), not per-variant — see `GET /public/products/{slug}` for that. Cached 60 s per resolved locale and query.
+         */
+        get: operations["listPublicProducts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/public/products/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One public product by slug.
+         * @description No auth. `404 NOT_FOUND` for an unknown, inactive, or inactive-category product (same visibility rule as the list, O-22). Each variant carries its own `price`/`availability` (D-67/D-68/O-20); only active variants are listed. Cached 60 s per resolved locale.
+         */
+        get: operations["getPublicProductBySlug"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1383,7 +1463,7 @@ export interface components {
             costOverride?: string | null;
             isActive: boolean;
         };
-        /** @description Defined now for Phase 6's public catalogue (D-32/D-34); no path references it yet. No cost, no `isActive` (only active variants are ever returned publicly); `availability` replaces any quantity (hard rule 4/5). */
+        /** @description Referenced by `GET /public/products/{slug}` (Phase 6, D-32/D-34). No cost, no `isActive` (only active variants are ever returned publicly); `availability` replaces any quantity (hard rule 4/5). */
         VariantPublic: {
             /** Format: uuid */
             id: string;
@@ -1393,6 +1473,7 @@ export interface components {
             /** Format: decimal */
             priceOverride: string | null;
             availability: components["schemas"]["Availability"];
+            price: components["schemas"]["PublicPrice"];
         };
         VariantCreate: {
             sku?: string;
@@ -1455,22 +1536,34 @@ export interface components {
             /** @description `GET /products` list items only (D-83): the product image flagged `isCover`, else the first by position, else absent. `GET /products/{id}` returns the full `images` array instead and does not set this field. */
             coverImage?: components["schemas"]["ProductImage"];
         };
-        /** @description Defined now for Phase 6's public catalogue (D-32/D-34); no path references it yet. Only active products/variants are ever returned this way; variants carry `availability`, never cost or quantity (hard rule 4/5). */
+        /** @description Response body for `GET /public/products/{slug}` (Phase 6, D-32/D-34). Only active products/variants are ever returned this way; variants carry `availability`, never cost or quantity (hard rule 4/5). A product with no category has `categoryId`/ `categorySlug`/`categoryName` all `null` (O-22); one whose category is inactive is `404 NOT_FOUND` instead. */
         ProductPublic: {
             /** Format: uuid */
             id: string;
             /** Format: uuid */
             categoryId: string | null;
+            categorySlug: string | null;
+            /** @description Resolved for the caller's `Accept-Language`, same fallback as `name`. */
+            categoryName: string | null;
             slug: string;
             sku: string | null;
             /** Format: uuid */
             unitId: string;
             basePrice: components["schemas"]["Decimal"];
-            /** Format: decimal */
+            /**
+             * Format: decimal
+             * @description `null` unless a promo is active right now, per the D-68 calendar-day rule in the shop's timezone (D-109: a future promo is hidden from the public site until it starts). Use `price.current`/`price.promoActive` to know what a customer actually pays; this field and `promoFrom`/`promoTo` are only for showing an active promo's own window, never a preview of one still to come.
+             */
             promoPrice: string | null;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description `null` unless a promo is active right now (see `promoPrice`).
+             */
             promoFrom: string | null;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description `null` unless a promo is active right now (see `promoPrice`).
+             */
             promoTo: string | null;
             isActive: boolean;
             isFeatured: boolean;
@@ -1481,6 +1574,79 @@ export interface components {
             translationFallback: boolean;
             variants?: components["schemas"]["VariantPublic"][];
             images?: components["schemas"]["ProductImage"][];
+        };
+        /** @description D-67/D-68 effective price, resolved server-side (Phase 6): a promo replaces the price entirely on every calendar day in the shop's timezone from `promoFrom`'s date to `promoTo`'s date inclusive, it is never combined with a price override. */
+        PublicPrice: {
+            /** @description The non-promo price (variant `priceOverride` when set, else the product `basePrice`). */
+            regular: components["schemas"]["Decimal"];
+            /** @description What a customer pays right now — the product `promoPrice` when `promoActive`, else `regular`. */
+            current: components["schemas"]["Decimal"];
+            promoActive: boolean;
+        };
+        /** @description `PublicShop.blocks.hero` — `ContentHero`'s fields plus `image`, `imageMediaId` resolved to its `MediaUrls` set (O-21). `image` is absent when `imageMediaId` is unset or names media that no longer exists. */
+        PublicHero: {
+            title: string;
+            tagline?: string;
+            /** Format: uuid */
+            imageMediaId?: string;
+            image?: components["schemas"]["MediaUrls"];
+        };
+        /** @description Each of the six landing sections (D-99), absent when that key has no saved content in any locale (D-104) — never present-but-empty. */
+        PublicShopBlocks: {
+            hero?: components["schemas"]["PublicHero"];
+            about?: components["schemas"]["ContentAbout"];
+            hours?: components["schemas"]["ContentHours"];
+            contacts?: components["schemas"]["ContentContacts"];
+            social?: components["schemas"]["ContentSocial"];
+            seo?: components["schemas"]["ContentSeo"];
+        };
+        /** @description Response body for `GET /public/shop` (O-21). */
+        PublicShop: {
+            name: string;
+            slug: string;
+            /** @description ISO 4217 currency code (ADR-007). `UZS` in MVP. */
+            currency: string;
+            defaultLocale: components["schemas"]["Locale"];
+            /** @description The locale this response was resolved for (requested `Accept-Language`, falling back to `defaultLocale`). */
+            locale: components["schemas"]["Locale"];
+            /** @description `true` when any block in `blocks` fell back to `uz` (D-104). */
+            translationFallback: boolean;
+            blocks: components["schemas"]["PublicShopBlocks"];
+        };
+        /** @description One row of `GET /public/categories` (O-21). */
+        PublicCategory: {
+            /** Format: uuid */
+            id: string;
+            slug: string;
+            /** @description Resolved for the caller's `Accept-Language`, falling back to `uz` then any locale (ADR-012). */
+            name: string;
+            /** @description Active, non-deleted products in this category (O-20). */
+            productCount: number;
+        };
+        /** @description Flat envelope for `GET /public/categories` (not cursor-paginated — a shop has few categories). */
+        PublicCategoryList: {
+            items: components["schemas"]["PublicCategory"][];
+        };
+        /** @description One row of `GET /public/products` (O-21/O-22). */
+        PublicProductListItem: {
+            /** Format: uuid */
+            id: string;
+            slug: string;
+            /** @description Resolved for the caller's `Accept-Language`, falling back to `uz` then any locale (ADR-012). */
+            name: string;
+            /** @description The image flagged `isCover`, else the first by position, else absent (D-83). */
+            coverImage?: components["schemas"]["ProductImage"];
+            /** @description Product-level (`basePrice`/`promoPrice`), not per-variant — see `GET /public/products/{slug}` for per-variant pricing. */
+            price: components["schemas"]["PublicPrice"];
+            /** @description The best availability among the product's active variants (O-20). */
+            availability: components["schemas"]["Availability"];
+            /** @description `null` for an uncategorized product (O-22). */
+            categorySlug: string | null;
+        };
+        /** @description Cursor-paginated envelope for `GET /public/products`, newest first (D-92). */
+        PublicProductList: {
+            items: components["schemas"]["PublicProductListItem"][];
+            nextCursor: string | null;
         };
         ProductCreate: {
             /** Format: uuid */
@@ -4496,6 +4662,103 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+        };
+    };
+    getPublicShop: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicShop"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listPublicCategories: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicCategoryList"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listPublicProducts: {
+        parameters: {
+            query?: {
+                /** @description Filter to one category's slug. */
+                category?: string;
+                featured?: boolean;
+                /** @description Free-text search over product name (Postgres ILIKE/trigram). */
+                q?: string;
+                /** @description Maximum number of items to return. */
+                limit?: components["parameters"]["Limit"];
+                /** @description Opaque cursor from a previous page's `nextCursor`. */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicProductList"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getPublicProductBySlug: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductPublic"];
+                };
+            };
+            404: components["responses"]["NotFound"];
         };
     };
 }
