@@ -59,6 +59,14 @@ const (
 	actionVerifierN = 20 // bytes of random verifier newSelectorToken draws for an actionToken
 )
 
+// otpDeliveryTimeout bounds the goroutine RequestOtp spawns to actually
+// call OTPSender.SendOTP (Review MAJOR 2) — long enough for a normal
+// Telegram Bot API call, short enough that a hung sender can't leak
+// goroutines forever. Derived from context.Background(), not the
+// request's own ctx, since the request has already returned by the time
+// this fires.
+const otpDeliveryTimeout = 10 * time.Second
+
 // OTPSender delivers a freshly generated OTP code to a user's linked
 // Telegram account. Implemented by internal/bot (T4); RequestOtp (below)
 // never has any other way to reach a chat — it only ever has the
@@ -251,12 +259,25 @@ func (s *Service) RequestOtp(ctx context.Context, username string, purpose db.Ot
 	if s.otpSender == nil {
 		return nil
 	}
-	// Delivery failure is logged as a class only — never the code itself
-	// (hard rule 9) — and never fails the request: RequestOtp's contract
-	// is "202 either way" (docs/05-API.md § Auth spec).
-	if err := s.otpSender.SendOTP(ctx, tgAccount.TelegramUserID, code, string(user.Locale)); err != nil {
-		slog.Error("auth: otp delivery failed", "purpose", string(purpose), "reason", "send_error")
-	}
+	// Delivery runs off the request path (Review MAJOR 2): calling
+	// SendOTP synchronously here made RequestOtp's own latency depend on
+	// a Telegram round trip for a real, linked user while every other
+	// case (unknown username, no linked account, ...) returned almost
+	// immediately — a timing side channel that enumerates which
+	// usernames are actually linked, on top of tying up the request for
+	// as long as delivery (or a hung sender) took. The goroutine gets its
+	// own bounded context, deliberately derived from context.Background()
+	// rather than ctx: ctx belongs to the HTTP request, which is already
+	// on its way to completing by the time this runs, and must not cut
+	// delivery short the moment the client sees its 202. Delivery failure
+	// is logged as a class only — never the code itself (hard rule 9).
+	go func() { //nolint:gosec // G118: context.Background() is deliberate here, not a mistake — see the comment above.
+		sendCtx, cancel := context.WithTimeout(context.Background(), otpDeliveryTimeout)
+		defer cancel()
+		if err := s.otpSender.SendOTP(sendCtx, tgAccount.TelegramUserID, code, string(user.Locale)); err != nil {
+			slog.Error("auth: otp delivery failed", "purpose", string(purpose), "reason", "send_error")
+		}
+	}()
 	return nil
 }
 
@@ -302,13 +323,36 @@ func (s *Service) VerifyOtp(ctx context.Context, username string, purpose db.Otp
 	}
 
 	if !verifyOTPHash(otp.CodeHash, code) {
-		if _, err := s.q.IncrementOTPAttempts(ctx, db.IncrementOTPAttemptsParams{ShopID: s.shopID, ID: otp.ID}); err != nil {
+		// Increment first, decide on the value the database actually
+		// returned — never on the otp.Attempts snapshot read above, which
+		// concurrent wrong-code submissions would all still see as
+		// "under the cap" (Review MAJOR 4: read-then-write here let each
+		// concurrent guess through for free). Burn the code the instant
+		// the cap is reached so a delayed correct submission can't use it
+		// either, and so GetActiveOTPCode's used_at IS NULL filter alone
+		// answers every later attempt without a separate cap check.
+		updated, err := s.q.IncrementOTPAttempts(ctx, db.IncrementOTPAttemptsParams{ShopID: s.shopID, ID: otp.ID})
+		if err != nil {
 			return "", time.Time{}, fmt.Errorf("auth: verify otp: increment attempts: %w", err)
+		}
+		if updated.Attempts >= otpMaxAttempts {
+			if _, err := s.q.MarkOTPUsed(ctx, db.MarkOTPUsedParams{ShopID: s.shopID, ID: otp.ID}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return "", time.Time{}, fmt.Errorf("auth: verify otp: mark exhausted code used: %w", err)
+			}
 		}
 		return "", time.Time{}, apierr.Unauthenticated()
 	}
 
 	if _, err := s.q.MarkOTPUsed(ctx, db.MarkOTPUsedParams{ShopID: s.shopID, ID: otp.ID}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Already used — a replayed or racing second VerifyOtp call
+			// for the same code (Review MINOR 5: this used to fall
+			// through to the generic %w wrap below and surface as a 500;
+			// it is exactly the same "code no longer valid" case
+			// ResetPassword's own MarkOTPUsed call already treats as
+			// Unauthenticated).
+			return "", time.Time{}, apierr.Unauthenticated()
+		}
 		return "", time.Time{}, fmt.Errorf("auth: verify otp: mark used: %w", err)
 	}
 
@@ -385,6 +429,22 @@ func (s *Service) ResetPassword(ctx context.Context, actionToken, newPassword st
 		}
 		return fmt.Errorf("auth: reset password: mark action token used: %w", err)
 	}
+
+	// Re-check is_active (Review MINOR 10): the action token may have
+	// been minted while the user was active and redeemed after an owner
+	// deactivated their account in between — a deactivated user must not
+	// be able to set a new password any more than they can log in.
+	user, err := qtx.GetUserByID(ctx, db.GetUserByIDParams{ShopID: s.shopID, ID: userID})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return apierr.Unauthenticated()
+		}
+		return fmt.Errorf("auth: reset password: load user: %w", err)
+	}
+	if !user.IsActive {
+		return apierr.Unauthenticated()
+	}
+
 	if err := qtx.SetUserPassword(ctx, db.SetUserPasswordParams{ShopID: s.shopID, ID: userID, PasswordHash: hash}); err != nil {
 		return fmt.Errorf("auth: reset password: set password: %w", err)
 	}

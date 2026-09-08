@@ -161,7 +161,8 @@ absolute (config.go L120-129).
 | `MEDIA_MAX_BYTES`   | `10485760`     | Single upload file part size cap (10 MB); checked before WebP encoding                |
 | `MEDIA_CONCURRENCY` | `2`            | Max WebP derivative encode tasks running concurrently (gated by a semaphore; Review B) |
 | `MEDIA_QUEUE`       | `8`            | Max uploads in flight (spooling + queued + encoding); admission gate outside encode queue |
-| `TELEGRAM_BOT_TOKEN`| (secret)       | Telegram bot API token (D-112); owner-provided in `infra/.env` only, never in repo or logs |
+| `BOT_USERNAME`      | (required)     | The bot's own `@handle`, no `@` (ADR-005); not a secret. `CreateTelegramLink`'s deep link embeds it (`https://t.me/<BOT_USERNAME>?start=link_<code>`), and `VerifyLoginWidget` checks the Login Widget's HMAC against `TELEGRAM_BOT_TOKEN` (the same bot). `config.Load()` fails fast at startup if this is empty. |
+| `TELEGRAM_BOT_TOKEN`| (required, secret) | Telegram bot API token (D-112); owner-provided in `infra/.env` only, never in repo or logs. `config.Load()` fails fast at startup if this is empty — an empty token would otherwise make the Login Widget HMAC's secret key `SHA-256("")`, a public constant anyone could forge a valid login against. |
 | `ANTHROPIC_API_KEY` | (secret)       | Anthropic API key for the bot's LLM (D-112); owner-provided in `infra/.env` only, never in repo or logs |
 | `AI_MODEL`          | `claude-sonnet-5` | LLM model identifier (D-110); configurable for different providers via the `internal/ai` adapter |
 | `AI_PROVIDER`       | `anthropic`    | LLM provider selector (O-29); `anthropic` or `openai_compat` (self-hosted) in Phase 7 |

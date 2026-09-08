@@ -29,7 +29,20 @@ import (
 // to prevent the use of outdated data" —
 // https://core.telegram.org/widgets/login-legacy#checking-authorization):
 // 24 hours.
-const telegramAuthMaxAge = 24 * time.Hour
+//
+// telegramAuthMaxSkew bounds how far into the future an authDate may claim
+// to be before VerifyLoginWidget rejects it too — a correctly-HMAC'd
+// payload timestamped hours or days ahead of "now" is not something the
+// real widget would ever produce, and rejecting it costs nothing (Review
+// finding 8's "trivial half": the 24h replay-window question itself is
+// left to the owner, but a future-dated auth_date has no legitimate
+// explanation regardless of how that question is answered). 60 seconds
+// gives normal clock drift between this server and Telegram's headroom
+// without accepting anything meaningfully "from the future".
+const (
+	telegramAuthMaxAge  = 24 * time.Hour
+	telegramAuthMaxSkew = 60 * time.Second
+)
 
 // errTelegramAuthInvalid is VerifyLoginWidget's one failure value — a bad
 // HMAC, a malformed id or a stale authDate are all the same "not valid"
@@ -102,13 +115,26 @@ func widgetSignature(payload gen.TelegramAuthRequest, botToken string) string {
 // carried as a decimal string end to end for JS safety) and the Telegram
 // username, if the widget sent one.
 func VerifyLoginWidget(payload gen.TelegramAuthRequest, botToken string) (telegramUserID int64, username string, err error) {
+	// An empty botToken must never reach widgetSignature: its secret_key
+	// would be SHA-256("") — a public constant anyone can compute — so a
+	// caller who forgot to configure TELEGRAM_BOT_TOKEN would silently
+	// accept a forged HMAC for any payload instead of rejecting every one
+	// (Review CRITICAL 1). config.Load already refuses to start the API
+	// with an empty token, but this check is the last line of defense in
+	// case VerifyLoginWidget is ever reached with a zero-value Config
+	// some other way (e.g. a test).
+	if botToken == "" {
+		return 0, "", errTelegramAuthInvalid
+	}
+
 	want := widgetSignature(payload, botToken)
 	got := strings.ToLower(strings.TrimSpace(payload.Hash))
 	if len(want) != len(got) || subtle.ConstantTimeCompare([]byte(want), []byte(got)) != 1 {
 		return 0, "", errTelegramAuthInvalid
 	}
 
-	if time.Since(time.Unix(int64(payload.AuthDate), 0)) > telegramAuthMaxAge {
+	age := time.Since(time.Unix(int64(payload.AuthDate), 0))
+	if age > telegramAuthMaxAge || age < -telegramAuthMaxSkew {
 		return 0, "", errTelegramAuthInvalid
 	}
 
@@ -290,9 +316,68 @@ func (s *Service) CompleteLink(ctx context.Context, code string, telegramUserID 
 
 	sum := sha256.Sum256([]byte(verifier))
 	if subtle.ConstantTimeCompare(sum[:], otp.CodeHash) != 1 {
-		if _, err := s.q.IncrementOTPAttempts(ctx, db.IncrementOTPAttemptsParams{ShopID: s.shopID, ID: otp.ID}); err != nil {
+		// Increment first, decide on the value the database actually
+		// returned — never on the otp.Attempts snapshot read above, which
+		// two concurrent wrong-verifier submissions would both still see
+		// as "under the cap" (Review MAJOR 4). Burn the code the moment
+		// the cap is reached so neither a further guess nor a delayed
+		// correct submission can use it — GetActiveOTPCode's used_at IS
+		// NULL filter then makes every later CompleteLink call for this
+		// code answer ErrLinkCodeInvalid without needing its own cap
+		// check.
+		updated, err := s.q.IncrementOTPAttempts(ctx, db.IncrementOTPAttemptsParams{ShopID: s.shopID, ID: otp.ID})
+		if err != nil {
 			return fmt.Errorf("auth: complete telegram link: increment attempts: %w", err)
 		}
+		if updated.Attempts >= otpMaxAttempts {
+			if _, err := s.q.MarkOTPUsed(ctx, db.MarkOTPUsedParams{ShopID: s.shopID, ID: otp.ID}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("auth: complete telegram link: mark exhausted code used: %w", err)
+			}
+		}
+		return ErrLinkCodeInvalid
+	}
+
+	// From here, MarkOTPUsed and LinkTelegramAccount happen in one
+	// transaction (Review MAJOR 3): the previous version linked the
+	// account first and marked the code used second, as two separate
+	// statements — a failure in between left the account linked with the
+	// code still active (replayable), and two concurrent CompleteLink
+	// calls for the same code could both pass the verifier check above
+	// and both link. MarkOTPUsed goes first and is the one step that
+	// decides the winner: its own `used_at IS NULL` guard means only one
+	// concurrent caller can ever get past it for a given code, and if
+	// linking fails afterwards (a conflicting Telegram account, an
+	// infrastructure error) the whole transaction rolls back, so the code
+	// is not burned by a link attempt that didn't actually take effect.
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("auth: complete telegram link: begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	qtx := s.q.WithTx(tx)
+
+	if _, err := qtx.MarkOTPUsed(ctx, db.MarkOTPUsedParams{ShopID: s.shopID, ID: otp.ID}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Already used — a replayed or racing second CompleteLink
+			// call for the same code. Same outward answer as any other
+			// invalid code.
+			return ErrLinkCodeInvalid
+		}
+		return fmt.Errorf("auth: complete telegram link: mark code used: %w", err)
+	}
+
+	// Re-check is_active (Review MINOR 10): the code may have been
+	// requested while the user was active and completed after an owner
+	// deactivated their account in between — a deactivated user must not
+	// be able to complete a Telegram link any more than they can log in.
+	user, err := qtx.GetUserByID(ctx, db.GetUserByIDParams{ShopID: s.shopID, ID: userID})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrLinkCodeInvalid
+		}
+		return fmt.Errorf("auth: complete telegram link: load user: %w", err)
+	}
+	if !user.IsActive {
 		return ErrLinkCodeInvalid
 	}
 
@@ -305,7 +390,7 @@ func (s *Service) CompleteLink(ctx context.Context, code string, telegramUserID 
 	if err != nil {
 		linkID = uuid.New()
 	}
-	if _, err := s.q.LinkTelegramAccount(ctx, db.LinkTelegramAccountParams{
+	if _, err := qtx.LinkTelegramAccount(ctx, db.LinkTelegramAccountParams{
 		ID: linkID, UserID: userID, ShopID: s.shopID,
 		TelegramUserID: telegramUserID, TelegramUsername: uname,
 	}); err != nil {
@@ -315,8 +400,8 @@ func (s *Service) CompleteLink(ctx context.Context, code string, telegramUserID 
 		return fmt.Errorf("auth: complete telegram link: link account: %w", err)
 	}
 
-	if _, err := s.q.MarkOTPUsed(ctx, db.MarkOTPUsedParams{ShopID: s.shopID, ID: otp.ID}); err != nil {
-		return fmt.Errorf("auth: complete telegram link: mark code used: %w", err)
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("auth: complete telegram link: commit: %w", err)
 	}
 	return nil
 }

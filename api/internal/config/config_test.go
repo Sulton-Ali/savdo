@@ -15,8 +15,12 @@ func TestLoad(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "defaults when only the required DATABASE_URL is set",
-			env:  map[string]string{"DATABASE_URL": dbURL},
+			name: "defaults when only the required DATABASE_URL/BOT_USERNAME/TELEGRAM_BOT_TOKEN are set",
+			env: map[string]string{
+				"DATABASE_URL":       dbURL,
+				"BOT_USERNAME":       "savdo_bot",
+				"TELEGRAM_BOT_TOKEN": "123456:fake-token-for-tests",
+			},
 			want: Config{
 				Addr:                 ":8080",
 				LogLevel:             "info",
@@ -38,6 +42,8 @@ func TestLoad(t *testing.T) {
 				AIModel:              "claude-sonnet-5",
 				AIPriceInputPerMTok:  "2.00",
 				AIPriceOutputPerMTok: "10.00",
+				BotUsername:          "savdo_bot",
+				TelegramBotToken:     "123456:fake-token-for-tests",
 			},
 		},
 		{
@@ -100,7 +106,9 @@ func TestLoad(t *testing.T) {
 				// cases below) — set one here so this case can isolate
 				// the CookieSecure-defaulting behavior it's actually
 				// testing.
-				"MEDIA_DIR": "/data/media",
+				"MEDIA_DIR":          "/data/media",
+				"BOT_USERNAME":       "savdo_bot",
+				"TELEGRAM_BOT_TOKEN": "123456:fake-token-for-tests",
 			},
 			want: Config{
 				Addr:                 ":8080",
@@ -123,6 +131,8 @@ func TestLoad(t *testing.T) {
 				AIModel:              "claude-sonnet-5",
 				AIPriceInputPerMTok:  "2.00",
 				AIPriceOutputPerMTok: "10.00",
+				BotUsername:          "savdo_bot",
+				TelegramBotToken:     "123456:fake-token-for-tests",
 			},
 		},
 		{
@@ -152,9 +162,11 @@ func TestLoad(t *testing.T) {
 		{
 			name: "dev tolerates a relative MEDIA_DIR",
 			env: map[string]string{
-				"DATABASE_URL": dbURL,
-				"ENV":          "dev",
-				"MEDIA_DIR":    "./data/media",
+				"DATABASE_URL":       dbURL,
+				"ENV":                "dev",
+				"MEDIA_DIR":          "./data/media",
+				"BOT_USERNAME":       "savdo_bot",
+				"TELEGRAM_BOT_TOKEN": "123456:fake-token-for-tests",
 			},
 			want: Config{
 				Addr:                 ":8080",
@@ -177,7 +189,48 @@ func TestLoad(t *testing.T) {
 				AIModel:              "claude-sonnet-5",
 				AIPriceInputPerMTok:  "2.00",
 				AIPriceOutputPerMTok: "10.00",
+				BotUsername:          "savdo_bot",
+				TelegramBotToken:     "123456:fake-token-for-tests",
 			},
+		},
+		{
+			name: "missing BOT_USERNAME fails fast",
+			env: map[string]string{
+				"DATABASE_URL":       dbURL,
+				"TELEGRAM_BOT_TOKEN": "123456:fake-token-for-tests",
+			},
+			wantErr: true,
+		},
+		{
+			name: "empty BOT_USERNAME (set but blank) fails fast",
+			env: map[string]string{
+				"DATABASE_URL":       dbURL,
+				"BOT_USERNAME":       "",
+				"TELEGRAM_BOT_TOKEN": "123456:fake-token-for-tests",
+			},
+			wantErr: true,
+		},
+		{
+			// Review [empty bot token] CRITICAL 1: an empty TELEGRAM_BOT_TOKEN
+			// makes VerifyLoginWidget's secret_key SHA-256("") — a public
+			// constant an attacker can compute too — so Load must never let the
+			// API start without a real one, the same way it never starts
+			// without DATABASE_URL.
+			name: "missing TELEGRAM_BOT_TOKEN fails fast",
+			env: map[string]string{
+				"DATABASE_URL": dbURL,
+				"BOT_USERNAME": "savdo_bot",
+			},
+			wantErr: true,
+		},
+		{
+			name: "empty TELEGRAM_BOT_TOKEN (set but blank) fails fast",
+			env: map[string]string{
+				"DATABASE_URL":       dbURL,
+				"BOT_USERNAME":       "savdo_bot",
+				"TELEGRAM_BOT_TOKEN": "",
+			},
+			wantErr: true,
 		},
 	}
 

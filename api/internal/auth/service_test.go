@@ -19,6 +19,18 @@ func testConfig() config.Config {
 		LoginRateIPPerMin:   1000,
 		LoginRateUserPerMin: 1000,
 		CookieSecure:        true,
+		// config.Load() now refuses to start with an empty
+		// TELEGRAM_BOT_TOKEN/BOT_USERNAME (Review CRITICAL 1 / MINOR 11),
+		// and VerifyLoginWidget itself refuses to run with an empty
+		// botToken — a fake, fixed value here (never a real secret) keeps
+		// every test that builds a Service off this helper working the
+		// same way a real deployment's Config would. Tests that actually
+		// exercise the Telegram HMAC against known vectors use their own
+		// testTelegramConfig() (telegram_test.go), which overrides these
+		// with the specific testBotToken the vectors were computed
+		// against.
+		TelegramBotToken: "test-bot-token-for-service-tests",
+		BotUsername:      "savdo_test_bot",
 	}
 }
 

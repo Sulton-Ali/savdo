@@ -125,6 +125,28 @@ func TestVerifyLoginWidget(t *testing.T) {
 			payload: signPayload(gen.TelegramAuthRequest{Id: "987654321", AuthDate: int(time.Now().Unix())}, "a-completely-different-bot-token"),
 			wantErr: true,
 		},
+		{
+			// Review finding 8's trivial half: a correctly-signed payload
+			// timestamped meaningfully in the future is rejected, not
+			// just a stale one.
+			name: "auth_date far in the future is rejected",
+			payload: func() gen.TelegramAuthRequest {
+				future := int(time.Now().Add(telegramAuthMaxSkew * 10).Unix())
+				return signPayload(gen.TelegramAuthRequest{Id: "123456789", AuthDate: future}, testBotToken)
+			}(),
+			wantErr: true,
+		},
+		{
+			// Small clock drift between this server and Telegram's must
+			// still be tolerated.
+			name: "auth_date a few seconds in the future is within tolerated skew",
+			payload: func() gen.TelegramAuthRequest {
+				future := int(time.Now().Add(5 * time.Second).Unix())
+				return signPayload(gen.TelegramAuthRequest{Id: "123456789", Username: strPtr("testuser"), AuthDate: future}, testBotToken)
+			}(),
+			wantID:      123456789,
+			wantUserame: "testuser",
+		},
 	}
 
 	for _, tt := range tests {
@@ -146,6 +168,25 @@ func TestVerifyLoginWidget(t *testing.T) {
 				t.Fatalf("username = %q, want %q", username, tt.wantUserame)
 			}
 		})
+	}
+}
+
+// TestVerifyLoginWidgetRejectsEmptyBotToken is Review CRITICAL 1's own
+// regression test: an empty botToken must never be treated as "sign with
+// an empty key" — secret_key would be SHA-256(""), a public constant
+// anyone can compute, so an attacker who forges a payload against that
+// same empty string must still be rejected. This calls VerifyLoginWidget
+// with an explicit "" second argument (unlike TestVerifyLoginWidget's own
+// table, which always checks against the fixed testBotToken) — the case
+// that actually exercises the fix.
+func TestVerifyLoginWidgetRejectsEmptyBotToken(t *testing.T) {
+	payload := signPayload(gen.TelegramAuthRequest{
+		Id: "123456789", Username: strPtr("testuser"), AuthDate: int(time.Now().Unix()),
+	}, "")
+
+	_, _, err := VerifyLoginWidget(payload, "")
+	if err == nil {
+		t.Fatal("VerifyLoginWidget(payload, \"\") error = nil, want an error (empty bot token must never validate anything)")
 	}
 }
 
@@ -364,5 +405,167 @@ func TestCompleteLinkTelegramAccountAlreadyLinkedToAnotherUser(t *testing.T) {
 	err = svc.CompleteLink(ctx, result.Code, 42, "")
 	if err != ErrTelegramAlreadyLinked {
 		t.Fatalf("CompleteLink() error = %v, want ErrTelegramAlreadyLinked", err)
+	}
+}
+
+// TestAuthenticateTelegramRejectsAccountLinkedInAnotherShop is Review
+// finding 6's cross-shop test: GetTelegramAccountByTelegramUserID
+// (db/queries/auth_telegram.sql's own doc comment) is deliberately the
+// one lookup in this whole flow that runs before a shop_id is known —
+// AuthenticateTelegram's own account.ShopID != s.shopID guard
+// (telegram.go) is what actually enforces the tenant boundary
+// afterwards. This proves shop A's Service never authenticates as shop
+// B's user just because the same Telegram id happens to be linked there.
+func TestAuthenticateTelegramRejectsAccountLinkedInAnotherShop(t *testing.T) {
+	pool := testdb.New(t)
+	testdb.Truncate(t, pool)
+	ctx := context.Background()
+	q := db.New(pool)
+
+	shopA := seedShop(ctx, t, q, "shop-a")
+	shopB := seedShop(ctx, t, q, "shop-b")
+
+	shopBUser := seedUser(ctx, t, q, shopB.ID, "shop-b-owner", "correct-horse-battery", db.UserRoleOwner)
+	if _, err := q.LinkTelegramAccount(ctx, db.LinkTelegramAccountParams{
+		ID: uuid.New(), UserID: shopBUser.ID, ShopID: shopB.ID, TelegramUserID: 777,
+	}); err != nil {
+		t.Fatalf("LinkTelegramAccount: %v", err)
+	}
+
+	svcA := NewService(pool, q, testTelegramConfig(), shopA.ID)
+	payload := signPayload(gen.TelegramAuthRequest{Id: "777", AuthDate: int(time.Now().Unix())}, testBotToken)
+
+	_, err := svcA.AuthenticateTelegram(ctx, payload, "", nil)
+	if err == nil || errStatus(t, err) != 401 {
+		t.Fatalf("AuthenticateTelegram() (shop A, account linked in shop B) error = %v, want 401", err)
+	}
+
+	// The same telegram id authenticates fine against shop B's own
+	// Service — proving the rejection above is really about the shop
+	// boundary, not a broken payload/link.
+	svcB := NewService(pool, q, testTelegramConfig(), shopB.ID)
+	result, err := svcB.AuthenticateTelegram(ctx, payload, "", nil)
+	if err != nil {
+		t.Fatalf("AuthenticateTelegram() (shop B, account linked in shop B) error = %v, want nil", err)
+	}
+	if result.User.ID != shopBUser.ID {
+		t.Fatalf("User.ID = %v, want %v", result.User.ID, shopBUser.ID)
+	}
+}
+
+// TestAuthenticateTelegramRateLimitedByIP mirrors
+// TestRequestOtpRateLimitsByIPAndUsername/TestServiceLoginRateLimitsByIPAndUsername
+// (Review S2): AuthenticateTelegram shares Login's own ipLimiter
+// (telegram.go), so it must be rate limited the same way.
+func TestAuthenticateTelegramRateLimitedByIP(t *testing.T) {
+	pool := testdb.New(t)
+	testdb.Truncate(t, pool)
+	ctx := context.Background()
+	q := db.New(pool)
+
+	shop := seedShop(ctx, t, q, "shop-a")
+	cfg := testTelegramConfig()
+	cfg.LoginRateIPPerMin = 2
+	svc := NewService(pool, q, cfg, shop.ID)
+
+	// Every payload here fails the HMAC check (no telegram id is linked),
+	// but that happens after the rate limiter — same ordering Login's own
+	// rate-limit test relies on.
+	badPayload := gen.TelegramAuthRequest{Id: "1", AuthDate: int(time.Now().Unix()), Hash: "0000"}
+
+	for i := 0; i < 2; i++ {
+		_, err := svc.AuthenticateTelegram(ctx, badPayload, "", nil)
+		if err == nil || errStatus(t, err) != 401 {
+			t.Fatalf("attempt %d: want 401 (still under the rate limit), got %v", i+1, err)
+		}
+	}
+
+	_, err := svc.AuthenticateTelegram(ctx, badPayload, "", nil)
+	if err == nil {
+		t.Fatal("3rd attempt: error = nil, want RateLimited")
+	}
+	if got := errStatus(t, err); got != 429 {
+		t.Fatalf("3rd attempt status = %d, want 429", got)
+	}
+}
+
+// TestCompleteLinkSecondAttemptWithSameCodeFailsAndDoesNotRelink is Review
+// MAJOR 3's own regression test: MarkOTPUsed and LinkTelegramAccount now
+// happen in one transaction, MarkOTPUsed first — a second CompleteLink
+// call for an already-consumed code must fail before it can touch
+// telegram_accounts at all, not just "fail eventually".
+func TestCompleteLinkSecondAttemptWithSameCodeFailsAndDoesNotRelink(t *testing.T) {
+	pool := testdb.New(t)
+	testdb.Truncate(t, pool)
+	ctx := context.Background()
+	q := db.New(pool)
+
+	shop := seedShop(ctx, t, q, "shop-a")
+	svc := NewService(pool, q, testTelegramConfig(), shop.ID)
+	user := seedUser(ctx, t, q, shop.ID, "owner1", "correct-horse-battery", db.UserRoleOwner)
+
+	result, err := svc.CreateTelegramLink(ctx, shop.ID, user.ID)
+	if err != nil {
+		t.Fatalf("CreateTelegramLink() error = %v", err)
+	}
+
+	if err := svc.CompleteLink(ctx, result.Code, 900, "first_username"); err != nil {
+		t.Fatalf("CompleteLink() (1st) error = %v", err)
+	}
+
+	// A second call with the same code, attempting to relink to a
+	// *different* Telegram id — must fail outright, and must not change
+	// the link the first call already made.
+	err = svc.CompleteLink(ctx, result.Code, 901, "attacker_username")
+	if err != ErrLinkCodeInvalid {
+		t.Fatalf("CompleteLink() (2nd, same code) error = %v, want ErrLinkCodeInvalid", err)
+	}
+
+	linked, username, err := svc.GetTelegramLink(ctx, shop.ID, user.ID)
+	if err != nil {
+		t.Fatalf("GetTelegramLink() error = %v", err)
+	}
+	if !linked {
+		t.Fatal("GetTelegramLink() linked = false, want true")
+	}
+	if username == nil || *username != "first_username" {
+		t.Fatalf("GetTelegramLink() username = %v, want first_username (the 2nd CompleteLink call must not have relinked)", username)
+	}
+}
+
+// TestCompleteLinkRejectsInactiveUser is Review MINOR 10's own regression
+// test: a code requested while the user was active but completed after
+// an owner deactivated the account in between must not complete the
+// link.
+func TestCompleteLinkRejectsInactiveUser(t *testing.T) {
+	pool := testdb.New(t)
+	testdb.Truncate(t, pool)
+	ctx := context.Background()
+	q := db.New(pool)
+
+	shop := seedShop(ctx, t, q, "shop-a")
+	svc := NewService(pool, q, testTelegramConfig(), shop.ID)
+	user := seedUser(ctx, t, q, shop.ID, "owner1", "correct-horse-battery", db.UserRoleOwner)
+
+	result, err := svc.CreateTelegramLink(ctx, shop.ID, user.ID)
+	if err != nil {
+		t.Fatalf("CreateTelegramLink() error = %v", err)
+	}
+
+	isActive := false
+	if _, err := q.UpdateUser(ctx, db.UpdateUserParams{ShopID: shop.ID, ID: user.ID, IsActive: &isActive}); err != nil {
+		t.Fatalf("deactivate user: %v", err)
+	}
+
+	if err := svc.CompleteLink(ctx, result.Code, 42, ""); err != ErrLinkCodeInvalid {
+		t.Fatalf("CompleteLink() (inactive user) error = %v, want ErrLinkCodeInvalid", err)
+	}
+
+	linked, _, err := svc.GetTelegramLink(ctx, shop.ID, user.ID)
+	if err != nil {
+		t.Fatalf("GetTelegramLink() error = %v", err)
+	}
+	if linked {
+		t.Fatal("GetTelegramLink() linked = true, want false (an inactive user must not complete a link)")
 	}
 }

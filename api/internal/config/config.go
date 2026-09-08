@@ -126,18 +126,27 @@ type Config struct {
 	// BotUsername names the bot the Telegram Login Widget signs requests
 	// against and CreateTelegramLink's deep link points users at (ADR-005:
 	// `https://t.me/<BOT_USERNAME>?start=link_<code>`) — non-secret, unlike
-	// TelegramBotToken below.
-	BotUsername string `env:"BOT_USERNAME"`
+	// TelegramBotToken below. Required: an empty value would make
+	// CreateTelegramLink hand back a deep link of `https://t.me/?start=...`
+	// — no bot named, so it goes nowhere — so Load fails fast the same way
+	// a missing DATABASE_URL does, rather than let that surface later as a
+	// dead link in the admin UI.
+	BotUsername string `env:"BOT_USERNAME,required,notEmpty"`
 
 	// TelegramBotToken is the API's own copy of the bot token (D-112,
 	// docs/07-DEVOPS.md § Environment variables) — AuthenticateTelegram
 	// uses it to verify the Telegram Login Widget's HMAC (ADR-005), a
 	// distinct read from whatever cmd/bot does with the same environment
-	// variable. No envDefault (secret; owner-provided in infra/.env only,
-	// never in the repo or logs — hard rule 9); an empty value simply
-	// means every Login Widget HMAC check fails, the same fail-closed
-	// posture a wrong value would have.
-	TelegramBotToken string `env:"TELEGRAM_BOT_TOKEN"`
+	// variable. Secret; owner-provided in infra/.env only, never in the
+	// repo or logs (hard rule 9). Required: an empty botToken would make
+	// VerifyLoginWidget's secret_key SHA-256("") — a public constant, not
+	// a secret — so anyone could forge a valid signature for any linked
+	// Telegram id and get a session. VerifyLoginWidget itself also refuses
+	// to run with an empty botToken (telegram.go), but Load fails fast
+	// here too, the same way a missing DATABASE_URL does, so a
+	// misconfigured deployment never serves traffic with the check
+	// effectively disabled in the first place.
+	TelegramBotToken string `env:"TELEGRAM_BOT_TOKEN,required,notEmpty"`
 }
 
 // Load parses the environment into a Config, applying defaults. It fails
