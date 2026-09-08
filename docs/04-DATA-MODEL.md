@@ -144,8 +144,8 @@ null`, `mode` (`customer`), `message_count`, `last_message_at`. Unique `(shop_id
 telegram_chat_id)`.
 
 **bot_messages** — `conversation_id`, `role` (`user|assistant|tool`), `content text`,
-`tool_calls jsonb`, `provider`, `model`, `input_tokens`, `output_tokens`, `latency_ms`,
-`created_at`. Append-only.
+`tool_calls jsonb`, `provider`, `model`, `input_tokens`, `output_tokens`, `cost_estimate numeric(10,6)`, `latency_ms`,
+`created_at`. Append-only. Retention: messages older than 365 days are deleted by `savdo bot-prune` (D-114); `bot_conversations` rows persist.
 
 **audit_log** — `actor_id`, `action text`, `entity_type`, `entity_id`, `before jsonb`,
 `after jsonb`, `created_at`. Written by services for: price changes, stock adjustments,
