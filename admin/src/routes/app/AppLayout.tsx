@@ -8,6 +8,7 @@ import {
   Contact,
   FolderTree,
   History,
+  Image,
   LayoutDashboard,
   LogOut,
   MapPin,
@@ -170,6 +171,13 @@ function AppShell() {
       icon: <Settings size={16} />,
       label: <Link to="/settings">{t("nav.settings")}</Link>,
       permission: "shop.settings",
+    },
+    // Phase 6 T4: landing content editor (manager+, D-99).
+    {
+      key: "/settings/landing",
+      icon: <Image size={16} />,
+      label: <Link to="/settings/landing">{t("content.nav")}</Link>,
+      permission: "content.manage",
     },
   ];
 
