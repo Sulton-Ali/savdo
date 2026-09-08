@@ -122,27 +122,31 @@ func (s *Service) WarmShop(ctx context.Context) error {
 // and catalog.Invalidator's single method, so *Service satisfies both
 // interfaces structurally without either package importing this one. It
 // also drops the memoised shop row (resolveShop's own shopMu/shop/
-// shopResolved/shopExpiresAt) when it names the same shop, so a shop
-// identity write (name, currency, defaultLocale, timezone —
-// shop.Service.UpdateShop) is picked up by the very next request rather
-// than waiting out resolveShop's own cacheTTL on top of the response
-// cache's — the two TTLs would otherwise stack, doubling the worst-case
-// staleness this method exists to bound.
+// shopResolved/shopExpiresAt) when it names the same shop: *if* something
+// called Invalidate(shopID) after a shop-identity write, the very next
+// request would see it immediately, instead of waiting out resolveShop's
+// own cacheTTL on top of the response cache's.
 //
-// shop.Service itself is deliberately NOT wired to call this (unlike
-// content.Service/catalog.Service, wired in cmd/api/main.go): doing so
-// would need internal/shop to depend on an Invalidator interface the way
-// content/catalog do, touching a third module for a task scoped to
-// internal/public (and internal/db's stock/products queries) — a shop
-// identity edit is rare, administrative, and already bounded by
-// resolveShop's own cacheTTL (60 s, the same staleness budget O-20
-// already accepts for every other public response); this comment
-// documents that choice rather than making it silently.
+// Nothing does, today: shop.Service itself is deliberately NOT wired to
+// call this (unlike content.Service/catalog.Service, wired in
+// cmd/api/main.go) — doing so would need internal/shop to depend on an
+// Invalidator interface the way content/catalog do, touching a third
+// module for a task scoped to internal/public (and internal/db's
+// stock/products queries). So the actual worst-case staleness for a shop
+// identity write (name, currency, defaultLocale, timezone —
+// shop.Service.UpdateShop) today is up to two independent, unsynchronised
+// cacheTTL windows stacked (~120 s: resolveShop's own memo, plus whatever
+// is left of the response cache's), not the 60 s O-20 promises everywhere
+// else on this surface — a real but narrow gap (an administrative,
+// infrequent write), left for Phase 8 to close by wiring shop.Service to
+// an Invalidator the same way content/catalog already are; the shop-memo
+// clearing above is already correct and ready for that day, just
+// unreachable until something calls it for this shopID.
 func (s *Service) Invalidate(shopID uuid.UUID) {
 	s.respMu.Lock()
 	for key, entry := range s.resp {
 		if entry.shopID == shopID {
-			s.respBytes -= len(entry.body)
+			s.respBytes -= entrySize(key, entry)
 			delete(s.resp, key)
 		}
 	}

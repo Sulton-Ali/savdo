@@ -64,10 +64,20 @@ func TestPublic_isolatesShopBFromShopA(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListPublicProducts: %v", err)
 	}
+	var sawShopAProduct bool
 	for _, item := range gen.PublicProductList(listResp.(gen.ListPublicProducts200JSONResponse)).Items {
 		if item.Slug == "shop-b-product" {
 			t.Fatal("shop B's product appeared in shop A's product list")
 		}
+		if item.Slug == "shop-a-product" {
+			sawShopAProduct = true
+		}
+	}
+	// T3 review round 3, MINOR 5: without this, a handler that (bug)
+	// returned every product filtered to nothing would also pass the
+	// "shop-b-product absent" check above for the wrong reason.
+	if !sawShopAProduct {
+		t.Fatal("shop A's own product is missing from shop A's product list")
 	}
 
 	// Shop B's own slug must 404 through shop A's resolved handler — it

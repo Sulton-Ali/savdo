@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Sulton-Ali/savdo/api/gen"
+	"github.com/Sulton-Ali/savdo/api/internal/db"
 )
 
 // cacheEntry is one cached response body: the exact bytes
@@ -60,13 +62,22 @@ const (
 	maxCacheEntryBytes = 2 << 20  // 2 MiB
 )
 
+// entrySize is what one cache entry actually costs the process: the key
+// string plus the body bytes (T3 review round 3, MAJOR (a) — the key
+// itself is real memory too, not just the body; cacheEntry's other
+// fields are small/fixed-size and not worth tracking). Accounted
+// consistently by cacheSet, evictLocked and Invalidate, the three places
+// that ever add or remove a map entry, so Service.respBytes always
+// equals the sum of entrySize over every live entry.
+func entrySize(key string, entry cacheEntry) int {
+	return len(key) + len(entry.body)
+}
+
 // cacheSet inserts entry under key, first making room per the bounds
-// above. respBytes is Service's own running total of len(body) across
-// every live entry (cacheEntry's other fields are small/fixed-size and
-// not worth tracking) — kept in sync here and in evictLocked/Invalidate,
-// the three places that ever add or remove a map entry.
+// above.
 func (s *Service) cacheSet(key string, entry cacheEntry) {
-	if len(entry.body) > maxCacheEntryBytes {
+	size := entrySize(key, entry)
+	if size > maxCacheEntryBytes {
 		return
 	}
 	s.respMu.Lock()
@@ -75,12 +86,12 @@ func (s *Service) cacheSet(key string, entry cacheEntry) {
 		s.resp = make(map[string]cacheEntry)
 	}
 	if old, ok := s.resp[key]; ok {
-		s.respBytes -= len(old.body)
+		s.respBytes -= entrySize(key, old)
 		delete(s.resp, key)
 	}
-	s.evictLocked(len(entry.body))
+	s.evictLocked(size)
 	s.resp[key] = entry
-	s.respBytes += len(entry.body)
+	s.respBytes += size
 }
 
 // evictLocked makes room for a newBytes-sized insert; respMu must
@@ -98,7 +109,7 @@ func (s *Service) evictLocked(newBytes int) {
 	now := time.Now()
 	for k, e := range s.resp {
 		if now.After(e.expiresAt) {
-			s.respBytes -= len(e.body)
+			s.respBytes -= entrySize(k, e)
 			delete(s.resp, k)
 		}
 	}
@@ -115,7 +126,7 @@ func (s *Service) evictLocked(newBytes int) {
 				first = false
 			}
 		}
-		s.respBytes -= len(s.resp[oldestKey].body)
+		s.respBytes -= entrySize(oldestKey, s.resp[oldestKey])
 		delete(s.resp, oldestKey)
 	}
 }
@@ -144,7 +155,15 @@ func cacheKey(shopSlug, path, params, locale string) string {
 // oapi-codegen already dropped it before this object was built — and `q`
 // and `limit` are bounded exactly the way the handler itself bounds them
 // before running the query (searchParam's maxSearchLength cap,
-// clampLimit's [1, maxLimit]).
+// clampLimit's [1, maxLimit]). Each field is url.QueryEscape'd before
+// joining (T3 review round 3, NIT 7): plain concatenation with a fixed
+// separator would be ambiguous if a field's own value could contain that
+// separator (e.g. a category and a q value that, concatenated raw, are
+// indistinguishable from a different category/q split at another
+// position) — QueryEscape guarantees the "&" joiner below can never
+// appear unescaped inside an escaped field, so the five fields can always
+// be told apart, and two different (category, featured, q, limit,
+// cursor) tuples can never collide onto the same key string.
 func cacheParamsKey(request any) string {
 	req, ok := request.(gen.ListPublicProductsRequestObject)
 	if !ok {
@@ -164,7 +183,39 @@ func cacheParamsKey(request any) string {
 		cursor = *req.Params.Cursor
 	}
 	limit := strconv.Itoa(int(clampLimit(req.Params.Limit)))
-	return category + "\x00" + featured + "\x00" + q + "\x00" + limit + "\x00" + cursor
+	fields := []string{category, featured, q, limit, cursor}
+	for i, f := range fields {
+		fields[i] = url.QueryEscape(f)
+	}
+	return strings.Join(fields, "&")
+}
+
+// cacheAdmissible reports whether response for request should be entered
+// into the cache at all (T3 review round 3, MAJOR (c)): GetPublicShop,
+// ListPublicCategories and GetPublicProductBySlug are always admissible
+// — their own key space is already bounded (no query params at all, or
+// an already-existing product's own slug in the path). ListPublicProducts
+// is inadmissible when its `category` filter names a slug that does not
+// exist (active, non-deleted) in this shop: the response itself is
+// unchanged (still a 200 with an empty `items`, O-22's own "unknown
+// category matches nothing" behaviour) — it is simply never cached, so a
+// caller sweeping many nonexistent category slugs cannot grow the cache
+// at all, on top of contracts/openapi.yaml's own maxLength: 100 bound on
+// the parameter itself (validateListPublicProductsParams, handler.go).
+// Any error from the existence check itself is treated as inadmissible
+// (fail closed on caching, never on the response) — caching is a
+// performance optimisation and must never turn a working response into
+// an error.
+func (s *Service) cacheAdmissible(ctx context.Context, shopID uuid.UUID, request any) bool {
+	req, ok := request.(gen.ListPublicProductsRequestObject)
+	if !ok || req.Params.Category == nil {
+		return true
+	}
+	exists, err := s.q.PublicCategoryExists(ctx, db.PublicCategoryExistsParams{ShopID: shopID, Slug: *req.Params.Category})
+	if err != nil {
+		return false
+	}
+	return exists
 }
 
 // strongETag is a strong ETag (RFC 9110 § 8.8.1: quoted, byte-exact) over
@@ -369,7 +420,9 @@ func (s *Service) CacheMiddleware(f gen.StrictHandlerFunc, operationID string) g
 			shopID: shop.ID, status: status, contentType: contentType, body: body,
 			etag: strongETag(body), expiresAt: time.Now().Add(cacheTTL),
 		}
-		s.cacheSet(key, entry)
+		if s.cacheAdmissible(ctx, shop.ID, request) {
+			s.cacheSet(key, entry)
+		}
 		writeCached(w, r, entry)
 		return nil, nil
 	}

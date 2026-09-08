@@ -440,6 +440,37 @@ func (q *Queries) ListPublicCategories(ctx context.Context, arg ListPublicCatego
 	return items, nil
 }
 
+const publicCategoryExists = `-- name: PublicCategoryExists :one
+SELECT EXISTS (
+    SELECT 1 FROM categories
+    WHERE shop_id = $1
+        AND slug = $2
+        AND deleted_at IS NULL
+        AND is_active
+) AS exists
+`
+
+type PublicCategoryExistsParams struct {
+	ShopID uuid.UUID `json:"shop_id"`
+	Slug   string    `json:"slug"`
+}
+
+// T3 review round 3, MAJOR (c): public.CacheMiddleware's admission
+// control for GET /public/products?category= — a slug that names no
+// active, non-deleted category in this shop must never be cached (an
+// attacker sweeping many nonexistent slugs would otherwise mint one
+// cache entry per slug, all empty 200s). "Exists" here means the exact
+// same active/non-deleted visibility ListPublicCategories/
+// ListPublicProducts already apply — a real but inactive category counts
+// as not existing, the same as it already does everywhere else on this
+// surface (O-22).
+func (q *Queries) PublicCategoryExists(ctx context.Context, arg PublicCategoryExistsParams) (bool, error) {
+	row := q.db.QueryRow(ctx, publicCategoryExists, arg.ShopID, arg.Slug)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const softDeleteCategory = `-- name: SoftDeleteCategory :exec
 UPDATE categories
 SET deleted_at = now(), updated_at = now()

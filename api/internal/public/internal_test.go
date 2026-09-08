@@ -40,12 +40,14 @@ func TestCacheSet_boundsEntryCountAndTotalBytes(t *testing.T) {
 	// respBytes must still describe what's actually in the map (the two
 	// are updated together everywhere) — a real accounting bug (drift
 	// between the two) would otherwise hide behind an early return.
+	// entrySize (T3 review round 3, MAJOR (a)) counts the key too, not
+	// just the body, so the reconciliation sum must match.
 	var sum int
-	for _, e := range svc.resp {
-		sum += len(e.body)
+	for k, e := range svc.resp {
+		sum += entrySize(k, e)
 	}
 	if sum != svc.respBytes {
-		t.Fatalf("respBytes = %d, want %d (sum of live entries' bodies)", svc.respBytes, sum)
+		t.Fatalf("respBytes = %d, want %d (sum of entrySize over live entries)", svc.respBytes, sum)
 	}
 }
 

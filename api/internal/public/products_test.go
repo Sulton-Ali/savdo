@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/Sulton-Ali/savdo/api/gen"
 	"github.com/Sulton-Ali/savdo/api/internal/db"
 )
@@ -386,6 +388,82 @@ func TestListPublicProducts_negativeAndFractionalQtyAndZeroThreshold(t *testing.
 	check("qty just under the shop default threshold", fractionalLow.ID.String(), gen.Low)
 	check("qty just over the shop default threshold", fractionalIn.ID.String(), gen.InStock)
 	check("qty 1 with a threshold override of 0", zeroThresholdProduct.ID.String(), gen.InStock)
+}
+
+// TestListPublicProducts_categoryOverlyLong_400 pins T3 review round 3,
+// MAJOR (b): contracts/openapi.yaml's `maxLength: 100` on `category` has
+// no generated runtime enforcement (oapi-codegen doesn't validate
+// parameter constraints), so validateListPublicProductsParams
+// (handler.go) enforces it by hand, the same maxLoginUsernameLength
+// pattern internal/auth already uses — an over-long value is a 400
+// VALIDATION_FAILED, never a 500 or an unbounded query/cache key.
+func TestListPublicProducts_categoryOverlyLong_400(t *testing.T) {
+	h, _, _, q, _ := newTestHandler(t, "shop-a")
+	seedShop(context.Background(), t, q, "shop-a")
+
+	over := strings.Repeat("a", 101)
+	_, err := h.ListPublicProducts(ctxWithAcceptLanguage("uz"), gen.ListPublicProductsRequestObject{
+		Params: gen.ListPublicProductsParams{Category: &over},
+	})
+	if err == nil {
+		t.Fatal("want an error for a 101-character category, got none")
+	}
+	code, status := errCodeStatus(err)
+	if status != http.StatusBadRequest || code != string(gen.VALIDATIONFAILED) {
+		t.Fatalf("error = %v (code=%s, status=%d), want 400 VALIDATION_FAILED", err, code, status)
+	}
+
+	// Exactly at the bound must not error.
+	exact := strings.Repeat("a", 100)
+	if _, err := h.ListPublicProducts(ctxWithAcceptLanguage("uz"), gen.ListPublicProductsRequestObject{
+		Params: gen.ListPublicProductsParams{Category: &exact},
+	}); err != nil {
+		t.Fatalf("category of exactly 100 characters: %v, want no error", err)
+	}
+}
+
+// TestListPublicProducts_coverImageVariantIdNulledForInactiveVariant pins
+// T3 review round 3, MINOR 3: a list item's coverImage.variantId must be
+// nulled when it names a variant that is no longer active, the same rule
+// GetPublicProductBySlug's own images already apply — coverImages
+// (handler.go) reuses listAvailability's own active-variant set instead
+// of a second query.
+func TestListPublicProducts_coverImageVariantIdNulledForInactiveVariant(t *testing.T) {
+	h, _, _, q, _ := newTestHandler(t, "shop-a")
+	ctx := context.Background()
+	shopRow := seedShop(ctx, t, q, "shop-a")
+	unit := seedUnit(ctx, t, q, shopRow.ID)
+
+	product := seedProduct(ctx, t, q, shopRow.ID, unit.ID, productSpec{
+		Slug: "cover-image-variant", Name: "CoverImageVariant", BasePrice: "1.00", IsActive: true,
+	})
+	inactiveVariant := seedVariant(ctx, t, q, shopRow.ID, product.ID, variantSpec{Attributes: `{"size":"L"}`, IsActive: false})
+	seedVariant(ctx, t, q, shopRow.ID, product.ID, variantSpec{Attributes: `{"size":"M"}`, IsActive: true})
+
+	media := seedMedia(ctx, t, q, shopRow.ID, "shop-a/cover-image-variant")
+	if _, err := q.AddProductImage(ctx, db.AddProductImageParams{
+		ID: uuid.New(), ShopID: shopRow.ID, ProductID: product.ID, VariantID: &inactiveVariant.ID,
+		MediaID: media.ID, SortOrder: 0, IsCover: true,
+	}); err != nil {
+		t.Fatalf("AddProductImage: %v", err)
+	}
+
+	list := listPublicProducts(ctxWithAcceptLanguage("uz"), t, h, gen.ListPublicProductsParams{})
+	var item *gen.PublicProductListItem
+	for i := range list.Items {
+		if list.Items[i].Id == product.ID {
+			item = &list.Items[i]
+		}
+	}
+	if item == nil {
+		t.Fatal("product not in the list at all")
+	}
+	if item.CoverImage == nil {
+		t.Fatal("CoverImage = nil, want the image present (just without a variantId)")
+	}
+	if item.CoverImage.VariantId.IsSpecified() && !item.CoverImage.VariantId.IsNull() {
+		t.Errorf("CoverImage.VariantId = %+v, want null (its variant is inactive)", item.CoverImage.VariantId)
+	}
 }
 
 // publicHandler is the *public.Handler type alias this file's helpers use

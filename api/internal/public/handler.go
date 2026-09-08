@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -155,11 +156,36 @@ func searchParam(q *string) *string {
 	return searchTerm(*q)
 }
 
+// maxCategoryLength mirrors the `maxLength: 100` on ListPublicProducts'
+// `category` query parameter in contracts/openapi.yaml — oapi-codegen's
+// generated types carry no runtime validation for that constraint
+// (confirmed the same way auth.maxLoginUsernameLength's own doc comment
+// does), so the contract's bound and this bound must be kept in sync by
+// hand. This is also T3 review round 3's cache-growth defense (b): an
+// unbounded `?category=` could otherwise mint a cache entry (or at least
+// run a full query) per attacker-chosen megabyte-scale string.
+const maxCategoryLength = 100
+
+// validateListPublicProductsParams returns a field->reason map for an
+// out-of-bounds `category` — the only ListPublicProducts parameter this
+// package does not already silently clamp (limit via clampLimit, q via
+// searchParam, cursor via decodeCursor's own 400).
+func validateListPublicProductsParams(category *string) map[string]string {
+	if category != nil && utf8.RuneCountInString(*category) > maxCategoryLength {
+		return map[string]string{"category": fmt.Sprintf("must be at most %d characters", maxCategoryLength)}
+	}
+	return nil
+}
+
 // ListPublicProducts browses the catalogue: only active products, a
 // product with no category included (categorySlug null), one whose
 // category is inactive excluded (O-22); price/availability are product-
 // level (D-103/O-20), newest first (D-92).
 func (h *Handler) ListPublicProducts(ctx context.Context, req gen.ListPublicProductsRequestObject) (gen.ListPublicProductsResponseObject, error) {
+	if fields := validateListPublicProductsParams(req.Params.Category); fields != nil {
+		return nil, apierr.Validation(fields)
+	}
+
 	shop, err := h.svc.resolveShop(ctx)
 	if err != nil {
 		return nil, err
@@ -182,11 +208,11 @@ func (h *Handler) ListPublicProducts(ctx context.Context, req gen.ListPublicProd
 	page, nextCursor := paginateProducts(rows, limit)
 	ids := productIDs(page)
 
-	covers, err := h.coverImages(ctx, shop.ID, ids)
+	availability, activeVariantIDs, err := h.listAvailability(ctx, shop.ID, ids)
 	if err != nil {
 		return nil, err
 	}
-	availability, err := h.listAvailability(ctx, shop.ID, ids)
+	covers, err := h.coverImages(ctx, shop.ID, ids, activeVariantIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -216,7 +242,12 @@ func (h *Handler) ListPublicProducts(ctx context.Context, req gen.ListPublicProd
 // coverImages batches D-83's cover-image pick (isCover, else first by
 // position) for a whole page of product ids in one query — never one
 // query per product (a known trap this task's own spec names).
-func (h *Handler) coverImages(ctx context.Context, shopID uuid.UUID, ids []uuid.UUID) (map[uuid.UUID]gen.ProductImage, error) {
+// activeVariantIDs is listAvailability's own active-variant set (T3
+// review round 3, MINOR 3): a cover image tagged to a variant that is no
+// longer in it — inactive or deleted — has its variantId nulled, the
+// same rule GetPublicProductBySlug's own image handling already applies,
+// rather than naming a variant this response otherwise never mentions.
+func (h *Handler) coverImages(ctx context.Context, shopID uuid.UUID, ids []uuid.UUID, activeVariantIDs map[uuid.UUID]bool) (map[uuid.UUID]gen.ProductImage, error) {
 	out := make(map[uuid.UUID]gen.ProductImage, len(ids))
 	if len(ids) == 0 {
 		return out, nil
@@ -226,7 +257,11 @@ func (h *Handler) coverImages(ctx context.Context, shopID uuid.UUID, ids []uuid.
 		return nil, fmt.Errorf("public: list cover images: %w", err)
 	}
 	for _, r := range rows {
-		out[r.ProductID] = toProductImage(h.svc.mediaBaseURL, r.ID, r.MediaID, r.VariantID, r.SortOrder, r.IsCover, r.StorageKey)
+		img := toProductImage(h.svc.mediaBaseURL, r.ID, r.MediaID, r.VariantID, r.SortOrder, r.IsCover, r.StorageKey)
+		if r.VariantID != nil && !activeVariantIDs[*r.VariantID] {
+			img.VariantId = nullableUUID(nil)
+		}
+		out[r.ProductID] = img
 	}
 	return out, nil
 }
@@ -234,29 +269,34 @@ func (h *Handler) coverImages(ctx context.Context, shopID uuid.UUID, ids []uuid.
 // listAvailability batches per-variant qty/threshold for a whole page of
 // product ids in one query (SumVariantQtyForProducts), grouped by
 // product id — ListPublicProducts.availability is then
-// bestAvailability(...) of each product's group. SumVariantQtyForProducts
-// itself filters to active, non-deleted variants (its own doc comment,
-// stock.sql), so a product whose only in-stock variant has since been
-// deactivated contributes no row here — bestAvailability's empty-input
-// fallback (out_of_stock) then agrees with GET /public/products/{slug}'s
-// own empty `variants` array for the same product (O-20).
-func (h *Handler) listAvailability(ctx context.Context, shopID uuid.UUID, ids []uuid.UUID) (map[uuid.UUID][]gen.Availability, error) {
+// bestAvailability(...) of each product's group. The second return value
+// is that same query's variant ids as a set (T3 review round 3, MINOR
+// 3) — coverImages' own active-variant check, reusing this call instead
+// of a second query, since SumVariantQtyForProducts already filters to
+// active, non-deleted variants (its own doc comment, stock.sql): a
+// product whose only in-stock variant has since been deactivated
+// contributes no row here — bestAvailability's empty-input fallback
+// (out_of_stock) then agrees with GET /public/products/{slug}'s own
+// empty `variants` array for the same product (O-20).
+func (h *Handler) listAvailability(ctx context.Context, shopID uuid.UUID, ids []uuid.UUID) (map[uuid.UUID][]gen.Availability, map[uuid.UUID]bool, error) {
 	out := make(map[uuid.UUID][]gen.Availability, len(ids))
+	activeVariantIDs := map[uuid.UUID]bool{}
 	if len(ids) == 0 {
-		return out, nil
+		return out, activeVariantIDs, nil
 	}
 	rows, err := h.svc.q.SumVariantQtyForProducts(ctx, db.SumVariantQtyForProductsParams{ShopID: shopID, ProductIds: ids})
 	if err != nil {
-		return nil, fmt.Errorf("public: sum variant qty: %w", err)
+		return nil, nil, fmt.Errorf("public: sum variant qty: %w", err)
 	}
 	for _, r := range rows {
 		qty, err := money.FromNumeric(r.Qty)
 		if err != nil {
-			return nil, fmt.Errorf("public: variant qty: %w", err)
+			return nil, nil, fmt.Errorf("public: variant qty: %w", err)
 		}
 		out[r.ProductID] = append(out[r.ProductID], classifyAvailability(qty, decimal.NewFromInt32(r.Threshold)))
+		activeVariantIDs[r.VariantID] = true
 	}
-	return out, nil
+	return out, activeVariantIDs, nil
 }
 
 // GetPublicProductBySlug returns one active product by slug, with only
@@ -322,7 +362,7 @@ func (h *Handler) GetPublicProductBySlug(ctx context.Context, req gen.GetPublicP
 		promoTo = nullableTime(nil)
 	}
 
-	variants, activeVariantIDs, err := h.publicVariants(ctx, shop, row)
+	variants, activeVariantIDs, err := h.publicVariants(ctx, shop, row, now, loc)
 	if err != nil {
 		return nil, err
 	}
@@ -373,8 +413,13 @@ func (h *Handler) GetPublicProductBySlug(ctx context.Context, req gen.GetPublicP
 // tell an active-variant image from one whose variant has since gone
 // inactive or been deleted (ListVariantsForCashier already excludes a
 // deleted variant's row entirely; the !v.IsActive skip below excludes an
-// inactive one).
-func (h *Handler) publicVariants(ctx context.Context, shop db.Shop, product db.GetPublicProductBySlugRow) ([]gen.VariantPublic, map[uuid.UUID]bool, error) {
+// inactive one). now/loc come from the caller (GetPublicProductBySlug,
+// T3 review round 3, NIT 8) rather than being recomputed here, so the
+// whole response — the product's own promoActive check and every
+// variant's own D-67/D-68 price — is evaluated against exactly the same
+// instant, never two nanoseconds-apart calls to time.Now() that could
+// (vanishingly rarely, right at a promo's boundary) disagree.
+func (h *Handler) publicVariants(ctx context.Context, shop db.Shop, product db.GetPublicProductBySlugRow, now time.Time, loc *time.Location) ([]gen.VariantPublic, map[uuid.UUID]bool, error) {
 	sums, err := h.svc.q.SumVariantQtyByProduct(ctx, db.SumVariantQtyByProductParams{ShopID: shop.ID, ProductID: product.ID})
 	if err != nil {
 		return nil, nil, fmt.Errorf("public: sum variant qty: %w", err)
@@ -389,8 +434,6 @@ func (h *Handler) publicVariants(ctx context.Context, shop db.Shop, product db.G
 		return nil, nil, fmt.Errorf("public: list variants: %w", err)
 	}
 
-	now := time.Now()
-	loc := shopLocation(shop)
 	variants := make([]gen.VariantPublic, 0, len(rows))
 	activeVariantIDs := make(map[uuid.UUID]bool, len(rows))
 	for _, v := range rows {

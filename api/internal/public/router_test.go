@@ -327,6 +327,80 @@ func TestPublicRoutes_garbageAcceptLanguageAndIfNoneMatch_toleratedNot500(t *tes
 	}
 }
 
+// TestPublicCache_unknownCategory_200ButNeverCached pins T3 review round
+// 3, MAJOR (c): a `?category=` naming no active category in this shop
+// still answers 200 with an empty list (O-22's own "unknown category
+// matches nothing" behaviour, unchanged) — but cacheAdmissible refuses to
+// cache it, so a second identical request must run the real handler
+// again (another database hit), never a cache hit.
+func TestPublicCache_unknownCategory_200ButNeverCached(t *testing.T) {
+	pool := testdb.New(t)
+	testdb.Truncate(t, pool)
+	counter := &queryCounter{DBTX: pool}
+	q := db.New(counter)
+	ctx := context.Background()
+	seedShop(ctx, t, q, "shop-a")
+
+	router, _ := newTestRouter(pool, q, "shop-a")
+
+	rec1 := httptest.NewRecorder()
+	router.ServeHTTP(rec1, httptest.NewRequest(http.MethodGet, "/v1/public/products?category=no-such-category", nil))
+	if rec1.Code != http.StatusOK {
+		t.Fatalf("first call status = %d, body = %s, want 200 for an unknown category", rec1.Code, rec1.Body.String())
+	}
+	if !strings.Contains(rec1.Body.String(), `"items":[]`) {
+		t.Errorf("body = %s, want an empty items array", rec1.Body.String())
+	}
+	n1 := counter.n.Load()
+	if n1 == 0 {
+		t.Fatal("the first call made zero database queries — the test fixture is broken, not the cache")
+	}
+
+	rec2 := httptest.NewRecorder()
+	router.ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/v1/public/products?category=no-such-category", nil))
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("second call status = %d", rec2.Code)
+	}
+	if got := counter.n.Load(); got == n1 {
+		t.Error("second call made zero additional database queries — an unknown category was wrongly cached")
+	}
+}
+
+// TestPublicCache_knownCategory_cached_noExtraDBHit is
+// TestPublicCache_unknownCategory_200ButNeverCached's counterpart: a
+// `?category=` that does name an active category in this shop is cached
+// normally, the same as any other ListPublicProducts request.
+func TestPublicCache_knownCategory_cached_noExtraDBHit(t *testing.T) {
+	pool := testdb.New(t)
+	testdb.Truncate(t, pool)
+	counter := &queryCounter{DBTX: pool}
+	q := db.New(counter)
+	ctx := context.Background()
+	shopRow := seedShop(ctx, t, q, "shop-a")
+	seedCategory(ctx, t, q, shopRow.ID, "known-category", "Known", true)
+
+	router, _ := newTestRouter(pool, q, "shop-a")
+
+	rec1 := httptest.NewRecorder()
+	router.ServeHTTP(rec1, httptest.NewRequest(http.MethodGet, "/v1/public/products?category=known-category", nil))
+	if rec1.Code != http.StatusOK {
+		t.Fatalf("first call status = %d, body = %s", rec1.Code, rec1.Body.String())
+	}
+	n1 := counter.n.Load()
+	if n1 == 0 {
+		t.Fatal("the first call made zero database queries — the test fixture is broken, not the cache")
+	}
+
+	rec2 := httptest.NewRecorder()
+	router.ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/v1/public/products?category=known-category", nil))
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("second call status = %d", rec2.Code)
+	}
+	if got := counter.n.Load(); got != n1 {
+		t.Errorf("queries after the second call = %d, want unchanged from %d (a known category must be cached)", got, n1)
+	}
+}
+
 func TestPublicCache_contentPUT_invalidatesSoNextGETReflectsChange(t *testing.T) {
 	pool := testdb.New(t)
 	testdb.Truncate(t, pool)
