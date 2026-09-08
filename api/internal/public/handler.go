@@ -126,8 +126,12 @@ func (h *Handler) applyBlock(ctx context.Context, shopID uuid.UUID, key gen.Cont
 }
 
 // ListPublicCategories returns every active category with its active
-// product count (O-20/O-21). Not cursor-paginated (a shop has few
-// categories).
+// product count, summed across the category and every one of its
+// descendants for a parent (O-20/O-21, T7), plus the immediate parent's
+// slug/name for grouping (null for a root category, or one whose parent
+// is not itself active/present — ListPublicCategories' own doc comment).
+// Not cursor-paginated (a shop has few categories); rows already arrive
+// sorted parents-before-children (the query's own sort_path).
 func (h *Handler) ListPublicCategories(ctx context.Context, _ gen.ListPublicCategoriesRequestObject) (gen.ListPublicCategoriesResponseObject, error) {
 	shop, err := h.svc.resolveShop(ctx)
 	if err != nil {
@@ -142,7 +146,19 @@ func (h *Handler) ListPublicCategories(ctx context.Context, _ gen.ListPublicCate
 
 	items := make([]gen.PublicCategory, len(rows))
 	for i, r := range rows {
-		items[i] = gen.PublicCategory{Id: r.ID, Slug: r.Slug, Name: r.Name, ProductCount: int(r.ProductCount)}
+		item := gen.PublicCategory{Id: r.ID, Slug: r.Slug, Name: r.Name, ProductCount: int(r.ProductCount)}
+		item.ParentSlug = nullableString(r.ParentSlug)
+		// r.ParentName is a COALESCE(..., '') sentinel that also reads ''
+		// for "no parent" (same LATERAL-join quirk name/locale_used
+		// already work around) — parentSlug is the real null signal, so a
+		// root category's ParentName is never surfaced even though the
+		// row's own string value is technically "" rather than absent.
+		if r.ParentSlug != nil {
+			item.ParentName = nullableString(&r.ParentName)
+		} else {
+			item.ParentName = nullableString(nil)
+		}
+		items[i] = item
 	}
 	return gen.ListPublicCategories200JSONResponse(gen.PublicCategoryList{Items: items}), nil
 }

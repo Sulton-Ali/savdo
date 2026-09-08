@@ -289,6 +289,30 @@ ORDER BY t.locale;
 -- requires a separate query for) and ListProductImages.
 
 -- name: ListPublicProducts :many
+-- T7: `category_slug` matches the named category AND every one of its
+-- active, non-deleted descendants (matched_categories, a recursive walk
+-- down parent_id from the one category named by slug) — a parent slug
+-- like "erkaklar" now lists its children's products too, not just
+-- (usually zero) products assigned directly to the parent. When
+-- category_slug is NULL the base case's own IS NOT NULL guard makes
+-- matched_categories empty and the OR short-circuits, same as before
+-- T7. A product whose direct category is inactive is still excluded
+-- entirely by the unrelated (p.category_id IS NULL OR (c.deleted_at IS
+-- NULL AND c.is_active)) line below (O-22) — matched_categories only
+-- widens which *active* categories count as a match, it does not loosen
+-- that visibility rule.
+WITH RECURSIVE matched_categories AS (
+    SELECT id FROM categories
+    WHERE shop_id = sqlc.arg('shop_id') AND deleted_at IS NULL AND is_active
+        AND sqlc.narg('category_slug')::text IS NOT NULL AND slug = sqlc.narg('category_slug')
+
+    UNION ALL
+
+    SELECT ch.id
+    FROM categories ch
+    JOIN matched_categories m ON ch.parent_id = m.id
+    WHERE ch.shop_id = sqlc.arg('shop_id') AND ch.deleted_at IS NULL AND ch.is_active
+)
 SELECT
     p.id, p.shop_id, p.category_id, p.unit_id, p.slug, p.sku,
     p.base_price, p.promo_price, p.promo_from, p.promo_to,
@@ -314,7 +338,7 @@ WHERE p.shop_id = sqlc.arg('shop_id')
     AND p.deleted_at IS NULL
     AND p.is_active
     AND (p.category_id IS NULL OR (c.deleted_at IS NULL AND c.is_active))
-    AND (sqlc.narg('category_slug')::text IS NULL OR c.slug = sqlc.narg('category_slug'))
+    AND (sqlc.narg('category_slug')::text IS NULL OR p.category_id IN (SELECT id FROM matched_categories))
     AND (sqlc.narg('featured')::bool IS NULL OR p.is_featured = sqlc.narg('featured'))
     AND (
         sqlc.narg('q')::text IS NULL

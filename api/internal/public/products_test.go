@@ -94,6 +94,35 @@ func TestListPublicProducts_categoryFeaturedAndUncategorized(t *testing.T) {
 	}
 }
 
+// TestListPublicProducts_categoryFilterIncludesDescendants pins T7:
+// filtering by a parent category's slug lists products assigned to any of
+// its active, non-deleted descendants too, not just products assigned
+// directly to the parent (which usually has none).
+func TestListPublicProducts_categoryFilterIncludesDescendants(t *testing.T) {
+	h, _, _, q, _ := newTestHandler(t, "shop-a")
+	ctx := context.Background()
+	shopRow := seedShop(ctx, t, q, "shop-a")
+	unit := seedUnit(ctx, t, q, shopRow.ID)
+
+	men := seedCategory(ctx, t, q, shopRow.ID, "erkaklar", "Erkaklar", true)
+	women := seedCategory(ctx, t, q, shopRow.ID, "ayollar", "Ayollar", true)
+	menShirts := seedSubcategory(ctx, t, q, shopRow.ID, men.ID, "erkaklar-koylaklar", "Ko‘ylaklar", true)
+	womenDresses := seedSubcategory(ctx, t, q, shopRow.ID, women.ID, "ayollar-koylaklar", "Ko‘ylaklar", true)
+
+	mensShirt := seedProduct(ctx, t, q, shopRow.ID, unit.ID, productSpec{
+		CategoryID: &menShirts.ID, Slug: "mens-shirt", Name: "Mens Shirt", BasePrice: "100000.00", IsActive: true,
+	})
+	seedProduct(ctx, t, q, shopRow.ID, unit.ID, productSpec{
+		CategoryID: &womenDresses.ID, Slug: "womens-dress", Name: "Womens Dress", BasePrice: "150000.00", IsActive: true,
+	})
+
+	menSlug := "erkaklar"
+	byParent := listPublicProducts(ctxWithAcceptLanguage("uz"), t, h, gen.ListPublicProductsParams{Category: &menSlug})
+	if len(byParent.Items) != 1 || byParent.Items[0].Id != mensShirt.ID {
+		t.Fatalf("byParent.Items = %+v, want only mens-shirt (erkaklar's descendant erkaklar-koylaklar)", byParent.Items)
+	}
+}
+
 func TestListPublicProducts_cursorPaging(t *testing.T) {
 	h, _, _, q, _ := newTestHandler(t, "shop-a")
 	ctx := context.Background()

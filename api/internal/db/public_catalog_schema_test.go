@@ -24,6 +24,19 @@ func publicCategory(ctx context.Context, t *testing.T, q *db.Queries, shopID uui
 	return c
 }
 
+// publicSubcategory creates a category under parentID for the T7
+// parent/child public-catalogue tests below.
+func publicSubcategory(ctx context.Context, t *testing.T, q *db.Queries, shopID, parentID uuid.UUID, slug string, isActive bool) db.Category {
+	t.Helper()
+	c, err := q.CreateCategory(ctx, db.CreateCategoryParams{
+		ID: uuid.New(), ShopID: shopID, ParentID: &parentID, Slug: slug, IsActive: isActive,
+	})
+	if err != nil {
+		t.Fatalf("CreateCategory(%q): %v", slug, err)
+	}
+	return c
+}
+
 // publicProduct creates a product for the public-catalogue tests below,
 // with the given category (nil for none), active/featured flags.
 func publicProduct(ctx context.Context, t *testing.T, q *db.Queries, shopID, unitID uuid.UUID, categoryID *uuid.UUID, slug string, isActive, isFeatured bool) db.Product {
@@ -247,6 +260,59 @@ func TestListPublicCategories_activeOnlyWithProductCount(t *testing.T) {
 	}
 	if rows[0].ProductCount != 2 {
 		t.Fatalf("ProductCount = %d, want 2 (active products only)", rows[0].ProductCount)
+	}
+}
+
+// TestListPublicCategories_aggregatesDescendantProductCounts pins T7 at the
+// query layer: a parent's product_count sums its own direct products AND
+// every active, non-deleted descendant's, its parent_slug/parent_name are
+// nil for a root and set for a child, and rows sort parents-before-children
+// (ORDER BY the query's own sort_path).
+func TestListPublicCategories_aggregatesDescendantProductCounts(t *testing.T) {
+	pool := testdb.New(t)
+	testdb.Truncate(t, pool)
+	ctx := context.Background()
+	q := db.New(pool)
+
+	shop := catalogShop(ctx, t, q, "shop-category-tree")
+	unit := catalogUnit(ctx, t, q, shop.ID, "pcs")
+
+	parent := publicCategory(ctx, t, q, shop.ID, "parent", true)
+	if err := q.UpsertCategoryTranslation(ctx, db.UpsertCategoryTranslationParams{CategoryID: parent.ID, Locale: "uz", Name: "Parent"}); err != nil {
+		t.Fatalf("UpsertCategoryTranslation(parent): %v", err)
+	}
+	child := publicSubcategory(ctx, t, q, shop.ID, parent.ID, "child", true)
+	if err := q.UpsertCategoryTranslation(ctx, db.UpsertCategoryTranslationParams{CategoryID: child.ID, Locale: "uz", Name: "Child"}); err != nil {
+		t.Fatalf("UpsertCategoryTranslation(child): %v", err)
+	}
+
+	publicProduct(ctx, t, q, shop.ID, unit.ID, &child.ID, "tree-product-1", true, false)
+	publicProduct(ctx, t, q, shop.ID, unit.ID, &child.ID, "tree-product-2", true, false)
+
+	rows, err := q.ListPublicCategories(ctx, db.ListPublicCategoriesParams{ShopID: shop.ID, Locale: "uz"})
+	if err != nil {
+		t.Fatalf("ListPublicCategories: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("ListPublicCategories = %+v, want 2 (parent + child)", rows)
+	}
+	if rows[0].ID != parent.ID || rows[1].ID != child.ID {
+		t.Fatalf("ListPublicCategories order = %+v, want parent immediately before child", rows)
+	}
+	if rows[0].ParentSlug != nil {
+		t.Errorf("parent.ParentSlug = %v, want nil (root)", rows[0].ParentSlug)
+	}
+	if rows[0].ProductCount != 2 {
+		t.Errorf("parent.ProductCount = %d, want 2 (its child's products, it has none of its own)", rows[0].ProductCount)
+	}
+	if rows[1].ParentSlug == nil || *rows[1].ParentSlug != "parent" {
+		t.Errorf("child.ParentSlug = %v, want \"parent\"", rows[1].ParentSlug)
+	}
+	if rows[1].ParentName != "Parent" {
+		t.Errorf("child.ParentName = %q, want \"Parent\"", rows[1].ParentName)
+	}
+	if rows[1].ProductCount != 2 {
+		t.Errorf("child.ProductCount = %d, want 2", rows[1].ProductCount)
 	}
 }
 
