@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/Sulton-Ali/savdo/api/gen"
+	"github.com/Sulton-Ali/savdo/api/internal/db"
 )
 
 func TestListPublicCategories_activeOnlyWithProductCounts(t *testing.T) {
@@ -199,5 +200,73 @@ func TestListPublicCategories_inactiveChildExcludedFromParentCountAndListing(t *
 		if item.Slug == "erkaklar" && item.ProductCount != 1 {
 			t.Errorf("erkaklar ProductCount = %d, want 1 (only the active child's product)", item.ProductCount)
 		}
+	}
+}
+
+// TestListPublicCategories_inactiveOrDeletedParentPromotesChildToTopLevel
+// pins T7 review round 1 MAJOR 2 (the orchestrator accepted the
+// inactive-parent -> top-level ruling, categories.sql's own doc
+// comment): an active child whose parent is inactive, and another whose
+// parent is soft-deleted, both list as top-level entries (parentSlug/
+// parentName null) with their own product count, and their products
+// stay reachable via `?category=<child-slug>` — neither the inactive
+// nor the soft-deleted parent itself appears as a row.
+func TestListPublicCategories_inactiveOrDeletedParentPromotesChildToTopLevel(t *testing.T) {
+	h, _, _, q, _ := newTestHandler(t, "shop-a")
+	ctx := context.Background()
+	shopRow := seedShop(ctx, t, q, "shop-a")
+	unit := seedUnit(ctx, t, q, shopRow.ID)
+
+	inactiveParent := seedCategory(ctx, t, q, shopRow.ID, "inactive-parent", "Inactive Parent", false)
+	childOfInactive := seedSubcategory(ctx, t, q, shopRow.ID, inactiveParent.ID, "child-of-inactive", "Child Of Inactive", true)
+
+	deletedParent := seedCategory(ctx, t, q, shopRow.ID, "deleted-parent", "Deleted Parent", true)
+	childOfDeleted := seedSubcategory(ctx, t, q, shopRow.ID, deletedParent.ID, "child-of-deleted", "Child Of Deleted", true)
+	if err := q.SoftDeleteCategory(ctx, db.SoftDeleteCategoryParams{ShopID: shopRow.ID, ID: deletedParent.ID}); err != nil {
+		t.Fatalf("SoftDeleteCategory(deletedParent): %v", err)
+	}
+
+	seedProduct(ctx, t, q, shopRow.ID, unit.ID, productSpec{
+		CategoryID: &childOfInactive.ID, Slug: "product-under-inactive-parent", Name: "Product Under Inactive Parent", BasePrice: "100000.00", IsActive: true,
+	})
+	seedProduct(ctx, t, q, shopRow.ID, unit.ID, productSpec{
+		CategoryID: &childOfDeleted.ID, Slug: "product-under-deleted-parent", Name: "Product Under Deleted Parent", BasePrice: "100000.00", IsActive: true,
+	})
+
+	resp, err := h.ListPublicCategories(ctxWithAcceptLanguage("uz"), gen.ListPublicCategoriesRequestObject{})
+	if err != nil {
+		t.Fatalf("ListPublicCategories: %v", err)
+	}
+	list := resp.(gen.ListPublicCategories200JSONResponse)
+	if len(list.Items) != 2 {
+		t.Fatalf("Items = %+v, want exactly the 2 promoted children (both inactive/deleted parents excluded)", list.Items)
+	}
+	for _, item := range list.Items {
+		if item.Slug == "inactive-parent" || item.Slug == "deleted-parent" {
+			t.Fatalf("Items = %+v, want the inactive/soft-deleted parents excluded from the list entirely", list.Items)
+		}
+		if !item.ParentSlug.IsNull() {
+			t.Errorf("%s ParentSlug = %+v, want null (promoted to top-level)", item.Slug, item.ParentSlug)
+		}
+		if !item.ParentName.IsNull() {
+			t.Errorf("%s ParentName = %+v, want null (promoted to top-level)", item.Slug, item.ParentName)
+		}
+		if item.ProductCount != 1 {
+			t.Errorf("%s ProductCount = %d, want 1 (its own product)", item.Slug, item.ProductCount)
+		}
+	}
+
+	// Reachable via ?category=<child-slug> directly, regardless of the
+	// (now-invisible) parent's own state.
+	childOfInactiveSlug := "child-of-inactive"
+	byChildOfInactive := listPublicProducts(ctxWithAcceptLanguage("uz"), t, h, gen.ListPublicProductsParams{Category: &childOfInactiveSlug})
+	if len(byChildOfInactive.Items) != 1 || byChildOfInactive.Items[0].Slug != "product-under-inactive-parent" {
+		t.Fatalf("byChildOfInactive.Items = %+v, want just product-under-inactive-parent", byChildOfInactive.Items)
+	}
+
+	childOfDeletedSlug := "child-of-deleted"
+	byChildOfDeleted := listPublicProducts(ctxWithAcceptLanguage("uz"), t, h, gen.ListPublicProductsParams{Category: &childOfDeletedSlug})
+	if len(byChildOfDeleted.Items) != 1 || byChildOfDeleted.Items[0].Slug != "product-under-deleted-parent" {
+		t.Fatalf("byChildOfDeleted.Items = %+v, want just product-under-deleted-parent", byChildOfDeleted.Items)
 	}
 }

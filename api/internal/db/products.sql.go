@@ -807,16 +807,17 @@ func (q *Queries) ListProductsPublic(ctx context.Context, arg ListProductsPublic
 const listPublicProducts = `-- name: ListPublicProducts :many
 
 WITH RECURSIVE matched_categories AS (
-    SELECT id FROM categories
+    SELECT id, 1 AS depth FROM categories
     WHERE shop_id = $2 AND deleted_at IS NULL AND is_active
         AND $3::text IS NOT NULL AND slug = $3
 
     UNION ALL
 
-    SELECT ch.id
+    SELECT ch.id, m.depth + 1
     FROM categories ch
     JOIN matched_categories m ON ch.parent_id = m.id
     WHERE ch.shop_id = $2 AND ch.deleted_at IS NULL AND ch.is_active
+        AND m.depth < 4
 )
 SELECT
     p.id, p.shop_id, p.category_id, p.unit_id, p.slug, p.sku,
@@ -927,6 +928,13 @@ type ListPublicProductsRow struct {
 // NULL AND c.is_active)) line below (O-22) — matched_categories only
 // widens which *active* categories count as a match, it does not loosen
 // that visibility rule.
+//
+// T7 review round 1, MAJOR 1: matched_categories carries a depth column
+// and stops recursing once depth reaches 4 (one past the schema's own
+// depth <= 3 rule, 04-DATA-MODEL.md) — this endpoint has no auth and
+// must not trust catalog.Service's own depth guard alone; a parent_id
+// cycle from a manual DB edit would otherwise recurse forever (same
+// reasoning as ListPublicCategories' descendants/paths CTEs).
 func (q *Queries) ListPublicProducts(ctx context.Context, arg ListPublicProductsParams) ([]ListPublicProductsRow, error) {
 	rows, err := q.db.Query(ctx, listPublicProducts,
 		arg.Locale,

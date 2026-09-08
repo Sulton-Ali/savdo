@@ -357,16 +357,18 @@ WITH RECURSIVE active_cats AS (
     WHERE c.shop_id = $2 AND c.deleted_at IS NULL AND c.is_active
 ),
 descendants AS (
-    -- Every active category is its own descendant at distance 0, so a
-    -- leaf with no children still gets a product_counts row below,
-    -- matching the pre-T7 per-category-only count exactly in that case.
-    SELECT id AS ancestor_id, id AS descendant_id FROM active_cats
+    -- Every active category is its own descendant at distance 0 (depth
+    -- 1), so a leaf with no children still gets a product_counts row
+    -- below, matching the pre-T7 per-category-only count exactly in that
+    -- case.
+    SELECT id AS ancestor_id, id AS descendant_id, 1 AS depth FROM active_cats
 
     UNION ALL
 
-    SELECT d.ancestor_id, c.id
+    SELECT d.ancestor_id, c.id, d.depth + 1
     FROM active_cats c
     JOIN descendants d ON c.parent_id = d.descendant_id
+    WHERE d.depth < 4
 ),
 product_counts AS (
     SELECT d.ancestor_id AS category_id, count(p.id) AS product_count
@@ -376,15 +378,16 @@ product_counts AS (
     GROUP BY d.ancestor_id
 ),
 paths AS (
-    SELECT c.id, lpad(c.sort_order::text, 10, '0') || ':' || c.slug AS sort_path
+    SELECT c.id, lpad(c.sort_order::text, 10, '0') || ':' || c.slug AS sort_path, 1 AS depth
     FROM active_cats c
     WHERE c.parent_id IS NULL OR c.parent_id NOT IN (SELECT id FROM active_cats)
 
     UNION ALL
 
-    SELECT c.id, p.sort_path || '/' || lpad(c.sort_order::text, 10, '0') || ':' || c.slug
+    SELECT c.id, p.sort_path || '/' || lpad(c.sort_order::text, 10, '0') || ':' || c.slug, p.depth + 1
     FROM active_cats c
     JOIN paths p ON c.parent_id = p.id
+    WHERE p.depth < 4
 )
 SELECT
     c.id, c.shop_id, c.parent_id, c.slug, c.sort_order, c.is_active, c.image_id, c.created_at, c.updated_at,
@@ -481,6 +484,16 @@ type ListPublicCategoriesRow struct {
 // immediately before its own children, at any depth up to the schema's
 // depth <= 3 rule (04-DATA-MODEL.md) — not just the two levels the
 // current catalogue actually uses.
+//
+// T7 review round 1, MAJOR 1: both descendants and paths carry a depth
+// column and stop recursing once depth reaches 4 (one past the schema's
+// own depth <= 3 rule, 04-DATA-MODEL.md) — depth is normally enforced by
+// catalog.Service before a category is created or re-parented
+// (GetCategoryDepth/GetCategorySubtreeHeight), but this endpoint has no
+// auth and must not trust that guard alone: a parent_id cycle from a
+// manual DB edit (or a bug elsewhere) would otherwise recurse forever and
+// hang the request instead of erroring or returning a bounded, if
+// incomplete, result.
 func (q *Queries) ListPublicCategories(ctx context.Context, arg ListPublicCategoriesParams) ([]ListPublicCategoriesRow, error) {
 	rows, err := q.db.Query(ctx, listPublicCategories, arg.Locale, arg.ShopID)
 	if err != nil {
