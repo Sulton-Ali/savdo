@@ -66,6 +66,14 @@ const (
 	// maxToolRounds is ADR-009's tool-loop bound ("Tool loop runs at most
 	// 5 rounds").
 	maxToolRounds = 5
+
+	// defaultTypingInterval is chat.go's startTyping own re-send cadence
+	// for Telegram's typing chat action (O-30): Telegram shows a chat
+	// action for about 5 seconds (Bot API docs, sendChatAction), so
+	// re-sending every 4 seconds keeps it visible without flooding.
+	// Config.TypingInterval overrides this — only this package's own
+	// tests do.
+	defaultTypingInterval = 4 * time.Second
 )
 
 // Sender is the subset of the Telegram Bot API HandleUpdate needs to
@@ -83,6 +91,12 @@ type Sender interface {
 	// format.go's absoluteMediaURL) to chatID with a plain-text caption
 	// (D-116).
 	SendPhoto(ctx context.Context, chatID int64, photoURL, caption string) error
+	// SendTyping shows Telegram's "typing…" chat action for chatID
+	// (O-30) — chat.go's startTyping calls this repeatedly while a
+	// free-text turn's model call is in progress, never for a slash
+	// command or a turn one of O-25's gates rejects (both answer
+	// instantly, before startTyping is ever called).
+	SendTyping(ctx context.Context, chatID int64) error
 }
 
 // TelegramLinker is the account-linking capability `/start link_<code>`
@@ -140,6 +154,13 @@ type Config struct {
 	// explicitly asked for it — D-120's own fail-closed value, not "the
 	// caller forgot to set this".
 	DailyTokenBudget int
+	// TypingInterval overrides how often chat.go's startTyping re-sends
+	// Telegram's typing chat action (O-30) while a free-text turn's
+	// model call is in progress. Zero — every production caller —
+	// defaults to defaultTypingInterval; only this package's own tests
+	// (chat_test.go) set a shorter value, to observe more than one
+	// re-send without paying the real interval in wall-clock test time.
+	TypingInterval time.Duration
 }
 
 // Service implements the "Bot question" flow end to end. Every method
@@ -170,6 +191,12 @@ type Service struct {
 	// never a float.
 	priceIn  decimal.Decimal
 	priceOut decimal.Decimal
+
+	// typingInterval is Config.TypingInterval, defaulted to
+	// defaultTypingInterval when unset (parsePriceOrZero's own sibling
+	// default, NewService below) — chat.go's startTyping own re-send
+	// cadence.
+	typingInterval time.Duration
 
 	// dispatch.go's shared async worker state: sem bounds global
 	// in-flight updates, chatLocks serializes per chat, seen de-
@@ -217,18 +244,23 @@ func NewService(pool *pgxpool.Pool, q *db.Queries, aiClient ai.Client, pub *publ
 	if sender == nil {
 		sender = nilSender{}
 	}
+	typingInterval := cfg.TypingInterval
+	if typingInterval <= 0 {
+		typingInterval = defaultTypingInterval
+	}
 	baseCtx, baseCancel := context.WithCancel(context.Background())
 	return &Service{
 		pool: pool, q: q, ai: aiClient, pub: pub, content: contentSvc,
 		sender: sender, linker: linker, cfg: cfg, now: now, logger: logger,
-		priceIn:    parsePriceOrZero(cfg.PriceInputPerMTok, logger, "PriceInputPerMTok"),
-		priceOut:   parsePriceOrZero(cfg.PriceOutputPerMTok, logger, "PriceOutputPerMTok"),
-		sem:        make(chan struct{}, maxInFlightUpdates),
-		queueSlots: make(chan struct{}, maxQueuedUpdates),
-		chatLocks:  newChatLockTable(),
-		seen:       newSeenUpdates(maxSeenUpdateIDs),
-		baseCtx:    baseCtx,
-		baseCancel: baseCancel,
+		priceIn:        parsePriceOrZero(cfg.PriceInputPerMTok, logger, "PriceInputPerMTok"),
+		priceOut:       parsePriceOrZero(cfg.PriceOutputPerMTok, logger, "PriceOutputPerMTok"),
+		typingInterval: typingInterval,
+		sem:            make(chan struct{}, maxInFlightUpdates),
+		queueSlots:     make(chan struct{}, maxQueuedUpdates),
+		chatLocks:      newChatLockTable(),
+		seen:           newSeenUpdates(maxSeenUpdateIDs),
+		baseCtx:        baseCtx,
+		baseCancel:     baseCancel,
 	}
 }
 

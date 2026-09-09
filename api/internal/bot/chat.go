@@ -287,14 +287,19 @@ func turnCost(priceIn, priceOut decimal.Decimal, inputTokens, outputTokens int) 
 // logProviderError classifies err the way O-24 asks ("log the class"):
 // refusal, provider rate limit or anything else, without ever logging
 // err's own text. This is deliberately stricter than "never log the
-// request/response content itself" (hard rule 9): ai.ErrBadRequest can
-// wrap the provider's own error message verbatim
-// (openai_compat.mapOpenAICompatError includes it as-is — unlike the
-// Anthropic SDK mapping, which only ever surfaces a category string —
-// and that message can echo back a fragment of the request a self-hosted
-// endpoint rejected), so no case here — including the default one, for
-// whatever a provider fails to classify at all — ever passes err itself
-// to the logger (Opus review note on this task).
+// request/response content itself" (hard rule 9): neither provider's own
+// error mapping ever carries the provider's free-text message —
+// mapAnthropicError (internal/ai/anthropic.go) uses only the SDK's own
+// short apiErr.Type() classification, and mapOpenAICompatError (internal/
+// ai/openai_compat.go) uses only the envelope's "type"/"code" field,
+// explicitly never "message" (both packages' own doc comments cite hard
+// rule 9/D-112 for this). But mapAnthropicError's own non-API fallback (a
+// network failure or cancellation the SDK never wrapped in its own typed
+// error) still passes the raw Go error's own text through unclassified —
+// an environment detail (e.g. a DNS name, a local file path) this
+// package has no way to vet at this layer — so no case here, including
+// the default one, ever passes err itself to the logger (Opus review
+// note on this task).
 func (s *Service) logProviderError(shopID uuid.UUID, err error) {
 	switch {
 	case errors.Is(err, ai.ErrRefused):
@@ -307,5 +312,67 @@ func (s *Service) logProviderError(shopID uuid.UUID, err error) {
 		s.logger.Warn("bot: bad request to provider", "shop_id", shopID)
 	default:
 		s.logger.Error("bot: unclassified provider error", "shop_id", shopID)
+	}
+}
+
+// startTyping shows Telegram's "typing…" chat action (O-30) for chatID
+// immediately (synchronously, before this returns — so a caller that
+// sends the reply right after knows the indicator was requested first)
+// and keeps re-sending it every s.typingInterval, from a background
+// goroutine, until the returned stop func is called — Telegram only
+// displays a chat action for about 5 seconds (Bot API docs,
+// sendChatAction), so a single send would go stale partway through a
+// multi-round tool loop. handleFreeText (update.go) is this loop's only
+// caller: it calls stop explicitly right after runFreeText returns, so
+// the indicator never overlaps the reply it sends next (replyStatic
+// Fallback or sendAnswer), and also defers it as a safety net for a
+// panic unwinding through dispatch.go's own recover, or Close's own
+// shutdown (baseCtx cancellation propagates through ctx, the parent this
+// derives from). Never called for a slash command (handleCommand's own
+// path never reaches here) or a turn one of O-25's gates rejects
+// (handleFreeText returns before this is called), both of which already
+// answer instantly. stop blocks until the background goroutine has
+// actually exited, so no goroutine — and no further SendTyping call —
+// outlives the turn it belongs to, and is safe to call more than once
+// (cancel is idempotent by context.CancelFunc's own contract; receiving
+// from done after it is already closed returns immediately every time),
+// which is exactly what happens on handleFreeText's normal path: once
+// from the explicit call, once more from the deferred one.
+func (s *Service) startTyping(ctx context.Context, chatID int64) (stop func()) {
+	typingCtx, cancel := context.WithCancel(ctx)
+	s.sendTypingOnce(typingCtx, chatID)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(s.typingInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-typingCtx.Done():
+				return
+			case <-ticker.C:
+				s.sendTypingOnce(typingCtx, chatID)
+			}
+		}
+	}()
+
+	return func() {
+		cancel()
+		<-done
+	}
+}
+
+// sendTypingOnce sends one typing chat action, logging a failure by
+// class only (never err's own text, the same discipline
+// logProviderError follows for a provider error) and never failing the
+// turn — a lost "typing…" indicator is a cosmetic gap, not a reason to
+// abandon or delay the actual reply.
+func (s *Service) sendTypingOnce(ctx context.Context, chatID int64) {
+	if err := s.sender.SendTyping(ctx, chatID); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return
+		}
+		s.logger.Warn("bot: send typing action failed", "error_class", "send_failed")
 	}
 }
