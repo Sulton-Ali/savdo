@@ -99,10 +99,13 @@ func TestHandleUpdate_slowModel_sendsAtLeastTwoTypingActions(t *testing.T) {
 	}
 }
 
-// TestHandleUpdate_typingStopsAfterReply pins the loop's own shutdown:
-// once HandleUpdate returns, handleFreeText's deferred stop has already
-// joined startTyping's background goroutine (chat.go's own doc comment),
-// so no further typing action follows — proven by waiting several would-
+// TestHandleUpdate_typingStopsAfterReply pins the loop's own stop point
+// (update.go's handleFreeText, chat.go's startTyping doc comment): the
+// turn calls stopTyping explicitly right after runFreeText returns, so
+// no typing action is ever recorded at or after the reply — proven here
+// from the fake sender's own call-order log (Events), not just a count —
+// and the deferred stopTyping (the safety net for a panic/shutdown path)
+// never re-fires a stale action either, proven by waiting several would-
 // be intervals past the reply and checking the count never grew.
 func TestHandleUpdate_typingStopsAfterReply(t *testing.T) {
 	fake := ai.NewFake(scriptedAnswer("We have shoes in stock."))
@@ -111,13 +114,34 @@ func TestHandleUpdate_typingStopsAfterReply(t *testing.T) {
 
 	env.svc.HandleUpdate(context.Background(), textUpdate(1, 100, "alice", "uz", "Do you have shoes?"))
 
-	got := env.sender.typingCount()
-	if got == 0 {
-		t.Fatalf("want at least one typing action sent before the reply")
+	events := env.sender.events()
+	replyIdx := -1
+	for i, e := range events {
+		if e == "message" || e == "photo" {
+			replyIdx = i
+			break
+		}
+	}
+	if replyIdx == -1 {
+		t.Fatalf("events = %v, want at least one reply (message or photo)", events)
+	}
+	var sawTypingBeforeReply bool
+	for i, e := range events {
+		if e != "typing" {
+			continue
+		}
+		if i >= replyIdx {
+			t.Fatalf("events = %v, want no typing action at or after index %d (the reply) — handleFreeText's explicit stopTyping must run before the reply is sent", events, replyIdx)
+		}
+		sawTypingBeforeReply = true
+	}
+	if !sawTypingBeforeReply {
+		t.Fatalf("events = %v, want at least one typing action before the reply", events)
 	}
 
+	before := env.sender.typingCount()
 	time.Sleep(150 * time.Millisecond) // several would-be 20ms intervals
-	if after := env.sender.typingCount(); after != got {
-		t.Fatalf("typing actions after HandleUpdate returned = %d, want unchanged from %d (the loop must stop once the turn finishes)", after, got)
+	if after := env.sender.typingCount(); after != before {
+		t.Fatalf("typing actions after HandleUpdate returned = %d, want unchanged from %d (the loop must stay stopped)", after, before)
 	}
 }

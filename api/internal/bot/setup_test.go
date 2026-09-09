@@ -40,6 +40,14 @@ type fakeSender struct {
 	Photos   []sentPhoto
 	Typings  []int64 // chatIDs SendTyping was called with, in call order (O-30)
 	SendErr  error   // when set, every SendMessage/SendPhoto call fails with it
+
+	// Events is every SendMessage/SendPhoto/SendTyping call, in the exact
+	// order fakeSender's own methods were invoked ("message"/"photo"/
+	// "typing") — Messages/Photos/Typings above group by kind, which loses
+	// the cross-kind ordering TestHandleUpdate_typingStopsAfterReply (O-30)
+	// needs: whether any typing action was recorded *after* the reply that
+	// ended the turn, not just how many of each kind there were.
+	Events []string
 }
 
 type sentMessage struct {
@@ -60,6 +68,7 @@ func (f *fakeSender) SendMessage(_ context.Context, chatID int64, text string) e
 		return f.SendErr
 	}
 	f.Messages = append(f.Messages, sentMessage{ChatID: chatID, Text: text})
+	f.Events = append(f.Events, "message")
 	return nil
 }
 
@@ -70,6 +79,7 @@ func (f *fakeSender) SendPhoto(_ context.Context, chatID int64, url, caption str
 		return f.SendErr
 	}
 	f.Photos = append(f.Photos, sentPhoto{ChatID: chatID, URL: url, Caption: caption})
+	f.Events = append(f.Events, "photo")
 	return nil
 }
 
@@ -81,6 +91,7 @@ func (f *fakeSender) SendTyping(_ context.Context, chatID int64) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.Typings = append(f.Typings, chatID)
+	f.Events = append(f.Events, "typing")
 	return nil
 }
 
@@ -94,6 +105,15 @@ func (f *fakeSender) typingCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.Typings)
+}
+
+// events reads a copy of Events under the lock — see Events' own doc
+// comment for why an ordering assertion needs this rather than the
+// per-kind slices above.
+func (f *fakeSender) events() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.Events...)
 }
 
 // last returns every reply's own text — a SendMessage's Text or a
