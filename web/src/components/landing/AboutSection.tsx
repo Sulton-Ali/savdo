@@ -32,9 +32,12 @@ export function AboutSection({
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
       <AboutCard eyebrow={eyebrow} title={title} body={body} />
+      {/* `quote.author` is placeholder sample copy ("[Mijoz ismi]") and can
+       * repeat across entries, so it is not a safe React key on its own
+       * (review) — `quote.text` is unique per entry and doubles as one. */}
       {quotes.map((quote) => (
         <QuoteCard
-          key={quote.author}
+          key={quote.text}
           quote={quote.text}
           author={quote.author}
           sampleLabel={sampleLabel}
