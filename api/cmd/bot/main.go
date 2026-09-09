@@ -100,25 +100,40 @@ func run() error {
 	// client) is this binary's live confirmation that TELEGRAM_BOT_TOKEN
 	// is not just present but actually valid; its errors never include
 	// the token itself (the SDK redacts it in every wrapped URL error).
-	tgBot, err := telegram.New(cfg.TelegramBotToken, telegram.WithErrorsHandler(func(err error) {
-		logger.Error("telegram bot error", "error", err)
-	}))
+	// WithNotAsyncHandlers disables go-telegram/bot's own default
+	// dispatch (github.com/go-telegram/bot@v1.25.0/process_update.go: a
+	// bare `go r(ctx, b, upd)` per update, no recover, no concurrency
+	// cap) — the registered handler below calls bot.Service.Dispatch
+	// instead, which provides both, shared with httpx.HandleBotWebhook
+	// (item 8/9 of the Phase 7 T4 fix wave).
+	tgBot, err := telegram.New(cfg.TelegramBotToken,
+		telegram.WithErrorsHandler(func(err error) {
+			logger.Error("telegram bot error", "error", err)
+		}),
+		telegram.WithNotAsyncHandlers(),
+	)
 	if err != nil {
 		return fmt.Errorf("init telegram bot client: %w", err)
 	}
 
 	svc := bot.NewService(pool, queries, aiClient, pubHandler, contentSvc, bot.TelegramSender{Bot: tgBot}, nil,
-		bot.Config{ShopID: shopRow.ID, SiteURL: cfg.SiteURL}, nil, logger)
+		bot.Config{
+			ShopID: shopRow.ID, SiteURL: cfg.SiteURL,
+			PriceInputPerMTok: cfg.AIPriceInputPerMTok, PriceOutputPerMTok: cfg.AIPriceOutputPerMTok,
+			DailyTokenBudget: cfg.AIDailyTokenBudget,
+		}, nil, logger)
 
-	// Customer mode only (D-111): every update reaches HandleUpdate,
-	// which itself ignores anything that is not a text message — no
-	// go-telegram/bot pattern-matched handler is registered, since
-	// HandleUpdate is its own single dispatcher (update.go's own doc
-	// comment).
+	// Customer mode only (D-111): every update reaches Dispatch, which
+	// itself ignores anything HandleUpdate would (a non-text message) —
+	// no go-telegram/bot pattern-matched handler is registered beyond
+	// this one, since Dispatch/HandleUpdate is its own single dispatcher
+	// (update.go's own doc comment). Dispatch (not HandleUpdate directly)
+	// so this shares Service's own panic recovery, concurrency cap and
+	// per-chat serialization with the webhook path (dispatch.go).
 	tgBot.RegisterHandlerMatchFunc(
 		func(*models.Update) bool { return true },
-		func(ctx context.Context, _ *telegram.Bot, update *models.Update) {
-			svc.HandleUpdate(ctx, update)
+		func(_ context.Context, _ *telegram.Bot, update *models.Update) {
+			svc.Dispatch(update)
 		},
 	)
 

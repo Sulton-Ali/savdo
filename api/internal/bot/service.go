@@ -10,6 +10,12 @@
 // loop and httpx.HandleBotWebhook (the same operation Phase 8 points a
 // real Telegram webhook at) both call it with a decoded
 // *models.Update — nothing here knows or cares which one is calling.
+// Both should go through Dispatch (dispatch.go), not HandleUpdate
+// directly: Dispatch is the shared, panic-recovered, concurrency- and
+// per-chat-bounded, update_id-deduplicated worker (items 8/9); calling
+// HandleUpdate directly is still supported (every existing test does)
+// but skips all of that and runs synchronously in the caller's own
+// goroutine.
 //
 // The data boundary is structural, not a prompt instruction: the three
 // tools this package exposes to the model (tools.go) read only through
@@ -18,7 +24,12 @@
 // (gen.PublicProductListItem, gen.ProductPublic, gen.VariantPublic, the
 // O-19 content blocks) simply have no cost/quantity/staff/customer field
 // to leak (ADR-010) — never internal/catalog, internal/stock,
-// internal/crm or internal/sales (hard rule 10).
+// internal/crm or internal/sales (hard rule 10). Service itself holds a
+// plain *db.Queries (q below), the same as every other module's own
+// Service — the boundary is enforced by which functions the three tools
+// call (tools.go's own doc comment) and pinned by this package's own
+// O-27 boundary suite (boundary_test.go), never by q's own type: q could
+// run any query in principle, the tools simply never ask it to.
 package bot
 
 import (
@@ -28,6 +39,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/shopspring/decimal"
 
 	"github.com/Sulton-Ali/savdo/api/internal/ai"
 	"github.com/Sulton-Ali/savdo/api/internal/content"
@@ -64,7 +76,7 @@ type Sender interface {
 	// SendMessage sends plain-text text to chatID. Reply formatting
 	// (format.go) deliberately never asks for Telegram's MarkdownV2 parse
 	// mode — see format.go's own doc comment for why plain text is the
-	// safer of the two choices docs/05-API.md's task spec allows.
+	// safer of the two choices docs/00-DECISIONS.md D-119 allows.
 	SendMessage(ctx context.Context, chatID int64, text string) error
 	// SendPhoto sends the image at photoURL (an absolute URL,
 	// format.go's absoluteMediaURL) to chatID with a plain-text caption
@@ -100,6 +112,33 @@ type Config struct {
 	// absolute media URLs for D-116's product photo — never built by the
 	// model, always by format.go from a tool result's slug.
 	SiteURL string
+	// PriceInputPerMTok and PriceOutputPerMTok are USD per million
+	// tokens, decimal strings (ADR-007) — the same two values internal/
+	// ai.Config prices a single Chat call with (internal/config.Config's
+	// AIPriceInputPerMTok/AIPriceOutputPerMTok). chat.go needs its own
+	// copy because a turn's real cost is the *sum* across every round
+	// runFreeText's tool loop makes, and internal/ai's own cost formula
+	// (unexported, ai/config.go) only ever prices one round at a time —
+	// this package cannot import an unexported symbol from another one,
+	// so turnCost (chat.go) mirrors that formula instead. An empty or
+	// malformed value degrades to a "0.000000" cost estimate (logged
+	// once at construction, never a startup failure): by construction
+	// both cmd/bot/main.go and cmd/api/main.go already validate the same
+	// two strings via ai.New before ever building a Config here, so a
+	// parse failure at this point would mean this package's own copy of
+	// that validation has drifted, not a real misconfiguration.
+	PriceInputPerMTok  string
+	PriceOutputPerMTok string
+	// DailyTokenBudget is O-25/D-120's env-level daily token cap
+	// (AI_DAILY_TOKEN_BUDGET, internal/config.Config's own
+	// AIDailyTokenBudget field) — applied whenever shops.ai_daily_token_
+	// budget is NULL (shopOverBudget, persist.go). A plain pass-through,
+	// never re-defaulted here: config.Load() already turns an unset
+	// AI_DAILY_TOKEN_BUDGET into 200000 via its own envDefault, so 0
+	// reaching this field only ever means an operator (or a test)
+	// explicitly asked for it — D-120's own fail-closed value, not "the
+	// caller forgot to set this".
+	DailyTokenBudget int
 }
 
 // Service implements the "Bot question" flow end to end. Every method
@@ -107,7 +146,14 @@ type Config struct {
 // (Config above, resolved once at construction, is the only
 // configuration surface).
 type Service struct {
-	pool    *pgxpool.Pool
+	pool *pgxpool.Pool
+	// q is a plain *db.Queries — it can run any query in the schema, the
+	// same as every other module's own Service (item 17). The O-27 data
+	// boundary is enforced by which functions the three tools (tools.go)
+	// call with it — internal/public.Handler and internal/content.
+	// Service.Resolve only, never internal/catalog/stock/crm/sales
+	// directly — and pinned by this package's own boundary suite
+	// (boundary_test.go), not by q's own type.
 	q       *db.Queries
 	ai      ai.Client
 	pub     *public.Handler
@@ -117,11 +163,32 @@ type Service struct {
 	cfg     Config
 	now     func() time.Time
 	logger  *slog.Logger
+
+	// priceIn/priceOut are Config.PriceInputPerMTok/PriceOutputPerMTok,
+	// decimal-parsed once at construction (turnCost, chat.go) — ADR-007:
+	// never a float.
+	priceIn  decimal.Decimal
+	priceOut decimal.Decimal
+
+	// dispatch.go's shared async worker state: sem bounds global
+	// in-flight updates, chatLocks serializes per chat, seen de-
+	// duplicates by update_id. All three are process-local (dispatch.go's
+	// own doc comment) and only ever touched through Dispatch/
+	// dispatchOne — HandleUpdate itself remains synchronous and knows
+	// nothing about any of this, which is what every existing test calling
+	// it directly still relies on.
+	sem       chan struct{}
+	chatLocks *chatLockTable
+	seen      *seenUpdates
 }
 
 // NewService builds a Service. now and logger may be nil (time.Now and
 // slog.Default respectively) — tests pass a fixed clock so rate-limit and
-// budget window assertions never race real wall-clock time.
+// budget window assertions never race real wall-clock time. sender may
+// also be nil (an unconfigured TELEGRAM_BOT_TOKEN, cmd/api/main.go's own
+// doc comment): it is replaced with a nilSender (sender.go) that turns
+// every send attempt into a clear, logged error instead of a nil-
+// interface panic (item 10's own guard).
 func NewService(pool *pgxpool.Pool, q *db.Queries, aiClient ai.Client, pub *public.Handler, contentSvc *content.Service, sender Sender, linker TelegramLinker, cfg Config, now func() time.Time, logger *slog.Logger) *Service {
 	if now == nil {
 		now = time.Now
@@ -129,10 +196,36 @@ func NewService(pool *pgxpool.Pool, q *db.Queries, aiClient ai.Client, pub *publ
 	if logger == nil {
 		logger = slog.Default()
 	}
+	if sender == nil {
+		sender = nilSender{}
+	}
 	return &Service{
 		pool: pool, q: q, ai: aiClient, pub: pub, content: contentSvc,
 		sender: sender, linker: linker, cfg: cfg, now: now, logger: logger,
+		priceIn:   parsePriceOrZero(cfg.PriceInputPerMTok, logger, "PriceInputPerMTok"),
+		priceOut:  parsePriceOrZero(cfg.PriceOutputPerMTok, logger, "PriceOutputPerMTok"),
+		sem:       make(chan struct{}, maxInFlightUpdates),
+		chatLocks: newChatLockTable(),
+		seen:      newSeenUpdates(maxSeenUpdateIDs),
 	}
+}
+
+// parsePriceOrZero decimal-parses s (Config.PriceInputPerMTok/
+// PriceOutputPerMTok), returning decimal.Zero for an unset value (many
+// tests never set these, and cost is not what they are testing) or a
+// malformed one (logged once, never a construction failure — Config's
+// own doc comment explains why a parse failure here is unexpected in
+// production).
+func parsePriceOrZero(s string, logger *slog.Logger, field string) decimal.Decimal {
+	if s == "" {
+		return decimal.Zero
+	}
+	d, err := decimal.NewFromString(s)
+	if err != nil {
+		logger.Error("bot: invalid price config; cost estimates will read 0.000000 until fixed", "field", field, "value", s)
+		return decimal.Zero
+	}
+	return d
 }
 
 // newID mints a UUID v7 (time-ordered, docs/03-ARCHITECTURE.md §

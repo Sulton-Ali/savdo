@@ -176,6 +176,18 @@ func run() error {
 		logger.Warn("PUBLIC_SHOP_SLUG did not resolve to a shop; POST /bot/webhook/* will error until fixed",
 			"slug", cfg.PublicShopSlug, "error", err)
 	}
+
+	// Item 10: BOT_WEBHOOK_SECRET set with no TELEGRAM_BOT_TOKEN means
+	// every webhook update would need to reply through a botSender that
+	// can never exist — fail fast at startup rather than let the first
+	// real webhook call discover it (bot.nilSender turns that into a
+	// logged error instead of a panic if this check is ever bypassed, but
+	// this is the real fix: a webhook nobody can ever get a reply from is
+	// a misconfiguration, not a degrade-gracefully case).
+	if err := validateBotWebhookConfig(cfg); err != nil {
+		return err
+	}
+
 	// botSender only does outgoing Telegram Bot API calls (send message/
 	// photo) — cmd/api never polls or registers a webhook itself
 	// (cmd/bot's own doc comment: "polling stays in cmd/bot"). Built
@@ -193,7 +205,11 @@ func run() error {
 		}
 	}
 	botSvc := bot.NewService(pool, queries, aiClient, public.NewHandler(publicSvc), contentSvc, botSender, nil,
-		bot.Config{ShopID: botShopRow.ID, SiteURL: cfg.SiteURL}, nil, logger)
+		bot.Config{
+			ShopID: botShopRow.ID, SiteURL: cfg.SiteURL,
+			PriceInputPerMTok: cfg.AIPriceInputPerMTok, PriceOutputPerMTok: cfg.AIPriceOutputPerMTok,
+			DailyTokenBudget: cfg.AIDailyTokenBudget,
+		}, nil, logger)
 
 	srv := &http.Server{
 		Addr: cfg.Addr,
@@ -239,4 +255,21 @@ func newLogger(level string) *slog.Logger {
 	}
 	handler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: lvl})
 	return slog.New(handler)
+}
+
+// validateBotWebhookConfig is item 10's own startup guard: a configured
+// BOT_WEBHOOK_SECRET with an empty TELEGRAM_BOT_TOKEN would leave
+// botSender a nil bot.Sender (below) — bot.NewService's own nilSender
+// guard (internal/bot/sender.go) turns that into a logged error instead
+// of a panic if this check is ever bypassed, but the real fix is never
+// starting up in that combination at all: a webhook that can never send
+// a single reply is a misconfiguration, not something to degrade
+// gracefully into (unlike a bad PUBLIC_SHOP_SLUG or an unreachable
+// Telegram Bot API, which only degrade the not-yet-enabled webhook
+// route).
+func validateBotWebhookConfig(cfg config.Config) error {
+	if cfg.BotWebhookSecret != "" && cfg.TelegramBotToken == "" {
+		return errors.New("BOT_WEBHOOK_SECRET is set but TELEGRAM_BOT_TOKEN is empty; the webhook could never send a reply")
+	}
+	return nil
 }

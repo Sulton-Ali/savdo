@@ -138,13 +138,19 @@ func (h *Handler) ListBotConversationMessages(ctx context.Context, req gen.ListB
 // down the correct value one byte at a time; any mismatch (including an
 // unconfigured, empty webhookSecret) is 404, indistinguishable from a
 // path Telegram never registered — never a 403, which would confirm the
-// route exists to a prober guessing secrets. The decoded update is
-// handled synchronously through Service.HandleUpdate; a slow LLM call
-// can make this response slow, which Telegram tolerates within its own
-// webhook timeout — Phase 8's own wiring task, not this one, is the
-// right place to move this onto a background goroutine if that turns out
-// to matter in production.
-func (h *Handler) HandleBotWebhook(ctx context.Context, req gen.HandleBotWebhookRequestObject) (gen.HandleBotWebhookResponseObject, error) {
+// route exists to a prober guessing secrets.
+//
+// The decoded update is handed to Service.Dispatch, not HandleUpdate
+// directly (item 8): this handler only ever validates the secret and the
+// body, then acknowledges 200 — a multi-round tool loop (up to 5 rounds
+// * chat.go's own 45s chatCallTimeout) would otherwise run the whole
+// time behind cmd/api's 15s http.Server.WriteTimeout, and a Telegram
+// retry of an update that never got a fast 200 would bill a second turn
+// for a question the customer only asked once. Dispatch's own bounded
+// update_id de-dup set (dispatch.go) catches that retry; its own global
+// concurrency cap and per-chat serialization are shared with cmd/bot's
+// polling loop.
+func (h *Handler) HandleBotWebhook(_ context.Context, req gen.HandleBotWebhookRequestObject) (gen.HandleBotWebhookResponseObject, error) {
 	if h.webhookSecret == "" || subtle.ConstantTimeCompare([]byte(req.Secret), []byte(h.webhookSecret)) != 1 {
 		return nil, apierr.NotFound("bot_webhook")
 	}
@@ -152,18 +158,40 @@ func (h *Handler) HandleBotWebhook(ctx context.Context, req gen.HandleBotWebhook
 	if req.Body == nil {
 		return gen.HandleBotWebhook200Response{}, nil
 	}
-	b, err := json.Marshal(*req.Body)
+	update, err := decodeUpdate(*req.Body)
 	if err != nil {
-		return gen.HandleBotWebhook200Response{}, nil
-	}
-	var update models.Update
-	if err := json.Unmarshal(b, &update); err != nil {
 		// A malformed body from something that already knew the secret is
 		// still answered 200 (Telegram itself never sends one) — nothing
 		// useful to retry, and 4xx/5xx here only invites a retry storm.
 		return gen.HandleBotWebhook200Response{}, nil
 	}
 
-	h.svc.HandleUpdate(ctx, &update)
+	h.svc.Dispatch(update)
 	return gen.HandleBotWebhook200Response{}, nil
+}
+
+// decodeUpdate converts the contract's generic webhook body (gen.
+// HandleBotWebhookJSONBody = map[string]interface{}, the untyped-object
+// escape hatch the contract uses for Telegram's own payload) into the
+// SDK's typed models.Update (item 14). The generated strict handler
+// (gen/api.gen.go, out of this package's scope) has already decoded the
+// raw request body into that map with encoding/json's default numeric
+// handling (float64 for every JSON number) by the time this package ever
+// sees it — full int64 precision for a JSON number larger than 2^53
+// cannot be recovered after that hop, only preserved for one that never
+// needed it (every real Telegram id: update_id, chat.id, from.id, ...
+// is far below 2^53 in practice). The one remaining hop, this function's
+// own re-encode, decodes directly into models.Update's own typed int64
+// fields (never back into another map[string]interface{}), so it adds
+// no further precision loss of its own.
+func decodeUpdate(body gen.HandleBotWebhookJSONRequestBody) (*models.Update, error) {
+	b, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	var update models.Update
+	if err := json.Unmarshal(b, &update); err != nil {
+		return nil, err
+	}
+	return &update, nil
 }
