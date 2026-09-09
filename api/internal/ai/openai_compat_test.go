@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -244,6 +245,46 @@ func TestOpenAICompatClient_Chat_toolCallExtraContentRoundTrip(t *testing.T) {
 	}
 }
 
+// TestOpenAICompatClient_Chat_oversizedExtraContentIsDropped covers
+// Sonnet/Opus MAJOR (phase-7/t8 fix wave): a tool_calls entry whose
+// extra_content exceeds maxToolCallExtraContentBytes must be dropped,
+// not folded into the returned ToolCall.ID — a faulty or hostile backend
+// must not be able to smuggle several MiB per call into the in-memory
+// messages slice, replayed on every remaining round.
+func TestOpenAICompatClient_Chat_oversizedExtraContentIsDropped(t *testing.T) {
+	oversized := `"` + strings.Repeat("x", maxToolCallExtraContentBytes+1) + `"`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{
+				"message": map[string]any{
+					"tool_calls": []map[string]any{{
+						"id":            "call_big",
+						"type":          "function",
+						"function":      map[string]any{"name": "variant_availability", "arguments": `{"slug":"x"}`},
+						"extra_content": json.RawMessage(oversized),
+					}},
+				},
+				"finish_reason": "tool_calls",
+			}},
+		})
+	}))
+	defer server.Close()
+
+	client := newTestOpenAICompatClient(t, server.URL)
+	resp, err := client.Chat(context.Background(), Request{Messages: []Message{{Role: RoleUser, Text: "is it in stock?"}}})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	if len(resp.ToolCalls) != 1 {
+		t.Fatalf("ToolCalls = %+v, want 1", resp.ToolCalls)
+	}
+	if resp.ToolCalls[0].ID != "call_big" {
+		t.Fatalf("ToolCalls[0].ID = %q, want the raw provider id %q (oversized extra_content must be dropped, not folded)", resp.ToolCalls[0].ID, "call_big")
+	}
+}
+
 // TestOpenAICompatClient_Chat_toolCallWithoutExtraContentOmitsField
 // covers the other direction: a plain OpenAI-compatible provider (no
 // extra_content) must never gain the field on replay, and the id must
@@ -311,6 +352,27 @@ func TestEncodeDecodeToolCallID(t *testing.T) {
 		realID, extra := decodeToolCallID("plain-provider-id")
 		if realID != "plain-provider-id" || extra != nil {
 			t.Fatalf("decodeToolCallID(plain) = (%q, %s), want (plain-provider-id, nil)", realID, extra)
+		}
+	})
+
+	// The next two cover Sonnet/Opus minor 1 (phase-7/t8 fix wave): on
+	// any decode doubt, the *whole original string* must come back as
+	// realID — never a truncated id[:i] prefix, which would silently
+	// send a wrong id to the provider.
+	t.Run("malformed base64 after the separator decodes to the whole string, not a truncated prefix", func(t *testing.T) {
+		malformed := "call_1" + string(toolCallIDSeparator) + "not-valid-base64!!!"
+		realID, extra := decodeToolCallID(malformed)
+		if realID != malformed || extra != nil {
+			t.Fatalf("decodeToolCallID(malformed base64) = (%q, %s), want (%q, nil)", realID, extra, malformed)
+		}
+	})
+
+	t.Run("base64-valid but non-JSON payload decodes to the whole string, not a truncated prefix", func(t *testing.T) {
+		notJSON := base64.RawURLEncoding.EncodeToString([]byte("not json at all"))
+		id := "call_1" + string(toolCallIDSeparator) + notJSON
+		realID, extra := decodeToolCallID(id)
+		if realID != id || extra != nil {
+			t.Fatalf("decodeToolCallID(non-JSON payload) = (%q, %s), want (%q, nil)", realID, extra, id)
 		}
 	})
 }
@@ -550,6 +612,18 @@ func TestClassFromError(t *testing.T) {
 		{"numeric code stringified when type and status are empty", openAIErrorDetail{Code: json.RawMessage(`400`)}, "400"},
 		{"string code unquoted when type and status are empty", openAIErrorDetail{Code: json.RawMessage(`"invalid_request_error"`)}, "invalid_request_error"},
 		{"all empty", openAIErrorDetail{}, ""},
+		// Sonnet/Opus minor 2 (phase-7/t8 fix wave): code is only ever
+		// trusted as a JSON string or number.
+		{"object code is ignored", openAIErrorDetail{Code: json.RawMessage(`{"foo":"bar"}`)}, ""},
+		{"array code is ignored", openAIErrorDetail{Code: json.RawMessage(`[1,2,3]`)}, ""},
+		{"bool code is ignored", openAIErrorDetail{Code: json.RawMessage(`true`)}, ""},
+		{"null code is ignored", openAIErrorDetail{Code: json.RawMessage(`null`)}, ""},
+		{"malformed code is ignored", openAIErrorDetail{Code: json.RawMessage(`{not valid json`)}, ""},
+		// … and the resulting class is capped to maxErrorClassLen
+		// regardless of which field it came from.
+		{"a long type is capped", openAIErrorDetail{Type: strings.Repeat("a", 100)}, strings.Repeat("a", maxErrorClassLen)},
+		{"a long status is capped", openAIErrorDetail{Status: strings.Repeat("b", 100)}, strings.Repeat("b", maxErrorClassLen)},
+		{"a long string code is capped", openAIErrorDetail{Code: json.RawMessage(`"` + strings.Repeat("c", 100) + `"`)}, strings.Repeat("c", maxErrorClassLen)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

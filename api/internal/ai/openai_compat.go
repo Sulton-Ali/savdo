@@ -19,13 +19,23 @@ import (
 )
 
 // openAICompatClient is the "any OpenAI-compatible endpoint" provider
-// (ADR-009, O-29): a thin stdlib net/http client, no SDK, for self-hosted
-// backends (Ollama, vLLM, …) that speak the OpenAI Chat Completions
-// function-calling shape. Configured by two environment variables this
-// provider alone needs — AI_BASE_URL (required, e.g.
-// "http://localhost:11434/v1") and AI_API_KEY (optional: many self-hosted
-// endpoints need no auth) — read directly here rather than added to
-// Config, since every other Config value has no use for them.
+// (ADR-009, O-29): a thin stdlib net/http client, no SDK, for anything
+// that speaks the OpenAI Chat Completions function-calling shape — it
+// was written for a self-hosted backend (Ollama, vLLM, …), but as
+// actually deployed today (D-110, amended) AI_BASE_URL names a remote
+// managed API instead: Google Gemini's own openai-compat endpoint. This
+// file never assumes either kind of backend is more trustworthy than the
+// other because of who runs it (see maxOpenAICompatResponseBytes and
+// maxToolCallExtraContentBytes below) — only the loopback-only http rule
+// a few lines down treats "self-hosted on this machine" as a distinct,
+// more trusted case, and only for the transport, never the payload.
+// Configured by two environment variables this provider alone needs —
+// AI_BASE_URL (required, e.g.
+// "https://generativelanguage.googleapis.com/v1beta/openai" or
+// "http://localhost:11434/v1") and AI_API_KEY (required by Gemini;
+// optional for a self-hosted endpoint that needs no auth) — read
+// directly here rather than added to Config, since every other Config
+// value has no use for them.
 type openAICompatClient struct {
 	httpClient *http.Client
 	baseURL    string
@@ -90,12 +100,31 @@ func isLoopbackHost(host string) bool {
 }
 
 // maxOpenAICompatResponseBytes bounds how much of a response body this
-// client reads into memory. A self-hosted endpoint (this provider's only
-// use case, O-29) is not a trusted upstream the way Anthropic's API is;
-// without a bound, a misbehaving or malicious backend could stream an
-// unbounded body at the process. Overflow classifies as
-// ErrProviderUnavailable: the provider did not give us a usable response.
+// client reads into memory. Unlike the anthropic provider (an official
+// SDK talking to one vendor this codebase already trusts), this one
+// talks to whatever AI_BASE_URL names — a self-hosted backend or, as
+// deployed today (D-110, amended), Google's own Gemini endpoint — and
+// treats neither as a trusted upstream by virtue of being a named
+// vendor's managed API rather than a self-hosted one; without a bound, a
+// misbehaving or malicious backend could stream an unbounded body at the
+// process. Overflow classifies as ErrProviderUnavailable: the provider
+// did not give us a usable response.
 const maxOpenAICompatResponseBytes = 4 * 1024 * 1024 // 4 MiB
+
+// maxToolCallExtraContentBytes caps how much of a single tool_calls
+// entry's ExtraContent this file will fold into ai.ToolCall.ID and carry
+// through the in-memory messages slice for the rest of a turn (Sonnet/
+// Opus MAJOR, phase-7/t8 fix wave). A real thought_signature is hundreds
+// of bytes to a low few KiB; maxOpenAICompatResponseBytes bounds the
+// whole response but not any one field within it, so without this a
+// misbehaving or hostile backend could attach close to the full 4 MiB to
+// every tool_calls entry, which then gets base64-inflated into the id,
+// kept across every remaining round of the turn, and re-uploaded on
+// each one. Oversized content is dropped, not truncated — a truncated
+// blob is not valid extra_content to any provider, so keeping a
+// truncated prefix would not even serve the purpose ExtraContent exists
+// for.
+const maxToolCallExtraContentBytes = 8 * 1024 // 8 KiB
 
 // errUnsupportedToolCallType is logged, never returned, when a tool_calls
 // entry has a type other than "function" — this wire format defines no
@@ -178,6 +207,12 @@ func (c *openAICompatClient) Chat(ctx context.Context, req Request) (Response, e
 		if tc.Type != "" && tc.Type != "function" {
 			slog.Default().WarnContext(ctx, "ai: openai_compat: skipping unsupported tool_call type", "error", errUnsupportedToolCallType, "type", tc.Type)
 			continue
+		}
+		if len(tc.ExtraContent) > maxToolCallExtraContentBytes {
+			// Dropped, never logged with its content (hard rule 9) — only
+			// the size, which is safe.
+			slog.Default().WarnContext(ctx, "ai: openai_compat: dropping oversized tool_call extra_content", "bytes", len(tc.ExtraContent), "limit", maxToolCallExtraContentBytes)
+			tc.ExtraContent = nil
 		}
 		out.ToolCalls = append(out.ToolCalls, ToolCall{ID: encodeToolCallID(tc), Name: tc.Function.Name, Input: json.RawMessage(tc.Function.Arguments)})
 	}
@@ -263,19 +298,24 @@ func encodeToolCallID(tc openAIToolCall) string {
 // itself issued (goes in the wire request's "id" or "tool_call_id");
 // extra is the ExtraContent to echo back on a replayed assistant
 // tool_calls entry, or nil when there was none (a provider that never
-// sent one, e.g. a plain self-hosted OpenAI-compatible backend). An id
-// with no separator — the only shape any provider other than this file's
-// own encoding ever produces — decodes to itself with no extra content;
-// a corrupt-looking suffix (never expected from this client's own
-// output) does the same rather than failing the whole request over it.
+// sent one — most OpenAI-compatible backends, self-hosted or a managed
+// API, have no equivalent of Gemini's own thought_signature). An id with
+// no separator — the only shape any provider other than this file's own
+// encoding ever produces — decodes to itself with no extra content; any
+// other doubt (malformed base64, or decoded bytes that are not valid
+// JSON — never expected from this client's own output, only from
+// something else having forged the id) does the same: the *whole
+// original string* becomes realID with no extra content, never a
+// truncated id[:i] prefix, which would silently send a wrong id to the
+// provider instead of failing loudly.
 func decodeToolCallID(id string) (realID string, extra json.RawMessage) {
 	i := strings.IndexByte(id, toolCallIDSeparator)
 	if i < 0 {
 		return id, nil
 	}
 	decoded, err := base64.RawURLEncoding.DecodeString(id[i+1:])
-	if err != nil {
-		return id[:i], nil
+	if err != nil || !json.Valid(decoded) {
+		return id, nil
 	}
 	return id[:i], decoded
 }
@@ -310,10 +350,12 @@ type openAIErrorResponse struct {
 // envelope and Gemini's own openai-compat one send, with the two fields
 // Gemini adds/changes: Code is a JSON number there (its HTTP status
 // echoed back) rather than the short string a standard OpenAI-compatible
-// backend sends, so it is decoded as raw JSON and only ever stringified,
-// never parsed as either type; Status is Gemini's own machine
-// classification (e.g. "RESOURCE_EXHAUSTED", "INVALID_ARGUMENT"),
-// standard OpenAI-compatible backends do not send it.
+// backend sends, so it is decoded as raw JSON and only ever stringified
+// via codeAsString below — and only when it is itself a JSON string or
+// number, never parsed as either concrete type here; Status is Gemini's
+// own machine classification (e.g. "RESOURCE_EXHAUSTED",
+// "INVALID_ARGUMENT"), standard OpenAI-compatible backends do not send
+// it.
 type openAIErrorDetail struct {
 	Message string          `json:"message"`
 	Type    string          `json:"type"`
@@ -342,17 +384,65 @@ func parseOpenAIError(body []byte) openAIErrorDetail {
 	return openAIErrorDetail{}
 }
 
+// maxErrorClassLen caps the class string mapOpenAICompatError attaches to
+// a returned error. statusError.class (client.go) is documented as "a
+// short machine classification... safe to log" — a provider's "type" or
+// "status" field is normally a short enum token, but nothing stops a
+// malformed or hostile response from sending an arbitrarily long one, so
+// this is where that promise is actually enforced, once, for every
+// caller (logging.go included).
+const maxErrorClassLen = 64
+
 // classFromError picks mapOpenAICompatError's class: the envelope's own
 // "type" (the standard OpenAI field) first, then Gemini's "status", then
-// its numeric "code" stringified — never "message" (hard rule 9, D-112).
+// its "code" stringified (codeAsString) — never "message" (hard rule 9,
+// D-112) — capped to maxErrorClassLen.
 func classFromError(d openAIErrorDetail) string {
-	if d.Type != "" {
-		return d.Type
+	class := d.Type
+	if class == "" {
+		class = d.Status
 	}
-	if d.Status != "" {
-		return d.Status
+	if class == "" {
+		class = codeAsString(d.Code)
 	}
-	return strings.Trim(string(d.Code), `"`)
+	if len(class) > maxErrorClassLen {
+		class = class[:maxErrorClassLen]
+	}
+	return class
+}
+
+// codeAsString stringifies an error envelope's "code" field only when it
+// is itself a JSON string (a standard OpenAI-compatible backend's short
+// code, e.g. "rate_limit_error") or a JSON number (Gemini's own HTTP
+// status echoed back, e.g. 429) — the only two shapes any envelope this
+// file has seen ever uses. An object, array, bool, null or malformed
+// value is not a classification this file trusts, so it is ignored
+// rather than stringified as-is.
+func codeAsString(code json.RawMessage) string {
+	trimmed := bytes.TrimSpace(code)
+	if len(trimmed) == 0 {
+		return ""
+	}
+	if trimmed[0] == '"' {
+		var s string
+		if err := json.Unmarshal(trimmed, &s); err != nil {
+			return ""
+		}
+		return s
+	}
+	// Reject anything that is not a JSON number's leading byte before
+	// even trying to decode it as one — unmarshaling the JSON literal
+	// null into a non-pointer numeric Go value is a documented no-op
+	// with a nil error (encoding/json), which would otherwise let
+	// "code":null through as the four-character class "null".
+	if c := trimmed[0]; c != '-' && (c < '0' || c > '9') {
+		return ""
+	}
+	var n float64
+	if err := json.Unmarshal(trimmed, &n); err != nil {
+		return ""
+	}
+	return string(trimmed)
 }
 
 // toOpenAIMessages converts a Request's system prompt and history into
