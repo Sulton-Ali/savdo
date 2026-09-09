@@ -304,7 +304,7 @@ func TestHandleUpdate_startLink_redactsCodeBeforePersisting(t *testing.T) {
 	linker := &fakeLinker{}
 	env.rebuildServiceWithLinker(noChatClient(), linker)
 	const chatID = int64(1)
-	const code = "verysecretcode123"
+	const code = "VERYSECRETCODE234567" // base32 shape (A-Z, 2-7) — the alphabet a real link code uses
 
 	env.svc.HandleUpdate(context.Background(), textUpdate(chatID, 100, "alice", "uz", "/start link_"+code))
 
@@ -322,5 +322,75 @@ func TestHandleUpdate_startLink_redactsCodeBeforePersisting(t *testing.T) {
 	}
 	if linker.lastCode != code {
 		t.Fatalf("CompleteLink code = %q, want the real unredacted code %q", linker.lastCode, code)
+	}
+}
+
+// TestHandleUpdate_startLink_redactsEveryFormOfTheCode is the MAJOR
+// (round 4) regression table: redactLinkCode must catch a link code
+// wherever it appears in a message, not just inside an exact "/start
+// link_<code>" command — a code pasted as plain text, the full deep-link
+// URL pasted instead of tapped, and a case/whitespace/@suffix variant of
+// the command itself that splitCommand now also has to actually
+// recognize (so the link still gets *redeemed*, not just silently
+// dropped as an unknown command with its own code un-redacted). Every
+// row uses a base32-shaped fake code (A-Z, 2-7 — internal/auth/otp.go's
+// own selectorEncoding alphabet) since that is exactly what
+// redactLinkCode's own regex matches.
+func TestHandleUpdate_startLink_redactsEveryFormOfTheCode(t *testing.T) {
+	const code = "ABCDEFGH234567IJKLMNOP"
+	tests := []struct {
+		name      string
+		text      string
+		isCommand bool // true: must reach CompleteLink and never the LLM; false: must reach the LLM and never CompleteLink
+	}{
+		{"code pasted as plain text, no command at all", "here is my code: link_" + code, false},
+		{"the full deep-link URL pasted instead of tapped", "https://t.me/savdo_bot?start=link_" + code, false},
+		{"uppercase command", "/START link_" + code, true},
+		{"tab between command and payload", "/start\tlink_" + code, true},
+		{"newline between command and payload", "/start\nlink_" + code, true},
+		{"@botusername suffix (Telegram's own group-chat form)", "/start@savdo_bot link_" + code, true},
+		{"the canonical form itself still redeems", "/start link_" + code, true},
+	}
+
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			const chatID = int64(1)
+			var env *testEnv
+			var linker *fakeLinker
+			var fake *ai.Fake
+			if tt.isCommand {
+				env = newTestEnv(t, noChatClient()) // panics if Chat is ever called
+				linker = &fakeLinker{}
+				env.rebuildServiceWithLinker(noChatClient(), linker)
+			} else {
+				fake = ai.NewFake(scriptedAnswer("Sure, I can help with that."))
+				env = newTestEnv(t, fake)
+			}
+
+			env.svc.HandleUpdate(context.Background(), textUpdate(chatID+int64(i), 100+int64(i), "alice", "uz", tt.text))
+
+			transcript := env.messageTranscript(t, chatID+int64(i))
+			if strings.Contains(transcript, code) {
+				t.Fatalf("transcript contains the raw link code: %q", transcript)
+			}
+
+			if tt.isCommand {
+				if linker.calls != 1 {
+					t.Fatalf("CompleteLink called %d times, want 1 (the command must still be recognized and redeemed)", linker.calls)
+				}
+				if linker.lastCode != code {
+					t.Fatalf("CompleteLink code = %q, want the real unredacted code %q", linker.lastCode, code)
+				}
+			} else {
+				if len(fake.Requests) != 1 {
+					t.Fatalf("Chat called %d times, want 1", len(fake.Requests))
+				}
+				for _, msg := range fake.Requests[0].Messages {
+					if strings.Contains(msg.Text, code) {
+						t.Fatalf("the model's own prompt contains the raw link code: %q", msg.Text)
+					}
+				}
+			}
+		})
 	}
 }

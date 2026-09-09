@@ -48,17 +48,28 @@ func (s *Service) handleCommand(ctx context.Context, shop db.Shop, conv db.BotCo
 	}
 }
 
-// splitCommand separates a slash command from its payload and strips a
+// splitCommand separates a slash command from its payload, strips a
 // `@botusername` suffix Telegram appends to commands in group chats
-// (e.g. "/start@savdo_bot link_abc123" -> "/start", "link_abc123").
+// (e.g. "/start@savdo_bot link_abc123" -> "/start", "link_abc123"),
+// lowercases the command itself, and splits on any run of whitespace —
+// not just a single literal " " — so "/START link_x" and "/start\tlink_x"
+// (a tab) or "/start\nlink_x" (a newline) still parse into the same
+// ("/start", "link_x") the canonical form does, instead of falling
+// through to unknownCommand or an empty payload (part of the round-4
+// link-redaction fix: a link code reachable only through a command shape
+// this function failed to recognize was never redeemed *or* redacted).
 func splitCommand(text string) (cmd, payload string) {
-	fields := strings.SplitN(text, " ", 2)
+	fields := strings.Fields(text)
+	if len(fields) == 0 {
+		return "", ""
+	}
 	cmd = fields[0]
 	if i := strings.IndexByte(cmd, '@'); i >= 0 {
 		cmd = cmd[:i]
 	}
+	cmd = strings.ToLower(cmd)
 	if len(fields) > 1 {
-		payload = strings.TrimSpace(fields[1])
+		payload = strings.Join(fields[1:], " ")
 	}
 	return cmd, payload
 }
@@ -112,6 +123,12 @@ func (s *Service) handleStart(ctx context.Context, shop db.Shop, conv db.BotConv
 			return
 		}
 		if err := s.linker.CompleteLink(ctx, code, telegramUserID, telegramUsername); err != nil {
+			// Minor (round 4): logged by class only, like every other
+			// write/external-call error in this package (logWriteError,
+			// persist.go) — CompleteLink's own params carry the raw code,
+			// and an unexpected (non-apierr, non-ErrTelegramAlreadyLinked)
+			// failure could in principle wrap it into err's own text.
+			logWriteError(s.logger, "bot: complete telegram link failed", err)
 			s.replyStaticText(ctx, shop, conv, chatID, startLinkErrorText(localeTexts(locale), err))
 			return
 		}

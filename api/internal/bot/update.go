@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"math"
+	"regexp"
 	"strings"
 
 	"github.com/go-telegram/bot/models"
@@ -70,16 +71,17 @@ func (s *Service) HandleUpdate(ctx context.Context, update *models.Update) {
 	// always has. loadHistory (handleFreeText, chat.go) excludes this
 	// row by id instead of requiring persist to run after it, so the
 	// LLM's own prompt still never sees the current question twice.
-	// MAJOR 3: the persisted content is redacted (redactLinkPayload) —
-	// never the raw text — an un-redeemed "/start link_<code>" is a
-	// bearer credential for whoever's account minted it (POST /auth/
-	// telegram/link), and the admin transcript (GET /bot/conversations/
-	// {id}/messages) is manager-readable; a manager reading someone
-	// else's still-valid code could redeem it and get logged in as them.
-	// handleCommand below still gets the real, unredacted text — only
-	// what gets written to bot_messages changes.
+	// MAJOR (round 4): redactLinkCode strips any link_<code> substring
+	// from what gets persisted AND from what a free-text turn hands the
+	// model — never just the exact "/start link_<code>" command shape,
+	// which missed a code pasted as plain text, the full deep-link URL,
+	// or a case/whitespace/@suffix variant of the command itself. A
+	// command still gets the real, unredacted text (handleCommand below)
+	// — only what gets written to bot_messages and what a free-text turn
+	// sends to the model changes.
+	redactedText := redactLinkCode(text)
 	userMsg, err := s.persist(ctx, persistParams{
-		ConversationID: conv.ID, ShopID: shop.ID, Role: db.BotMessageRoleUser, Content: redactLinkPayload(text),
+		ConversationID: conv.ID, ShopID: shop.ID, Role: db.BotMessageRoleUser, Content: redactedText,
 		TelegramUsername: nilIfEmpty(telegramUsername),
 	})
 	if err != nil {
@@ -94,7 +96,7 @@ func (s *Service) HandleUpdate(ctx context.Context, update *models.Update) {
 		return
 	}
 
-	s.handleFreeText(ctx, shop, conv, msg.Chat.ID, locale, text, userMsg.ID)
+	s.handleFreeText(ctx, shop, conv, msg.Chat.ID, locale, redactedText, userMsg.ID)
 }
 
 // handleFreeText runs O-25's two gates (per-chat rate limit, then
@@ -205,24 +207,34 @@ func clampInt32(v int) int32 {
 	return int32(v) // #nosec G115 -- range-checked immediately above
 }
 
-// redactLinkPayload returns text unchanged unless it is a "/start
-// link_<code>" command (optionally "/start@botusername link_<code>",
-// Telegram's own group-chat suffix), in which case the code itself is
-// replaced with a fixed placeholder — MAJOR 3. The command token (with
-// its @suffix, if any) stays visible; every other command and every
-// free-text message passes through untouched.
-func redactLinkPayload(text string) string {
-	fields := strings.SplitN(text, " ", 2)
-	rawCmd := fields[0]
-	cmd := rawCmd
-	if i := strings.IndexByte(cmd, '@'); i >= 0 {
-		cmd = cmd[:i]
-	}
-	if cmd != "/start" || len(fields) < 2 {
-		return text
-	}
-	if !strings.HasPrefix(strings.TrimSpace(fields[1]), "link_") {
-		return text
-	}
-	return rawCmd + " link_***"
+// linkCodeToken matches a link_<code> credential anywhere in a message —
+// not just inside an exact "/start link_<code>" command — in the base32
+// alphabet internal/auth/telegram.go's own newSelectorToken encodes a
+// link code with (RFC 4648 §6: uppercase A-Z and digits 2-7, no padding;
+// see otp.go's own selectorEncoding). Case-insensitive: a customer can
+// retype or paste a code in a different case than the deep-link URL
+// showed it in, and the match must still catch it. "link_" itself is
+// never itself base32 (the underscore is not in the alphabet), so the
+// match can never run past the code into unrelated following text.
+var linkCodeToken = regexp.MustCompile(`(?i)link_[A-Z2-7]+`)
+
+// redactLinkCode replaces every link_<code> occurrence text carries —
+// wherever it appears — with a fixed placeholder (MAJOR, round 4): an
+// un-redeemed code is a bearer credential for whoever's account minted
+// it (POST /auth/telegram/link), and both the admin transcript (GET
+// /bot/conversations/{id}/messages, manager-readable) and the model's
+// own prompt (a real call could echo it straight back in its answer)
+// must never carry it. Catches the canonical "/start link_<code>"
+// command, the same command with different case/whitespace/an
+// "@botusername" suffix (redactLinkCode does not need to parse the
+// command shape at all — it only looks for the credential token
+// itself), a customer pasting the code as plain text with no command
+// around it at all, and the code embedded in a full
+// "https://t.me/<bot>?start=link_<code>" deep-link URL pasted instead
+// of tapped. Accepted residual risk, not fixed here: a customer who
+// pastes *only* the part after "link_" — the bare code with no prefix
+// at all — cannot be told apart from arbitrary free text and is not
+// redacted.
+func redactLinkCode(text string) string {
+	return linkCodeToken.ReplaceAllString(text, "link_***")
 }

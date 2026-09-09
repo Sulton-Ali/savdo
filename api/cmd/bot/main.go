@@ -102,6 +102,26 @@ func run() error {
 	publicSvc := public.NewService(queries, contentSvc, cfg.PublicShopSlug, cfg.MediaBaseURL)
 	pubHandler := public.NewHandler(publicSvc)
 
+	// authShopRow resolves SHOP_SLUG's own shop — cmd/api's own auth.Service
+	// is scoped to that slug, never PUBLIC_SHOP_SLUG (internal/config.
+	// Config.ShopSlug's own doc comment: "the one shop this single-shop
+	// MVP serves"), so the linker built below has to match it too (minor,
+	// round 4): CompleteLink's own GetActiveOTPCode filters by shopID, so
+	// a bot resolved against PUBLIC_SHOP_SLUG but a linker resolved
+	// against a *different* SHOP_SLUG would make every /start
+	// link_<code> fail as "invalid" with no visible cause — invisible in
+	// the common single-shop case where both env vars default to the same
+	// "savdo-demo", but nothing stops an operator setting them
+	// differently. Resolved (and failed fast on) separately from shopRow
+	// above, the same posture cmd/api's own ShopSlug resolution already
+	// takes for the identical reason.
+	authShopRow, err := queries.GetShopBySlug(ctx, cfg.ShopSlug)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("no shop with slug %q (SHOP_SLUG) — run `savdo seed`", cfg.ShopSlug)
+		}
+		return fmt.Errorf("load shop %q (SHOP_SLUG): %w", cfg.ShopSlug, err)
+	}
 	// authSvc backs /start link_<code> (M1): CompleteLink is the one
 	// method bot.TelegramLinker needs, and *auth.Service satisfies it
 	// structurally the same way it does in cmd/api/main.go — this is the
@@ -109,9 +129,10 @@ func run() error {
 	// (BOT_MODE=polling, this file's own doc comment), so this is where
 	// the link has to be redeemable, not just in cmd/api's webhook path.
 	// Built the same way cmd/api/main.go builds its own: pool, queries,
-	// cfg, and the shop this binary already resolved above (shopRow.ID,
-	// from PUBLIC_SHOP_SLUG — the same shop the bot itself answers for).
-	authSvc := auth.NewService(pool, queries, cfg, shopRow.ID)
+	// cfg, and authShopRow.ID (SHOP_SLUG) above — never shopRow.ID
+	// (PUBLIC_SHOP_SLUG), which is the bot's own answering shop, a
+	// separate concern.
+	authSvc := auth.NewService(pool, queries, cfg, authShopRow.ID)
 
 	// tgBot both polls Telegram for updates (Start, below) and sends
 	// every reply (bot.TelegramSender wraps this same instance) — one
