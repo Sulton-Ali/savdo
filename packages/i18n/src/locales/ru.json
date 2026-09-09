@@ -52,14 +52,17 @@
     "quickSale": "Быстрая продажа",
     "salesDrafts": "Черновики продаж",
     "reports": "Отчёты",
-    "bot": "Бот"
+    "bot": "Бот",
+    "telegram": "Telegram"
   },
   "auth": {
     "login": {
       "title": "Вход в систему",
       "username": "Имя пользователя",
       "password": "Пароль",
-      "submit": "Войти"
+      "submit": "Войти",
+      "orDivider": "или",
+      "forgotPassword": "Забыли пароль?"
     },
     "errors": {
       "invalidCredentials": "Неверное имя пользователя или пароль",
@@ -67,7 +70,52 @@
       "retryAfter": "Повторите через {{seconds}} с",
       "generic": "Произошла ошибка. Попробуйте снова"
     },
+    "telegram": {
+      "errors": {
+        "notLinked": "Этот аккаунт Telegram не привязан ни к одному пользователю"
+      }
+    },
+    "forgotPassword": {
+      "title": "Восстановление пароля",
+      "backToLogin": "Вернуться ко входу",
+      "success": "Пароль изменён. Войдите с новым паролем.",
+      "step1": {
+        "description": "Введите имя пользователя. Если ваш аккаунт привязан к Telegram, туда придёт код.",
+        "username": "Имя пользователя",
+        "submit": "Отправить код"
+      },
+      "step2": {
+        "description": "Если этот аккаунт привязан к Telegram, код был отправлен. Введите его ниже.",
+        "code": "Код",
+        "submit": "Подтвердить код"
+      },
+      "step3": {
+        "newPassword": "Новый пароль",
+        "confirmPassword": "Повторите пароль",
+        "submit": "Сбросить пароль"
+      },
+      "errors": {
+        "codeInvalid": "Неверный или устаревший код. Попробуйте снова.",
+        "confirmMismatch": "Пароли не совпадают.",
+        "tokenExpired": "Сессия восстановления истекла. Начните заново."
+      }
+    },
     "logout": "Выйти"
+  },
+  "telegram": {
+    "title": "Telegram",
+    "status": {
+      "linked": "Привязан как @{{username}}",
+      "linkedNoUsername": "Привязан",
+      "notLinked": "Не привязан"
+    },
+    "link": "Привязать Telegram",
+    "unlink": "Отвязать",
+    "unlinkConfirm": "Отвязать этот аккаунт Telegram?",
+    "unlinked": "Аккаунт Telegram отвязан",
+    "refresh": "Проверить статус",
+    "codeValidity": "Действителен 10 минут",
+    "openInTelegram": "Открыть в Telegram"
   },
   "roles": {
     "owner": "Владелец",

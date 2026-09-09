@@ -52,14 +52,17 @@
     "quickSale": "Tezkor sotuv",
     "salesDrafts": "Sotuv qoralamalari",
     "reports": "Hisobotlar",
-    "bot": "Bot"
+    "bot": "Bot",
+    "telegram": "Telegram"
   },
   "auth": {
     "login": {
       "title": "Tizimga kirish",
       "username": "Foydalanuvchi nomi",
       "password": "Parol",
-      "submit": "Kirish"
+      "submit": "Kirish",
+      "orDivider": "yoki",
+      "forgotPassword": "Parolni unutdingizmi?"
     },
     "errors": {
       "invalidCredentials": "Foydalanuvchi nomi yoki parol noto‘g‘ri",
@@ -67,7 +70,52 @@
       "retryAfter": "{{seconds}} soniyadan keyin qayta urining",
       "generic": "Xatolik yuz berdi. Qayta urinib ko‘ring"
     },
+    "telegram": {
+      "errors": {
+        "notLinked": "Bu Telegram hisobi hech qanday foydalanuvchiga bog‘lanmagan"
+      }
+    },
+    "forgotPassword": {
+      "title": "Parolni tiklash",
+      "backToLogin": "Tizimga kirishga qaytish",
+      "success": "Parol tiklandi. Yangi parol bilan tizimga kiring.",
+      "step1": {
+        "description": "Foydalanuvchi nomingizni kiriting. Agar hisobingiz Telegramga bog‘langan bo‘lsa, kod yuboriladi.",
+        "username": "Foydalanuvchi nomi",
+        "submit": "Kodni yuborish"
+      },
+      "step2": {
+        "description": "Agar bu hisob Telegramga bog‘langan bo‘lsa, kod yuborildi. Uni quyida kiriting.",
+        "code": "Kod",
+        "submit": "Kodni tasdiqlash"
+      },
+      "step3": {
+        "newPassword": "Yangi parol",
+        "confirmPassword": "Parolni tasdiqlang",
+        "submit": "Parolni tiklash"
+      },
+      "errors": {
+        "codeInvalid": "Kod noto‘g‘ri yoki muddati o‘tgan. Qayta urinib ko‘ring.",
+        "confirmMismatch": "Parollar mos kelmadi.",
+        "tokenExpired": "Tiklash seansi muddati tugadi. Qaytadan boshlang."
+      }
+    },
     "logout": "Chiqish"
+  },
+  "telegram": {
+    "title": "Telegram",
+    "status": {
+      "linked": "@{{username}} sifatida bog‘langan",
+      "linkedNoUsername": "Bog‘langan",
+      "notLinked": "Bog‘lanmagan"
+    },
+    "link": "Telegramni bog‘lash",
+    "unlink": "Bog‘lanishni uzish",
+    "unlinkConfirm": "Bu Telegram hisobini uzasizmi?",
+    "unlinked": "Telegram hisobi uzildi",
+    "refresh": "Holatni tekshirish",
+    "codeValidity": "10 daqiqa amal qiladi",
+    "openInTelegram": "Telegramda ochish"
   },
   "roles": {
     "owner": "Egasi",
