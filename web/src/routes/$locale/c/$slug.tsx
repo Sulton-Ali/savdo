@@ -104,7 +104,7 @@ function CategoryPage() {
                 key={child.id}
                 to="/$locale/c/$slug"
                 params={{ locale, slug: child.slug }}
-                className="rounded-full border border-bg px-3 py-1 text-sm text-text transition hover:border-primary hover:text-primary"
+                className="rounded-full border border-landing-line px-3 py-1 text-sm text-text transition hover:border-primary hover:text-primary"
               >
                 {child.name}
               </Link>
