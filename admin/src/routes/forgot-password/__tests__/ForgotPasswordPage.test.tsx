@@ -88,8 +88,21 @@ describe("ForgotPasswordPage", () => {
     mockedReset.mockReset();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     cleanup();
+    // This page always shows at least one Ant Design `Alert` (the step 1/2
+    // info notice, or an error alert), and its inline Form validation
+    // errors (the confirm-password mismatch test) both animate through
+    // rc-motion's `useDelayState`, which schedules a ~16ms
+    // requestAnimationFrame/setTimeout callback to advance the motion
+    // status *after* the test that triggered it has already returned. If
+    // that callback is still pending when Vitest tears down this file's
+    // jsdom environment, it throws `ReferenceError: window is not defined`
+    // as an unhandled error — non-deterministically, since it races the
+    // next test/file's teardown — even though every assertion above
+    // already passed. Flushing a short real-timer wait here, after
+    // `cleanup()`, lets any such callback run while `window` still exists.
+    await new Promise((resolve) => setTimeout(resolve, 50));
   });
 
   it("moves from username to the code step on a 202 (no enumeration hint)", async () => {

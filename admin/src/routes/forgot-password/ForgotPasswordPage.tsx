@@ -218,7 +218,7 @@ export function ForgotPasswordPage() {
                 label={t("auth.forgotPassword.step2.code")}
                 rules={[{ required: true, len: 6 }]}
               >
-                <Input inputMode="numeric" maxLength={6} autoFocus />
+                <Input inputMode="numeric" maxLength={6} autoFocus autoComplete="one-time-code" />
               </Form.Item>
               <Form.Item>
                 <Button type="primary" htmlType="submit" loading={submitting} block>

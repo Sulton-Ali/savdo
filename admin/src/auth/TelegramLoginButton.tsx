@@ -28,12 +28,13 @@ declare global {
 }
 
 /**
- * Version pinned per the task spec; the widget script is also served at
- * `?24` on the current docs page (checked live 2026-09-09) — both are the
- * same widget, the query string only busts the CDN cache for Telegram's own
- * builds, so this pin is safe.
+ * `?24` matches Telegram's current embed snippet (core.telegram.org/widgets/
+ * login-legacy's own "Embed Code" generator, checked live 2026-09-09); `?22`
+ * (this project's earlier pin) serves the identical file today — the query
+ * string only busts the CDN cache for Telegram's own builds — but `?24` is
+ * what a fresh copy-paste from Telegram's docs would use.
  */
-const WIDGET_SCRIPT_SRC = "https://telegram.org/js/telegram-widget.js?22";
+const WIDGET_SCRIPT_SRC = "https://telegram.org/js/telegram-widget.js?24";
 
 /**
  * Renders Telegram's official Login Widget (embed snippet from
