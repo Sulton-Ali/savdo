@@ -28,8 +28,13 @@ test("locale switch keeps the page and changes the language", async ({ page }) =
   const uzHeading = await heading.textContent();
   expect(uzHeading?.trim().length).toBeGreaterThan(0);
 
-  // Switch to Russian.
-  await page.getByRole("navigation", { name: "Tilni tanlang" }).getByText("Русский").click();
+  // Switch to Russian. phase-7.5 T4: the switcher's visible label is the
+  // two-letter locale code ("RU"), not the full `lang.ru` name — see
+  // `LanguageSwitcher.tsx`'s doc comment.
+  await page
+    .getByRole("navigation", { name: "Tilni tanlang" })
+    .getByRole("link", { name: "RU" })
+    .click();
   await page.waitForURL(`/ru/c/${categorySlug}`);
   await page.waitForLoadState("networkidle");
 
@@ -42,7 +47,10 @@ test("locale switch keeps the page and changes the language", async ({ page }) =
   expect(ruHeading).toMatch(/[Ѐ-ӿ]/); // contains Cyrillic
 
   // Switch back to uz.
-  await page.getByRole("navigation", { name: "Выберите язык" }).getByText("Oʻzbekcha").click();
+  await page
+    .getByRole("navigation", { name: "Выберите язык" })
+    .getByRole("link", { name: "UZ" })
+    .click();
   await page.waitForURL(`/uz/c/${categorySlug}`);
   await page.waitForLoadState("networkidle");
 

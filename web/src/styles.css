@@ -48,6 +48,30 @@
 
   --radius-landing-card: var(--savdo-landing-radius-card);
   --shadow-landing-card: var(--savdo-landing-shadow-card);
+
+  /* phase-7.5 T4 — two more landing-scoped tokens, literal here rather than
+   * in `packages/ui-tokens` (this task's file scope is `web/` only, and both
+   * are specific to the landing's white cards, not shared with admin/
+   * mobile):
+   *  - `landing-line`: a visible neutral border for content sitting on a
+   *    white card (product variant rows, category chips) — `border-bg`
+   *    (`--color-bg` #f5f5f4, the page background) reads as nearly
+   *    invisible on a white card, since it is the same tone the card sits
+   *    on to contrast with, not a border colour. A plain `#e5e7eb`
+   *    (the task's suggested style) measures only ~1.24:1 against white —
+   *    the task also asks for ≥ 3:1 non-text-UI contrast, so `#8c8781` (a
+   *    warm-toned grey matching the page's warm palette) was picked
+   *    instead: ~3.56:1 against white, still a light hairline, not a heavy
+   *    line (the row/chip text stays the existing AA-checked `text`/`muted`
+   *    tokens; this is the divider stroke only).
+   *  - `landing-switch-track`: the header language switcher's pill track,
+   *    matching the design canvas's Components sheet (`#f0e9e0`) — the
+   *    active pill still fills with `landing-accent-hover` (see
+   *    `LanguageSwitcher.tsx`'s doc comment for why not the base
+   *    `landing-accent`).
+   */
+  --color-landing-line: #8c8781;
+  --color-landing-switch-track: #f0e9e0;
 }
 
 * {
