@@ -116,7 +116,7 @@ Phase numbers refer to `06-ROADMAP.md`.
 | DELETE | `/auth/telegram/link`        | any    | unlink own Telegram (P7)                |
 | GET    | `/auth/telegram/link`        | any    | current link status: `{ linked, telegramUsername? }` (P7) |
 
-`/auth/telegram` verifies the Login Widget HMAC (ADR-005) and creates a session only for a Telegram id already linked to a user; it never creates users. OTP request answers 202 whether or not the username exists (no enumeration); codes are delivered by the bot only to a linked account; per-IP and per-username limits apply (ADR-005 § rate limits).
+`/auth/telegram` verifies the Login Widget HMAC (ADR-005) and creates a session only for a Telegram id already linked to a user; it never creates users. OTP request answers 202 whether or not the username exists (no enumeration); codes are delivered by the bot only to a linked account; per-IP and per-username limits apply (ADR-005 § rate limits), and the same per-IP limit also bounds `/auth/password/reset`, since its `actionToken` alone is otherwise the only thing gating it (D-118). Telegram link completion, which has no HTTP request to key an IP off, is instead limited per Telegram user id (D-118); it runs through the bot, not this table's endpoints.
 
 ### Shop, locations, staff (Phase 1)
 
