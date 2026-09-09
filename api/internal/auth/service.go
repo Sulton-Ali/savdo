@@ -49,6 +49,13 @@ type Service struct {
 	// to deliver to yet", not a panic, since its own contract is "202
 	// either way".
 	otpSender OTPSender
+
+	// otpAttemptLock serializes VerifyOtp's and CompleteLink's own
+	// read-check-increment sequence against otp_codes.attempts per (shop,
+	// user, purpose) — see otpAttemptLock's own doc comment (otp.go) for
+	// the race it closes. Zero value is ready to use (an array of
+	// sync.Mutex), so NewService below never has to initialize it.
+	otpAttemptLock otpAttemptLock
 }
 
 // NewService builds the auth Service for shopID — the single shop this

@@ -156,3 +156,46 @@ func TestHandlerAuthenticateTelegramSetsCookieAndReturnsNoToken(t *testing.T) {
 		t.Fatalf("User.Username = %q, want owner1", body.User.Username)
 	}
 }
+
+// TestHandlerCreateTelegramLinkRejectsEmptyBotUsername is BOT_USERNAME's
+// own dev-empty-is-allowed change (config.go) regression test at this
+// handler's level: config.Load() requires BOT_USERNAME only in prod, so a
+// dev deployment can reach this handler with cfg.BotUsername == "" — it
+// must refuse to mint a code and hand back a deep link of
+// `https://t.me/?start=...` (no bot named, so it goes nowhere) rather
+// than silently produce a dead link.
+func TestHandlerCreateTelegramLinkRejectsEmptyBotUsername(t *testing.T) {
+	pool := testdb.New(t)
+	testdb.Truncate(t, pool)
+	ctx := context.Background()
+	q := db.New(pool)
+
+	shop := seedShop(ctx, t, q, "shop-a")
+	cfg := testTelegramConfig()
+	cfg.BotUsername = ""
+	svc := NewService(pool, q, cfg, shop.ID)
+	h := NewHandler(svc)
+
+	user := seedUser(ctx, t, q, shop.ID, "owner1", "correct-horse-battery", db.UserRoleOwner)
+	authCtx := Context{ShopID: shop.ID, UserID: user.ID, Role: db.UserRoleOwner}
+	reqCtx := WithContext(ctx, authCtx)
+
+	_, err := h.CreateTelegramLink(reqCtx, gen.CreateTelegramLinkRequestObject{})
+	if err == nil {
+		t.Fatal("CreateTelegramLink() error = nil, want an error (empty BOT_USERNAME must never produce a deep link)")
+	}
+	if got := errStatus(t, err); got != 500 {
+		t.Fatalf("CreateTelegramLink() status = %d, want 500", got)
+	}
+
+	// No code was minted for a dead-end link: GetTelegramLink still
+	// reports unlinked and no otp_codes row for db.OtpPurposeLinkTelegram
+	// exists for this user.
+	linked, _, err := svc.GetTelegramLink(ctx, shop.ID, user.ID)
+	if err != nil {
+		t.Fatalf("GetTelegramLink() error = %v", err)
+	}
+	if linked {
+		t.Fatal("GetTelegramLink() linked = true, want false")
+	}
+}

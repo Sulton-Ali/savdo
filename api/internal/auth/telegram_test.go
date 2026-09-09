@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -630,5 +631,111 @@ func TestCompleteLinkRejectsInactiveUser(t *testing.T) {
 	}
 	if linked {
 		t.Fatal("GetTelegramLink() linked = true, want false (an inactive user must not complete a link)")
+	}
+}
+
+// TestCompleteLinkRejectsCodeMintedInAnotherShop mirrors
+// TestAuthenticateTelegramRejectsAccountLinkedInAnotherShop for CompleteLink:
+// GetActiveOTPCode is filtered by (shop_id, user_id, purpose) (hard rule 1),
+// so a code minted through shop B's Service (its userID is shop B's user)
+// must not resolve to anything when redeemed through shop A's Service,
+// even though parseSelectorToken alone would happily recover that userID
+// from the code — the shop_id filter is what actually enforces the tenant
+// boundary here, not the token's own shape.
+func TestCompleteLinkRejectsCodeMintedInAnotherShop(t *testing.T) {
+	pool := testdb.New(t)
+	testdb.Truncate(t, pool)
+	ctx := context.Background()
+	q := db.New(pool)
+
+	shopA := seedShop(ctx, t, q, "shop-a")
+	shopB := seedShop(ctx, t, q, "shop-b")
+
+	svcB := NewService(pool, q, testTelegramConfig(), shopB.ID)
+	shopBUser := seedUser(ctx, t, q, shopB.ID, "shop-b-owner", "correct-horse-battery", db.UserRoleOwner)
+
+	result, err := svcB.CreateTelegramLink(ctx, shopB.ID, shopBUser.ID)
+	if err != nil {
+		t.Fatalf("CreateTelegramLink() (shop B) error = %v", err)
+	}
+
+	svcA := NewService(pool, q, testTelegramConfig(), shopA.ID)
+	if err := svcA.CompleteLink(ctx, result.Code, 888, ""); err != ErrLinkCodeInvalid {
+		t.Fatalf("CompleteLink() (shop A, code minted in shop B) error = %v, want ErrLinkCodeInvalid", err)
+	}
+
+	// Shop B's own user must remain unlinked — shop A's failed attempt
+	// must not have consumed or otherwise touched shop B's code/link.
+	linked, _, err := svcB.GetTelegramLink(ctx, shopB.ID, shopBUser.ID)
+	if err != nil {
+		t.Fatalf("GetTelegramLink() (shop B) error = %v", err)
+	}
+	if linked {
+		t.Fatal("GetTelegramLink() (shop B) linked = true, want false (shop A's cross-shop attempt must not have linked anything)")
+	}
+
+	// The same code, redeemed through shop B's own Service, still works —
+	// proving the rejection above is really about the shop boundary, not
+	// a broken or already-consumed code.
+	if err := svcB.CompleteLink(ctx, result.Code, 888, "shop_b_username"); err != nil {
+		t.Fatalf("CompleteLink() (shop B, own code) error = %v, want nil", err)
+	}
+}
+
+// TestCompleteLinkConcurrentSameCodeExactlyOneSucceeds is Review MAJOR 3's
+// own concurrency regression test, run under -race: N goroutines racing
+// CompleteLink with the same code must produce exactly one success —
+// MarkOTPUsed's own `used_at IS NULL` guard, run inside CompleteLink's
+// transaction, is what actually serializes the winner (telegram.go's own
+// doc comment on that ordering).
+func TestCompleteLinkConcurrentSameCodeExactlyOneSucceeds(t *testing.T) {
+	pool := testdb.New(t)
+	testdb.Truncate(t, pool)
+	ctx := context.Background()
+	q := db.New(pool)
+
+	shop := seedShop(ctx, t, q, "shop-a")
+	svc := NewService(pool, q, testTelegramConfig(), shop.ID)
+	user := seedUser(ctx, t, q, shop.ID, "owner1", "correct-horse-battery", db.UserRoleOwner)
+
+	result, err := svc.CreateTelegramLink(ctx, shop.ID, user.ID)
+	if err != nil {
+		t.Fatalf("CreateTelegramLink() error = %v", err)
+	}
+
+	const n = 20
+	var (
+		wg           sync.WaitGroup
+		mu           sync.Mutex
+		successCount int
+	)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(telegramUserID int64) {
+			defer wg.Done()
+			err := svc.CompleteLink(ctx, result.Code, telegramUserID, "racer")
+			if err == nil {
+				mu.Lock()
+				successCount++
+				mu.Unlock()
+				return
+			}
+			if err != ErrLinkCodeInvalid && err != ErrTelegramAlreadyLinked {
+				t.Errorf("CompleteLink() (goroutine %d) error = %v, want nil, ErrLinkCodeInvalid or ErrTelegramAlreadyLinked", telegramUserID, err)
+			}
+		}(int64(1000 + i))
+	}
+	wg.Wait()
+
+	if successCount != 1 {
+		t.Fatalf("successCount = %d, want exactly 1 (only one concurrent CompleteLink call for the same code may win)", successCount)
+	}
+
+	linked, _, err := svc.GetTelegramLink(ctx, shop.ID, user.ID)
+	if err != nil {
+		t.Fatalf("GetTelegramLink() error = %v", err)
+	}
+	if !linked {
+		t.Fatal("GetTelegramLink() linked = false, want true (the one winner must have actually linked)")
 	}
 }

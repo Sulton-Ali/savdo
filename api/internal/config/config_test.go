@@ -15,7 +15,7 @@ func TestLoad(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "defaults when only the required DATABASE_URL/BOT_USERNAME/TELEGRAM_BOT_TOKEN are set",
+			name: "defaults when DATABASE_URL is required and BOT_USERNAME/TELEGRAM_BOT_TOKEN are set (dev)",
 			env: map[string]string{
 				"DATABASE_URL":       dbURL,
 				"BOT_USERNAME":       "savdo_bot",
@@ -194,17 +194,26 @@ func TestLoad(t *testing.T) {
 			},
 		},
 		{
-			name: "missing BOT_USERNAME fails fast",
+			// BOT_USERNAME and TELEGRAM_BOT_TOKEN are required only when
+			// ENV=prod (the same precedent as MEDIA_DIR's prod-only
+			// absolute-path check) — a fresh clone's `cp
+			// infra/.env.example infra/.env && make api`/`make seed` must
+			// not need Telegram credentials just to run in dev.
+			name: "prod requires BOT_USERNAME (missing) fails fast",
 			env: map[string]string{
 				"DATABASE_URL":       dbURL,
+				"ENV":                "prod",
+				"MEDIA_DIR":          "/data/media",
 				"TELEGRAM_BOT_TOKEN": "123456:fake-token-for-tests",
 			},
 			wantErr: true,
 		},
 		{
-			name: "empty BOT_USERNAME (set but blank) fails fast",
+			name: "prod requires BOT_USERNAME (set but blank) fails fast",
 			env: map[string]string{
 				"DATABASE_URL":       dbURL,
+				"ENV":                "prod",
+				"MEDIA_DIR":          "/data/media",
 				"BOT_USERNAME":       "",
 				"TELEGRAM_BOT_TOKEN": "123456:fake-token-for-tests",
 			},
@@ -213,24 +222,63 @@ func TestLoad(t *testing.T) {
 		{
 			// Review [empty bot token] CRITICAL 1: an empty TELEGRAM_BOT_TOKEN
 			// makes VerifyLoginWidget's secret_key SHA-256("") — a public
-			// constant an attacker can compute too — so Load must never let the
-			// API start without a real one, the same way it never starts
+			// constant an attacker can compute too — so Load must never let a
+			// prod API start without a real one, the same way it never starts
 			// without DATABASE_URL.
-			name: "missing TELEGRAM_BOT_TOKEN fails fast",
+			name: "prod requires TELEGRAM_BOT_TOKEN (missing) fails fast",
 			env: map[string]string{
 				"DATABASE_URL": dbURL,
+				"ENV":          "prod",
+				"MEDIA_DIR":    "/data/media",
 				"BOT_USERNAME": "savdo_bot",
 			},
 			wantErr: true,
 		},
 		{
-			name: "empty TELEGRAM_BOT_TOKEN (set but blank) fails fast",
+			name: "prod requires TELEGRAM_BOT_TOKEN (set but blank) fails fast",
 			env: map[string]string{
 				"DATABASE_URL":       dbURL,
+				"ENV":                "prod",
+				"MEDIA_DIR":          "/data/media",
 				"BOT_USERNAME":       "savdo_bot",
 				"TELEGRAM_BOT_TOKEN": "",
 			},
 			wantErr: true,
+		},
+		{
+			// Dev must load with no Telegram credentials at all — Telegram
+			// login/link/OTP are simply disabled until an owner sets real
+			// values (VerifyLoginWidget/CreateTelegramLink each refuse to
+			// operate with an empty value as a last line of defense; see
+			// their own tests).
+			name: "dev tolerates missing BOT_USERNAME/TELEGRAM_BOT_TOKEN",
+			env: map[string]string{
+				"DATABASE_URL": dbURL,
+			},
+			want: Config{
+				Addr:                 ":8080",
+				LogLevel:             "info",
+				DatabaseURL:          dbURL,
+				Env:                  "dev",
+				SessionWebTTL:        168 * time.Hour,
+				SessionMobileTTL:     720 * time.Hour,
+				LoginRateIPPerMin:    10,
+				LoginRateUserPerMin:  5,
+				CookieSecure:         false,
+				ShopSlug:             "savdo-demo",
+				PublicShopSlug:       "savdo-demo",
+				MediaDir:             "../infra/data/media",
+				MediaBaseURL:         "/media",
+				MediaMaxBytes:        10485760,
+				MediaConcurrency:     2,
+				MediaQueue:           8,
+				AIProvider:           "anthropic",
+				AIModel:              "claude-sonnet-5",
+				AIPriceInputPerMTok:  "2.00",
+				AIPriceOutputPerMTok: "10.00",
+				BotUsername:          "",
+				TelegramBotToken:     "",
+			},
 		},
 	}
 

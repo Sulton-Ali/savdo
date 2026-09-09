@@ -83,6 +83,17 @@ func (h *Handler) CreateTelegramLink(ctx context.Context, _ gen.CreateTelegramLi
 		return nil, apierr.Unauthenticated()
 	}
 
+	// BOT_USERNAME is required only in prod (config.Load) but may be empty
+	// in dev — refuse to hand back a deep link of `https://t.me/?start=...`
+	// (no bot named, so it goes nowhere) rather than mint and burn a
+	// single-use code for a dead link the caller can never actually use.
+	// A misconfigured prod deployment fails config.Load before ever
+	// reaching here; this is the same last-line-of-defense posture
+	// VerifyLoginWidget already takes for an empty TELEGRAM_BOT_TOKEN.
+	if h.svc.cfg.BotUsername == "" {
+		return nil, apierr.Internal()
+	}
+
 	result, err := h.svc.CreateTelegramLink(ctx, authCtx.ShopID, authCtx.UserID)
 	if err != nil {
 		return nil, fmt.Errorf("auth: create telegram link: %w", err)

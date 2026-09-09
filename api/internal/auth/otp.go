@@ -6,11 +6,13 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base32"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"log/slog"
 	"math/big"
 	"net/netip"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -59,6 +61,65 @@ const (
 	actionVerifierN = 20 // bytes of random verifier newSelectorToken draws for an actionToken
 )
 
+// otpAttemptLockStripes is how many mutexes otpAttemptLock spreads
+// (shop, user, purpose) keys across. Both VerifyOtp's wrong-code branch
+// and CompleteLink's wrong-verifier branch (telegram.go) used to read
+// GetActiveOTPCode's otp.Attempts, compare it against otpMaxAttempts, and
+// only then call IncrementOTPAttempts — a read-then-act sequence with no
+// lock between the two: N concurrent guesses against the same code could
+// each read the same stale, still-under-the-cap otp.Attempts before any
+// of their own IncrementOTPAttempts committed, so each proceeded to
+// increment independently. IncrementOTPAttempts's own UPDATE is atomic at
+// the row level, and the code that decides whether to mark the row used
+// already reads the freshly-updated value it returns (not the stale
+// snapshot — VerifyOtp/CompleteLink's own doc comments), so the row does
+// still end up locked once *some* increment crosses the cap; what wasn't
+// bounded was the *total number of guesses* that got to run before that
+// happened — up to as many as raced through the same window, not just
+// otpMaxAttempts of them. otpAttemptLock closes that by serializing the
+// whole read-check-increment sequence per key, so only one caller at a
+// time can even read otp.Attempts for a given (shop, user, purpose).
+//
+// A lock per exact key (rather than this fixed stripe count) would avoid
+// any unrelated-key contention, but would also need its own cleanup the
+// same way loginLimiter's own map needs eviction (ratelimit.go) — striping
+// across a fixed, small number of mutexes instead bounds memory with no
+// cleanup needed at all, at the cost of occasionally serializing two
+// unrelated keys that happen to hash to the same stripe. That's an
+// acceptable trade here: VerifyOtp/CompleteLink traffic is already capped
+// by otpVerifyRateLimit and the shared ipLimiter (D-118), so contention
+// under this lock is never more than a handful of requests deep.
+const otpAttemptLockStripes = 256
+
+// otpAttemptLock is Service's own otpAttemptLock field's type — see
+// otpAttemptLockStripes's doc comment above for what it's for. Callers
+// acquire it with lock(key), hold it for the read-check-increment section,
+// and release with the returned func — never call lock twice for
+// overlapping keys on the same goroutine (there's only ever one such
+// section per call in this package, so that never happens today).
+type otpAttemptLock struct {
+	stripes [otpAttemptLockStripes]sync.Mutex
+}
+
+// lock acquires the mutex key hashes to and returns a func that releases
+// it — sha256, not a weaker hash, only because this package already
+// imports it for everything else; collision resistance itself is not the
+// point (any deterministic spread of keys across stripes would do).
+func (l *otpAttemptLock) lock(key string) (unlock func()) {
+	sum := sha256.Sum256([]byte(key))
+	idx := binary.BigEndian.Uint32(sum[:4]) % otpAttemptLockStripes
+	l.stripes[idx].Lock()
+	return l.stripes[idx].Unlock
+}
+
+// otpAttemptLockKey builds the key VerifyOtp and CompleteLink each lock
+// on: the same (shop, user, purpose) tuple GetActiveOTPCode itself is
+// queried by, since that tuple is exactly what determines which
+// otp_codes row two concurrent callers might race on.
+func otpAttemptLockKey(shopID, userID uuid.UUID, purpose db.OtpPurpose) string {
+	return shopID.String() + "|" + userID.String() + "|" + string(purpose)
+}
+
 // otpDeliveryTimeout bounds the goroutine RequestOtp spawns to actually
 // call OTPSender.SendOTP (Review MAJOR 2) — long enough for a normal
 // Telegram Bot API call, short enough that a hung sender can't leak
@@ -81,6 +142,14 @@ type OTPSender interface {
 // send as a no-op rather than a nil-pointer panic — RequestOtp's own
 // contract is "202 either way", so a missing sender must never surface as
 // a 500.
+//
+// s.otpSender carries no lock: RequestOtp's delivery goroutine (below)
+// reads it unsynchronized, so SetOTPSender must be called once, before the
+// Service starts serving requests — never concurrently with a RequestOtp
+// call already in flight. cmd/api's own startup sequence (build the
+// Service, then SetOTPSender, then start the HTTP server) already
+// satisfies this; it is not safe to call again later to swap the sender
+// while traffic is live.
 func (s *Service) SetOTPSender(sender OTPSender) {
 	s.otpSender = sender
 }
@@ -265,7 +334,12 @@ func (s *Service) RequestOtp(ctx context.Context, username string, purpose db.Ot
 	// case (unknown username, no linked account, ...) returned almost
 	// immediately — a timing side channel that enumerates which
 	// usernames are actually linked, on top of tying up the request for
-	// as long as delivery (or a hung sender) took. The goroutine gets its
+	// as long as delivery (or a hung sender) took. This narrows that
+	// channel; it does not remove it — a linked user's request still runs
+	// two more synchronous queries (GetUserByUsername, then
+	// GetTelegramAccountByUserID) than an unknown-username one before
+	// this point, so some difference in latency remains observable, just
+	// no longer the full width of a Telegram round trip. The goroutine gets its
 	// own bounded context, deliberately derived from context.Background()
 	// rather than ctx: ctx belongs to the HTTP request, which is already
 	// on its way to completing by the time this runs, and must not cut
@@ -309,6 +383,13 @@ func (s *Service) VerifyOtp(ctx context.Context, username string, purpose db.Otp
 	if !user.IsActive {
 		return "", time.Time{}, apierr.Unauthenticated()
 	}
+
+	// otpAttemptLock (above): serializes the read-check-increment section
+	// below per (shop, user, purpose) so concurrent guesses against the
+	// same code can't each read the same stale otp.Attempts and all
+	// increment past otpMaxAttempts.
+	unlock := s.otpAttemptLock.lock(otpAttemptLockKey(s.shopID, user.ID, purpose))
+	defer unlock()
 
 	otp, err := s.q.GetActiveOTPCode(ctx, db.GetActiveOTPCodeParams{ShopID: s.shopID, UserID: user.ID, Purpose: purpose})
 	if err != nil {

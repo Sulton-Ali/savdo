@@ -3,9 +3,11 @@ package auth
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http/httptest"
 	"net/netip"
 	"strings"
 	"sync"
@@ -14,6 +16,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Sulton-Ali/savdo/api/gen"
+	"github.com/Sulton-Ali/savdo/api/internal/apierr"
 	"github.com/Sulton-Ali/savdo/api/internal/db"
 	"github.com/Sulton-Ali/savdo/api/internal/db/testdb"
 )
@@ -511,6 +515,31 @@ func TestResetPasswordRateLimitedByIP(t *testing.T) {
 	if got := errStatus(t, err); got != 429 {
 		t.Fatalf("3rd attempt status = %d, want 429", got)
 	}
+
+	// The contract now declares 429 on POST /auth/password/reset
+	// (contracts/openapi.yaml, generated as gen.ResetPassword429JSONResponse) —
+	// prove the body apierr.Write actually produces for this error decodes
+	// into that generated type, not just that the status code matches.
+	// handler_otp.go's own ResetPassword never constructs
+	// gen.ResetPassword429JSONResponse itself (it returns the *apierr.Error
+	// straight through and internal/httpx's strict-server error handler
+	// calls apierr.Write on it), so this is what actually proves the two
+	// stay in sync.
+	rec := httptest.NewRecorder()
+	apierr.Write(rec, err)
+	if rec.Code != 429 {
+		t.Fatalf("apierr.Write() status = %d, want 429", rec.Code)
+	}
+	var body gen.ResetPassword429JSONResponse
+	if decErr := json.Unmarshal(rec.Body.Bytes(), &body); decErr != nil {
+		t.Fatalf("decode body into gen.ResetPassword429JSONResponse: %v", decErr)
+	}
+	if body.Error.Code != gen.RATELIMITED {
+		t.Fatalf("error.code = %q, want %q", body.Error.Code, gen.RATELIMITED)
+	}
+	if got := rec.Header().Get("Retry-After"); got == "" {
+		t.Fatal("Retry-After header is empty, want the RateLimited retry-after value")
+	}
 }
 
 // TestVerifyOtpAttemptCapMarksCodeUsed is Review MAJOR 4's own regression
@@ -592,16 +621,20 @@ func TestRequestOtpProducesNoCodeForAnotherShopsUsername(t *testing.T) {
 	if err := svcA.RequestOtp(ctx, "shared-username", db.OtpPurposePasswordReset, nil); err != nil {
 		t.Fatalf("RequestOtp() error = %v, want nil (no enumeration, even across shops)", err)
 	}
-	// Shop A's RequestOtp returns before ever reaching the delivery
-	// dispatch for a username it can't find (no user, no goroutine) —
-	// this margin is only a defensive wait, not a requirement for
-	// correctness here.
-	time.Sleep(20 * time.Millisecond)
-	sender.mu.Lock()
-	gotForShopA := len(sender.calls)
-	sender.mu.Unlock()
-	if gotForShopA != 0 {
-		t.Fatalf("sender.calls = %d, want 0 (shop A must never deliver a code for a username that only exists in shop B)", gotForShopA)
+	// Shop A's RequestOtp returns before ever reaching CreateOTPCode or the
+	// delivery dispatch for a username it can't find (GetUserByUsername's
+	// own pgx.ErrNoRows early-returns first) — so, unlike
+	// TestResetPasswordRejectsInactiveUser's own use of waitForDone for a
+	// call that *does* spawn a delivery goroutine, there is nothing async
+	// to wait for here: checking otp_codes directly, synchronously, proves
+	// the absence deterministically instead of racing a fixed sleep
+	// against a goroutine that was never going to run.
+	var shopACodeCount int
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM otp_codes WHERE shop_id = $1`, shopA.ID).Scan(&shopACodeCount); err != nil {
+		t.Fatalf("query otp_codes: %v", err)
+	}
+	if shopACodeCount != 0 {
+		t.Fatalf("otp_codes rows for shop A = %d, want 0 (shop A must never create or deliver a code for a username that only exists in shop B)", shopACodeCount)
 	}
 
 	// The same username, against shop B's own Service, does deliver —
@@ -666,5 +699,71 @@ func TestResetPasswordRejectsInactiveUser(t *testing.T) {
 	}
 	if _, err := svc.Login(ctx, "owner1", "old-password-1", db.SessionClientWeb, "", nil); err != nil {
 		t.Fatalf("Login(old password) error = %v, want nil (ResetPassword must not have changed it)", err)
+	}
+}
+
+// TestVerifyOtpConcurrentWrongCodesNeverExceedAttemptCapAndMarkUsed is Review
+// MAJOR 4's own concurrency regression test, run under -race: N goroutines
+// racing VerifyOtp with the same wrong code against the same active OTP
+// code must never push otp_codes.attempts past otpMaxAttempts, and the row
+// must end up marked used (locked) once the cap is reached — exactly what
+// the "increment first, decide on the value the database actually
+// returned" fix (VerifyOtp's own doc comment) is for. n stays under
+// otpVerifyRateLimit (10 per otpRateWindow, otp.go) so none of the
+// goroutines are rejected by the rate limiter instead of actually
+// exercising the attempt cap.
+func TestVerifyOtpConcurrentWrongCodesNeverExceedAttemptCapAndMarkUsed(t *testing.T) {
+	pool := testdb.New(t)
+	testdb.Truncate(t, pool)
+	ctx := context.Background()
+	q := db.New(pool)
+
+	shop := seedShop(ctx, t, q, "shop-a")
+	svc := NewService(pool, q, testConfig(), shop.ID)
+	done := make(chan struct{}, 1)
+	sender := &fakeOTPSender{done: done}
+	svc.SetOTPSender(sender)
+
+	user := seedUser(ctx, t, q, shop.ID, "owner1", "correct-horse-battery", db.UserRoleOwner)
+	linkTelegram(ctx, t, q, shop.ID, user.ID, 555)
+
+	if err := svc.RequestOtp(ctx, "owner1", db.OtpPurposePasswordReset, nil); err != nil {
+		t.Fatalf("RequestOtp() error = %v", err)
+	}
+	waitForDone(t, done, 2*time.Second)
+	realCode := sender.lastCall(t).code
+	wrongCode := "000000"
+	if wrongCode == realCode {
+		wrongCode = "111111"
+	}
+
+	const n = 8 // > otpMaxAttempts (5), < otpVerifyRateLimit (10)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, _, err := svc.VerifyOtp(ctx, "owner1", db.OtpPurposePasswordReset, wrongCode, nil); err == nil {
+				t.Error("VerifyOtp() (wrong code) error = nil, want 401")
+			} else if errStatus(t, err) != 401 {
+				t.Errorf("VerifyOtp() (wrong code) status = %d, want 401", errStatus(t, err))
+			}
+		}()
+	}
+	wg.Wait()
+
+	var attempts int
+	var usedAt *time.Time
+	row := pool.QueryRow(ctx,
+		`SELECT attempts, used_at FROM otp_codes WHERE shop_id = $1 AND user_id = $2 AND purpose = $3 ORDER BY created_at DESC LIMIT 1`,
+		shop.ID, user.ID, db.OtpPurposePasswordReset)
+	if err := row.Scan(&attempts, &usedAt); err != nil {
+		t.Fatalf("query otp_codes: %v", err)
+	}
+	if attempts > otpMaxAttempts {
+		t.Fatalf("otp_codes.attempts = %d, want at most otpMaxAttempts (%d)", attempts, otpMaxAttempts)
+	}
+	if usedAt == nil {
+		t.Fatal("otp_codes.used_at is still NULL after enough concurrent wrong attempts to exhaust the cap, want it marked used")
 	}
 }

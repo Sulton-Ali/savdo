@@ -28,6 +28,10 @@ type Config struct {
 
 	// LoginRateIPPerMin and LoginRateUserPerMin bound login attempts per IP
 	// and per username per minute (docs/03-ARCHITECTURE.md § Cross-cutting).
+	// LoginRateIPPerMin also sizes the shared per-IP limiter Login,
+	// AuthenticateTelegram, ResetPassword and (keyed by Telegram user id
+	// instead of IP) CompleteLink all draw from (D-118, auth/service.go's
+	// ipLimiter) — it is no longer login-only despite the name.
 	LoginRateIPPerMin   int `env:"LOGIN_RATE_IP_PER_MIN" envDefault:"10"`
 	LoginRateUserPerMin int `env:"LOGIN_RATE_USER_PER_MIN" envDefault:"5"`
 
@@ -126,27 +130,37 @@ type Config struct {
 	// BotUsername names the bot the Telegram Login Widget signs requests
 	// against and CreateTelegramLink's deep link points users at (ADR-005:
 	// `https://t.me/<BOT_USERNAME>?start=link_<code>`) — non-secret, unlike
-	// TelegramBotToken below. Required: an empty value would make
-	// CreateTelegramLink hand back a deep link of `https://t.me/?start=...`
-	// — no bot named, so it goes nowhere — so Load fails fast the same way
-	// a missing DATABASE_URL does, rather than let that surface later as a
-	// dead link in the admin UI.
-	BotUsername string `env:"BOT_USERNAME,required,notEmpty"`
+	// TelegramBotToken below. Required only when ENV=prod, the same
+	// precedent as MediaDir's prod-only absolute-path check below: an
+	// empty value would make CreateTelegramLink hand back a deep link of
+	// `https://t.me/?start=...` — no bot named, so it goes nowhere — so
+	// Load fails fast in prod the same way a missing DATABASE_URL does,
+	// rather than let that surface later as a dead link in the admin UI.
+	// In dev it may be empty, so a fresh clone's `cp infra/.env.example
+	// infra/.env && make api` / `make seed` (which loads the full Config
+	// for MEDIA_DIR) doesn't need Telegram credentials just to run;
+	// CreateTelegramLink itself also refuses to hand back a deep link with
+	// no bot named (telegram.go) as a last line of defense.
+	BotUsername string `env:"BOT_USERNAME"`
 
 	// TelegramBotToken is the API's own copy of the bot token (D-112,
 	// docs/07-DEVOPS.md § Environment variables) — AuthenticateTelegram
 	// uses it to verify the Telegram Login Widget's HMAC (ADR-005), a
 	// distinct read from whatever cmd/bot does with the same environment
 	// variable. Secret; owner-provided in infra/.env only, never in the
-	// repo or logs (hard rule 9). Required: an empty botToken would make
+	// repo or logs (hard rule 9). Required only when ENV=prod (same
+	// precedent as MediaDir below): an empty botToken would make
 	// VerifyLoginWidget's secret_key SHA-256("") — a public constant, not
 	// a secret — so anyone could forge a valid signature for any linked
-	// Telegram id and get a session. VerifyLoginWidget itself also refuses
-	// to run with an empty botToken (telegram.go), but Load fails fast
-	// here too, the same way a missing DATABASE_URL does, so a
-	// misconfigured deployment never serves traffic with the check
-	// effectively disabled in the first place.
-	TelegramBotToken string `env:"TELEGRAM_BOT_TOKEN,required,notEmpty"`
+	// Telegram id and get a session; Load fails fast on that in prod, the
+	// same way a missing DATABASE_URL does, so a misconfigured deployment
+	// never serves traffic with the check effectively disabled. In dev it
+	// may be empty — VerifyLoginWidget itself also refuses to run with an
+	// empty botToken (telegram.go) as a last line of defense — so Telegram
+	// login/link/OTP are simply disabled on a fresh clone until an owner
+	// sets a real token, instead of blocking `make api`/`make seed`
+	// entirely.
+	TelegramBotToken string `env:"TELEGRAM_BOT_TOKEN"`
 }
 
 // Load parses the environment into a Config, applying defaults. It fails
@@ -174,6 +188,18 @@ func Load() (Config, error) {
 	// than let that surface later as files that vanish on redeploy.
 	if cfg.Env == "prod" && !filepath.IsAbs(cfg.MediaDir) {
 		return Config{}, fmt.Errorf("config: MEDIA_DIR must be an absolute path when ENV=prod (got %q)", cfg.MediaDir)
+	}
+
+	// BOT_USERNAME and TELEGRAM_BOT_TOKEN are required only in prod (same
+	// pattern as MEDIA_DIR above): dev/CI must be able to run `make api`/
+	// `make seed` on a fresh clone without Telegram credentials, but a
+	// production deployment must never start with Telegram login/link/OTP
+	// silently disabled by a missing value.
+	if cfg.Env == "prod" && cfg.BotUsername == "" {
+		return Config{}, fmt.Errorf("config: BOT_USERNAME is required when ENV=prod")
+	}
+	if cfg.Env == "prod" && cfg.TelegramBotToken == "" {
+		return Config{}, fmt.Errorf("config: TELEGRAM_BOT_TOKEN is required when ENV=prod")
 	}
 
 	return cfg, nil

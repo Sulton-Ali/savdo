@@ -34,6 +34,11 @@ seed` directly needs `DATABASE_URL` and `MEDIA_DIR` in the environment, same as 
 
 Media files in dev go to `infra/data/media/` (gitignored).
 
+`BOT_USERNAME`/`TELEGRAM_BOT_TOKEN` are required only when `ENV=prod` (§ Environment
+variables below) — `infra/.env.example` leaves them blank, so `make api`/`make seed` run
+on a fresh clone with no Telegram credentials; Telegram login, link and OTP delivery are
+simply disabled until an owner sets real values.
+
 Phase 3 (D-49): `make seed` then creates three suppliers and opening stock through the services, never by writing `stock_levels` or `stock_movements` directly (ADR-006): one received purchase per catalogue category (6 purchases, one line per variant, 135 lines for the demo catalogue), quantities 3–12 derived from a stable hash of the SKU, `unitCost` equal to the variant's effective cost so receiving leaves the catalogue's cost numbers unchanged (D-42), then one transfer of 2 units for the first 10 variants by SKU from the shop floor to the storeroom. The step is skipped when the shop already has a purchase (`stock already seeded`). The seed is additive-only and has no destructive reset; a full local reset is `make dev-infra-down && make dev-infra && make migrate && make seed`, which recreates the database (the ledger's append-only trigger blocks per-shop deletes by design).
 
 ### Stock rebuild
@@ -142,7 +147,9 @@ The API loads all of these via `config.Load()`. `savdo migrate` reads only
 `api/internal/config/config.go`. `config.Load()`
 also enforces that, in **production, `MEDIA_DIR` must be an absolute path**; the dev
 default is relative, and `config.Load()` fails fast when `ENV=prod` and it isn't
-absolute (config.go L120-129).
+absolute (config.go L120-129). The same prod-only pattern applies to `BOT_USERNAME` and
+`TELEGRAM_BOT_TOKEN`: required (non-empty) only when `ENV=prod`, free to be left empty
+in dev/CI.
 
 | Variable            | Default        | Notes                                                                                 |
 | ------------------- | -------------- | ------------------------------------------------------------------------------------- |
@@ -153,7 +160,7 @@ absolute (config.go L120-129).
 | `PUBLIC_SHOP_SLUG`  | `savdo-demo`   | Public landing shop slug (Phase 6, D-105); Phase 8 resolves by hostname               |
 | `SESSION_WEB_TTL`   | `168h` (7 d)   | Web cookie sliding window (D-29)                                                      |
 | `SESSION_MOBILE_TTL`| `720h` (30 d)  | Mobile bearer token sliding window (D-29)                                             |
-| `LOGIN_RATE_IP_PER_MIN` | `10`       | Per-IP login attempts per minute                                                      |
+| `LOGIN_RATE_IP_PER_MIN` | `10`       | Per-IP attempts per minute — shared by `/auth/login`, `/auth/telegram`, `/auth/password/reset` and, keyed by Telegram user id instead of IP, Telegram link completion (D-118) |
 | `LOGIN_RATE_USER_PER_MIN` | `5`      | Per-username login attempts per minute                                                |
 | `COOKIE_SECURE`     | dev: `false`, prod: `true` | Forces HTTPS-only session cookies; explicit env var overrides the default |
 | `MEDIA_DIR`         | `../infra/data/media` | Absolute path in prod; local-disk root for media.LocalStorage (ADR-008). **In prod this is a Docker volume mounted at `/data/media`.** |
@@ -161,8 +168,8 @@ absolute (config.go L120-129).
 | `MEDIA_MAX_BYTES`   | `10485760`     | Single upload file part size cap (10 MB); checked before WebP encoding                |
 | `MEDIA_CONCURRENCY` | `2`            | Max WebP derivative encode tasks running concurrently (gated by a semaphore; Review B) |
 | `MEDIA_QUEUE`       | `8`            | Max uploads in flight (spooling + queued + encoding); admission gate outside encode queue |
-| `BOT_USERNAME`      | (required)     | The bot's own `@handle`, no `@` (ADR-005); not a secret. `CreateTelegramLink`'s deep link embeds it (`https://t.me/<BOT_USERNAME>?start=link_<code>`), and `VerifyLoginWidget` checks the Login Widget's HMAC against `TELEGRAM_BOT_TOKEN` (the same bot). `config.Load()` fails fast at startup if this is empty. |
-| `TELEGRAM_BOT_TOKEN`| (required, secret) | Telegram bot API token (D-112); owner-provided in `infra/.env` only, never in repo or logs. `config.Load()` fails fast at startup if this is empty — an empty token would otherwise make the Login Widget HMAC's secret key `SHA-256("")`, a public constant anyone could forge a valid login against. |
+| `BOT_USERNAME`      | (required in prod; empty in dev) | The bot's own `@handle`, no `@` (ADR-005); not a secret. `CreateTelegramLink`'s deep link embeds it (`https://t.me/<BOT_USERNAME>?start=link_<code>`), and `VerifyLoginWidget` checks the Login Widget's HMAC against `TELEGRAM_BOT_TOKEN` (the same bot). `config.Load()` fails fast at startup when `ENV=prod` and this is empty (same precedent as `MEDIA_DIR`'s prod-only check); dev/CI may leave it empty — `CreateTelegramLink`'s handler then refuses with `500 INTERNAL` rather than hand back a dead `https://t.me/?start=...` link, so Telegram linking is simply disabled until an owner sets a real value. |
+| `TELEGRAM_BOT_TOKEN`| (required in prod, secret; empty in dev) | Telegram bot API token (D-112); owner-provided in `infra/.env` only, never in repo or logs. `config.Load()` fails fast when `ENV=prod` and this is empty — an empty token would otherwise make the Login Widget HMAC's secret key `SHA-256("")`, a public constant anyone could forge a valid login against. Dev/CI may leave it empty; `VerifyLoginWidget` itself also refuses to run with an empty token as a last line of defense, so Telegram login/OTP delivery are simply disabled until an owner sets a real value — a fresh clone's `cp infra/.env.example infra/.env && make api`/`make seed` must not need Telegram credentials just to run. |
 | `ANTHROPIC_API_KEY` | (secret)       | Anthropic API key for the bot's LLM (D-112); owner-provided in `infra/.env` only, never in repo or logs |
 | `AI_MODEL`          | `claude-sonnet-5` | LLM model identifier (D-110); configurable for different providers via the `internal/ai` adapter |
 | `AI_PROVIDER`       | `anthropic`    | LLM provider selector (O-29); `anthropic` or `openai_compat` (self-hosted) in Phase 7 |
