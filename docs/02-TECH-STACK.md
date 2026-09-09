@@ -108,12 +108,12 @@ pattern; revisit if bundle size becomes a landing performance issue.
 | GitHub Actions  | —        | `ci.yml` from Phase 0, `deploy.yml` from Phase 8                                                                        |
 | lefthook        | 2.1.12   | Git hooks (commit-msg conventional-commit + trailer ban); installed by `pnpm install` (`prepare`), build approved in `pnpm-workspace.yaml` |
 
-## LLM for the bot (D-110: Gemini 3.8 Flash)
+## LLM for the bot (D-110: Gemini 2.5 Flash)
 
-Model: `gemini-3.8-flash` via `openai_compat` provider (D-110).
-Config: `AI_MODEL=gemini-3.8-flash`, `AI_API_KEY` from Google AI Studio (free tier),
+Model: `gemini-2.5-flash` via `openai_compat` provider (D-110).
+Config: `AI_MODEL=gemini-2.5-flash`, `AI_API_KEY` from Google AI Studio (free tier),
 `AI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai`, plus
-`AI_PRICE_INPUT_PER_MTOK=0.75` and `AI_PRICE_OUTPUT_PER_MTOK=3.75` for cost estimates
+`AI_PRICE_INPUT_PER_MTOK=0.30` and `AI_PRICE_OUTPUT_PER_MTOK=2.50` for cost estimates
 (ADR-009 provider-agnostic adapter).
 
 ## Tooling for agents
