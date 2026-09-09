@@ -104,7 +104,7 @@ function CategoryPage() {
                 key={child.id}
                 to="/$locale/c/$slug"
                 params={{ locale, slug: child.slug }}
-                className="rounded-full border border-bg px-3 py-1 text-sm text-text transition hover:border-primary hover:text-primary"
+                className="rounded-full border border-landing-line px-3 py-1 text-sm text-text transition hover:border-primary hover:text-primary"
               >
                 {child.name}
               </Link>
@@ -113,7 +113,7 @@ function CategoryPage() {
         )}
       </div>
       {items.length === 0 ? (
-        <p className="rounded-md border border-bg border-dashed px-4 py-10 text-center text-muted">
+        <p className="rounded-md border border-landing-line border-dashed px-4 py-10 text-center text-muted">
           {t("web.category.empty")}
         </p>
       ) : (

@@ -10,8 +10,8 @@ import { HoursCard } from "../../components/landing/HoursCard";
 import { TelegramCtaSection } from "../../components/landing/TelegramCtaSection";
 import { listPublicCategories, listPublicProducts } from "../../lib/publicApi.functions";
 import { absoluteUrl, asRouteMatchHead, buildSeoHead, chooseOgImage } from "../../lib/seo";
+import { getTelegramHref } from "../../lib/telegramHref";
 import { splitParagraphs } from "../../lib/text";
-import { isSafeHttpsUrl } from "../../lib/url";
 
 const PAGE_LIMIT = 8;
 
@@ -45,10 +45,7 @@ function HomePage() {
   const blocks = shop.blocks;
   const about = blocks.about;
 
-  const telegramHref =
-    blocks.social?.telegram != null && isSafeHttpsUrl(blocks.social.telegram)
-      ? blocks.social.telegram
-      : null;
+  const telegramHref = getTelegramHref(blocks.social);
 
   const aboutBody =
     about?.body != null && about.body !== ""

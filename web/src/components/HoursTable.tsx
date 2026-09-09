@@ -10,7 +10,7 @@ type ContentHours = components["schemas"]["ContentHours"];
 export function HoursTable({ hours }: { hours: ContentHours }) {
   const { t } = useTranslation();
   return (
-    <div className="rounded-lg border border-bg bg-surface p-4">
+    <div className="rounded-lg border border-landing-line bg-surface p-4">
       <table className="w-full text-sm">
         <tbody>
           {sortHoursDays(hours.days).map((day, index) => {

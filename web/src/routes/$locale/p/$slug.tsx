@@ -90,7 +90,7 @@ function ProductPage() {
                 {product.variants.map((variant) => (
                   <li
                     key={variant.id}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-bg p-3"
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-landing-line p-3"
                   >
                     <span className="text-text">
                       {Object.entries(variant.attributes)

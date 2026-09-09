@@ -69,7 +69,7 @@ export function HeroCard({
           )}
           <a
             href={catalogHref}
-            className="inline-flex w-full items-center justify-center rounded-xl border border-bg bg-landing-surface px-6 py-3 font-semibold text-base text-text transition hover:border-muted sm:w-auto"
+            className="inline-flex w-full items-center justify-center rounded-xl border border-landing-line bg-landing-surface px-6 py-3 font-semibold text-base text-text transition hover:border-muted sm:w-auto"
           >
             {catalogLabel}
           </a>

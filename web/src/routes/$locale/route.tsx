@@ -9,6 +9,7 @@ import { createI18nInstance } from "../../lib/i18n";
 import { isLocale } from "../../lib/locale";
 import { getPublicShop } from "../../lib/publicApi.functions";
 import { getSiteUrl } from "../../lib/site.functions";
+import { getTelegramHref } from "../../lib/telegramHref";
 
 /**
  * The `$locale` layout: validates the locale segment (404 for anything
@@ -35,10 +36,15 @@ export const Route = createFileRoute("/$locale")({
 function LocaleLayout() {
   const { locale, shop } = Route.useRouteContext();
   const i18n = useMemo(() => createI18nInstance(locale), [locale]);
+  // phase-7.5 T4: same source and check as the homepage's own hero/CTA
+  // Telegram buttons (`$locale/index.tsx`'s `telegramHref`) — computed once
+  // here so the header (every route, via this layout) and the homepage
+  // never disagree about whether the shop has a Telegram link.
+  const telegramHref = getTelegramHref(shop.blocks.social);
 
   return (
     <I18nextProvider i18n={i18n}>
-      <Header shopName={shop.name} locale={locale} />
+      <Header shopName={shop.name} locale={locale} telegramHref={telegramHref} />
       <Outlet />
       <Footer shopName={shop.name} locale={locale} blocks={shop.blocks} />
     </I18nextProvider>
