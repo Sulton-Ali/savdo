@@ -10,8 +10,18 @@ import (
 
 	"github.com/Sulton-Ali/savdo/api/gen"
 	"github.com/Sulton-Ali/savdo/api/internal/ai"
+	"github.com/Sulton-Ali/savdo/api/internal/apierr"
+	"github.com/Sulton-Ali/savdo/api/internal/auth"
+	"github.com/Sulton-Ali/savdo/api/internal/config"
 	"github.com/Sulton-Ali/savdo/api/internal/db"
 )
+
+// startLinkAlreadyLinkedTextUz/startLinkRateLimitedTextUz mirror
+// texts.go's own uz map entries verbatim — an external _test package
+// cannot call the unexported localeTexts these replies are built from
+// (limits_test.go's own rateLimitedTextUz/fallbackTextUz do the same).
+const startLinkAlreadyLinkedTextUz = "Bu Telegram hisobi allaqachon boshqa foydalanuvchiga bog'langan."
+const startLinkRateLimitedTextUz = "Urinishlar soni juda ko'p. Iltimos, birozdan so'ng qayta urining."
 
 // noChatClient panics if Chat is ever called — every test below scripts
 // exactly the ai.Fake results a static-command turn needs (none), so a
@@ -49,18 +59,20 @@ func TestHandleUpdate_start_link_noLinkerConfigured(t *testing.T) {
 	}
 }
 
-// fakeLinker records every LinkTelegram call — Sonnet/Opus MAJOR 4's own
+// fakeLinker records every CompleteLink call — Sonnet/Opus MAJOR 4's own
 // tests need to see exactly which telegramUserID/telegramUsername
 // handleStart passed it.
 type fakeLinker struct {
 	calls              int
+	lastCode           string
 	lastTelegramUserID int64
 	lastUsername       string
 	err                error
 }
 
-func (f *fakeLinker) LinkTelegram(_ context.Context, _ string, telegramUserID int64, telegramUsername string) error {
+func (f *fakeLinker) CompleteLink(_ context.Context, code string, telegramUserID int64, telegramUsername string) error {
 	f.calls++
+	f.lastCode = code
 	f.lastTelegramUserID = telegramUserID
 	f.lastUsername = telegramUsername
 	return f.err
@@ -90,13 +102,13 @@ func TestHandleUpdate_startLink_usesLiveUpdateUser_notStoredConversationUser(t *
 	env.svc.HandleUpdate(context.Background(), textUpdate(chatID, userB, "bob", "uz", "/start link_abc123"))
 
 	if linker.calls != 1 {
-		t.Fatalf("LinkTelegram called %d times, want 1", linker.calls)
+		t.Fatalf("CompleteLink called %d times, want 1", linker.calls)
 	}
 	if linker.lastTelegramUserID != userB {
-		t.Fatalf("LinkTelegram telegramUserID = %d, want the live update's userB (%d), not conv's stored userA (%d)", linker.lastTelegramUserID, userB, userA)
+		t.Fatalf("CompleteLink telegramUserID = %d, want the live update's userB (%d), not conv's stored userA (%d)", linker.lastTelegramUserID, userB, userA)
 	}
 	if linker.lastUsername != "bob" {
-		t.Fatalf("LinkTelegram telegramUsername = %q, want %q", linker.lastUsername, "bob")
+		t.Fatalf("CompleteLink telegramUsername = %q, want %q", linker.lastUsername, "bob")
 	}
 }
 
@@ -113,7 +125,7 @@ func TestHandleUpdate_startLink_groupChatRefused(t *testing.T) {
 	env.svc.HandleUpdate(context.Background(), updateInChat(1, 100, "alice", "uz", "/start link_abc123", models.ChatTypeGroup))
 
 	if linker.calls != 0 {
-		t.Fatalf("LinkTelegram called %d times, want 0 (group chat must never redeem a link code)", linker.calls)
+		t.Fatalf("CompleteLink called %d times, want 0 (group chat must never redeem a link code)", linker.calls)
 	}
 	got := lastReply(t, env.sender.allReplyTexts())
 	if strings.Contains(got, "muvaffaqiyatli") {
@@ -207,5 +219,108 @@ func TestHandleUpdate_nonTextUpdatesAreIgnored(t *testing.T) {
 
 	if got := len(env.sender.allReplyTexts()); got != 0 {
 		t.Fatalf("got %d replies, want 0 for updates with no usable text message", got)
+	}
+}
+
+// TestHandleUpdate_startLink_alreadyLinkedText pins M1's error-class
+// mapping: auth.ErrTelegramAlreadyLinked gets its own text, distinct
+// from the generic startLinkFailed — retrying the same code can never
+// help when the problem is the Telegram account, not the code
+// (internal/auth/telegram.go's own doc comment on CompleteLink).
+func TestHandleUpdate_startLink_alreadyLinkedText(t *testing.T) {
+	env := newTestEnv(t, noChatClient())
+	linker := &fakeLinker{err: auth.ErrTelegramAlreadyLinked}
+	env.rebuildServiceWithLinker(noChatClient(), linker)
+
+	env.svc.HandleUpdate(context.Background(), textUpdate(1, 100, "alice", "uz", "/start link_abc123"))
+
+	got := lastReply(t, env.sender.allReplyTexts())
+	if got != startLinkAlreadyLinkedTextUz {
+		t.Fatalf("reply = %q, want %q", got, startLinkAlreadyLinkedTextUz)
+	}
+}
+
+// TestHandleUpdate_startLink_rateLimitedText pins the other mapped
+// class: a *apierr.Error with Code RATELIMITED (CompleteLink's shared
+// D-118 budget) gets its own "too many attempts" text, distinct from
+// "invalid code".
+func TestHandleUpdate_startLink_rateLimitedText(t *testing.T) {
+	env := newTestEnv(t, noChatClient())
+	linker := &fakeLinker{err: apierr.RateLimited(30)}
+	env.rebuildServiceWithLinker(noChatClient(), linker)
+
+	env.svc.HandleUpdate(context.Background(), textUpdate(1, 100, "alice", "uz", "/start link_abc123"))
+
+	got := lastReply(t, env.sender.allReplyTexts())
+	if got != startLinkRateLimitedTextUz {
+		t.Fatalf("reply = %q, want %q", got, startLinkRateLimitedTextUz)
+	}
+}
+
+// TestHandleUpdate_startLink_completesRealLink is M1's own integration
+// test: a real auth.Service (not a fake) mints a link code
+// (CreateTelegramLink, the same call POST /auth/telegram/link makes),
+// the bot redeems it via a real /start link_<code> update, and
+// GetTelegramLink confirms the account is actually linked afterward —
+// proving the bot.TelegramLinker/auth.TelegramLinker rename actually
+// wires *auth.Service in as a working linker, not just that the two
+// interfaces happen to compile against each other.
+func TestHandleUpdate_startLink_completesRealLink(t *testing.T) {
+	env := newTestEnv(t, noChatClient())
+	authSvc := auth.NewService(env.pool, env.q, config.Config{LoginRateIPPerMin: 1000, LoginRateUserPerMin: 1000}, env.shop.ID)
+	env.rebuildServiceWithLinker(noChatClient(), authSvc)
+
+	link, err := authSvc.CreateTelegramLink(context.Background(), env.shop.ID, env.owner.ID)
+	if err != nil {
+		t.Fatalf("CreateTelegramLink: %v", err)
+	}
+
+	const telegramUserID = int64(555000)
+	env.svc.HandleUpdate(context.Background(), textUpdate(1, telegramUserID, "owner_tg", "uz", "/start link_"+link.Code))
+
+	got := lastReply(t, env.sender.allReplyTexts())
+	if strings.Contains(got, startLinkAlreadyLinkedTextUz) || got == "" {
+		t.Fatalf("reply = %q, want a success reply", got)
+	}
+	linked, username, err := authSvc.GetTelegramLink(context.Background(), env.shop.ID, env.owner.ID)
+	if err != nil {
+		t.Fatalf("GetTelegramLink: %v", err)
+	}
+	if !linked {
+		t.Fatalf("GetTelegramLink linked = false, want true after redeeming a real code")
+	}
+	if username == nil || *username != "owner_tg" {
+		t.Fatalf("GetTelegramLink username = %v, want \"owner_tg\"", username)
+	}
+}
+
+// TestHandleUpdate_startLink_redactsCodeBeforePersisting pins MAJOR 3:
+// an un-redeemed (or even just-redeemed) link code is a bearer
+// credential for whoever's account minted it — a manager reading the
+// admin transcript (GET /bot/conversations/{id}/messages) must never see
+// it, even though the /start command itself stays visible.
+func TestHandleUpdate_startLink_redactsCodeBeforePersisting(t *testing.T) {
+	env := newTestEnv(t, noChatClient())
+	linker := &fakeLinker{}
+	env.rebuildServiceWithLinker(noChatClient(), linker)
+	const chatID = int64(1)
+	const code = "verysecretcode123"
+
+	env.svc.HandleUpdate(context.Background(), textUpdate(chatID, 100, "alice", "uz", "/start link_"+code))
+
+	transcript := env.messageTranscript(t, chatID)
+	if strings.Contains(transcript, code) {
+		t.Fatalf("transcript contains the raw link code: %q", transcript)
+	}
+	if !strings.Contains(transcript, "/start link_***") {
+		t.Fatalf("transcript = %q, want the redacted \"/start link_***\" command still visible", transcript)
+	}
+	// The linker itself must still have received the real, unredacted
+	// code — only the persisted transcript is redacted.
+	if linker.calls != 1 {
+		t.Fatalf("CompleteLink called %d times, want 1", linker.calls)
+	}
+	if linker.lastCode != code {
+		t.Fatalf("CompleteLink code = %q, want the real unredacted code %q", linker.lastCode, code)
 	}
 }

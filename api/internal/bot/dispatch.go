@@ -70,16 +70,23 @@ func (s *Service) Dispatch(update *models.Update) {
 		s.logger.Warn("bot: dispatch rejected: service is shutting down")
 		return
 	}
-	if update.ID != 0 && s.seen.markSeen(update.ID) {
-		s.shutdownMu.Unlock()
-		return // already dispatched (or a Telegram retry of one still running)
-	}
+	// minor m1: the queue slot is acquired *before* markSeen, not after
+	// — the other order marked a queue-full-dropped update seen anyway,
+	// so Telegram's own retry of that exact update_id (once a slot had
+	// freed up and it could actually have been processed) was discarded
+	// forever instead of getting a real second chance. An update that
+	// never got a slot is never marked seen at all.
 	select {
 	case s.queueSlots <- struct{}{}:
 	default:
 		s.shutdownMu.Unlock()
 		s.logger.Warn("bot: dispatch dropped: queue is full", "queue_limit", maxQueuedUpdates)
 		return
+	}
+	if update.ID != 0 && s.seen.markSeen(update.ID) {
+		<-s.queueSlots // never spawned: give the slot back
+		s.shutdownMu.Unlock()
+		return // already dispatched (or a Telegram retry of one still running)
 	}
 	// wg.Add must happen inside the same locked region Close's own
 	// shuttingDown flip uses (service.go's own doc comment on

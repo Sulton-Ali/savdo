@@ -70,8 +70,16 @@ func (s *Service) HandleUpdate(ctx context.Context, update *models.Update) {
 	// always has. loadHistory (handleFreeText, chat.go) excludes this
 	// row by id instead of requiring persist to run after it, so the
 	// LLM's own prompt still never sees the current question twice.
+	// MAJOR 3: the persisted content is redacted (redactLinkPayload) —
+	// never the raw text — an un-redeemed "/start link_<code>" is a
+	// bearer credential for whoever's account minted it (POST /auth/
+	// telegram/link), and the admin transcript (GET /bot/conversations/
+	// {id}/messages) is manager-readable; a manager reading someone
+	// else's still-valid code could redeem it and get logged in as them.
+	// handleCommand below still gets the real, unredacted text — only
+	// what gets written to bot_messages changes.
 	userMsg, err := s.persist(ctx, persistParams{
-		ConversationID: conv.ID, ShopID: shop.ID, Role: db.BotMessageRoleUser, Content: text,
+		ConversationID: conv.ID, ShopID: shop.ID, Role: db.BotMessageRoleUser, Content: redactLinkPayload(text),
 		TelegramUsername: nilIfEmpty(telegramUsername),
 	})
 	if err != nil {
@@ -195,4 +203,26 @@ func clampInt32(v int) int32 {
 		return math.MaxInt32
 	}
 	return int32(v) // #nosec G115 -- range-checked immediately above
+}
+
+// redactLinkPayload returns text unchanged unless it is a "/start
+// link_<code>" command (optionally "/start@botusername link_<code>",
+// Telegram's own group-chat suffix), in which case the code itself is
+// replaced with a fixed placeholder — MAJOR 3. The command token (with
+// its @suffix, if any) stays visible; every other command and every
+// free-text message passes through untouched.
+func redactLinkPayload(text string) string {
+	fields := strings.SplitN(text, " ", 2)
+	rawCmd := fields[0]
+	cmd := rawCmd
+	if i := strings.IndexByte(cmd, '@'); i >= 0 {
+		cmd = cmd[:i]
+	}
+	if cmd != "/start" || len(fields) < 2 {
+		return text
+	}
+	if !strings.HasPrefix(strings.TrimSpace(fields[1]), "link_") {
+		return text
+	}
+	return rawCmd + " link_***"
 }

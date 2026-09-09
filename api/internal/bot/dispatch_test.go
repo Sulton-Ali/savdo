@@ -2,6 +2,7 @@ package bot_test
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -323,5 +324,95 @@ func TestDispatch_oneChatBacklogDoesNotStarveAnotherChat(t *testing.T) {
 	// (multiple times perSendDelay) before a slot ever reaches it.
 	if elapsed > 3*perSendDelay {
 		t.Fatalf("chat B's update took %s, want well under chat A's own %d-deep backlog — it must run on its own free semaphore slot, not queue behind chat A's entire backlog", elapsed, chatABacklog)
+	}
+}
+
+// TestDispatch_queueFullDropIsNotPermanentlyMarkedSeen pins minor m1: an
+// update dropped because the queue was full must not be recorded in
+// seenUpdates — a genuine Telegram retry of that same update_id, arriving
+// once a slot has freed up, must still get a real chance to run instead
+// of being discarded forever as "already seen".
+func TestDispatch_queueFullDropIsNotPermanentlyMarkedSeen(t *testing.T) {
+	env := newTestEnv(t, noChatClient())
+	const perSendDelay = 20 * time.Millisecond
+	svc := bot.NewService(env.pool, env.q, noChatClient(), env.pub, env.content, delaySender{delay: perSendDelay}, nil, env.cfg, env.clock.now, testLogger())
+
+	// Fill every one of maxQueuedUpdates' slots with one chat's own
+	// backlog: each of these goroutines holds a queue slot for as long
+	// as it is running *or* still waiting on the shared per-chat lock, so
+	// dispatching more than maxQueuedUpdates (64) of them for the same
+	// chat saturates the queue almost immediately, well before any of
+	// them can finish (each takes at least perSendDelay to even reach
+	// the front of that chat's own lock).
+	const chatA = int64(85)
+	const backlog = 64
+	for i := 0; i < backlog; i++ {
+		svc.Dispatch(updateWithID(2000+i, chatA, 850000+int64(i), "x", "uz", "/hours"))
+	}
+
+	const dupID = 9999
+	const probeChat = int64(86)
+	svc.Dispatch(updateWithID(dupID, probeChat, 860000, "y", "uz", "/hours")) // must be dropped: queue full
+
+	// Confirm it really was dropped, not just slow — poll for a bounded
+	// window shorter than the backlog's own full drain time.
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if _, err := env.q.GetBotConversationByChat(context.Background(), db.GetBotConversationByChatParams{ShopID: env.shop.ID, TelegramChatID: probeChat}); err == nil {
+			t.Fatalf("probe update was processed immediately — queue was not actually full, this test's own setup is wrong")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Let chatA's whole backlog drain, freeing every slot.
+	waitForConversation(t, env, chatA)
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		convID, err := env.q.GetBotConversationByChat(context.Background(), db.GetBotConversationByChatParams{ShopID: env.shop.ID, TelegramChatID: chatA})
+		if err == nil {
+			rows, err := env.q.ListBotMessages(context.Background(), db.ListBotMessagesParams{ShopID: env.shop.ID, ConversationID: convID.ID, Limit: 1000})
+			if err == nil && len(rows) >= backlog*2 { // user + assistant row per turn
+				break
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	// Redeliver the *same* update_id now that the queue has room — with
+	// the fix, it was never marked seen, so this must actually run.
+	svc.Dispatch(updateWithID(dupID, probeChat, 860000, "y", "uz", "/hours"))
+	waitForConversation(t, env, probeChat)
+}
+
+// TestServiceClose_forceCancelsAfterDeadline pins minor m3: once ctx's
+// own deadline passes, Close returns ctx.Err() immediately (never
+// waiting the full duration of a still-blocked turn) having force-
+// cancelled baseCtx — the blocked turn observes ctx.Done() instead of
+// hanging forever.
+func TestServiceClose_forceCancelsAfterDeadline(t *testing.T) {
+	env := newTestEnv(t, nil)
+	client := &blockingAIClient{release: make(chan struct{}), started: make(chan struct{})}
+	svc := bot.NewService(env.pool, env.q, client, env.pub, env.content, env.sender, nil, env.cfg, env.clock.now, testLogger())
+
+	svc.Dispatch(updateWithID(1, 91, 910, "alice", "uz", "Do you have shoes?"))
+	select {
+	case <-client.started:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("the dispatched turn never reached Chat")
+	}
+	// Deliberately never closing client.release: the turn only ends via
+	// baseCtx's own cancellation.
+
+	closeCtx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	err := svc.Close(closeCtx)
+	elapsed := time.Since(start)
+
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Close() error = %v, want context.DeadlineExceeded", err)
+	}
+	if elapsed > 1*time.Second {
+		t.Fatalf("Close() took %s, want it to return promptly once its own deadline passed, not wait for the still-blocked turn", elapsed)
 	}
 }

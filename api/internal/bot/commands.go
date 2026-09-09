@@ -2,12 +2,15 @@ package bot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
 
 	"github.com/Sulton-Ali/savdo/api/gen"
+	"github.com/Sulton-Ali/savdo/api/internal/apierr"
+	"github.com/Sulton-Ali/savdo/api/internal/auth"
 	"github.com/Sulton-Ali/savdo/api/internal/db"
 )
 
@@ -74,20 +77,29 @@ func (s *Service) replyStaticText(ctx context.Context, shop db.Shop, conv db.Bot
 }
 
 // handleStart answers plain /start with D-113's greeting, and /start
-// link_<code> by redeeming code through s.linker — using the *live*
-// telegramUserID/telegramUsername the triggering update itself carried,
-// never conv.TelegramUserID (the *first* update that ever created this
-// bot_conversations row, which can be a different Telegram user's id
-// once T5 wires a real Linker: Sonnet/Opus MAJOR 4, an account-takeover
-// risk in any chat more than one person can post to). isPrivateChat
-// rejects the redemption outright in a group/supergroup/channel — a
-// link code is a one-person credential, and "whoever sends /start
-// link_<code> next" in a group is never guaranteed to be the Telegram
-// account the owner meant to link. telegramUserID is 0 whenever the
-// triggering update carried no `from` at all (update.go's own zero
-// value for that case) — MINOR 4: a Telegram update with no sender
-// identity can never redeem a link code either, the same refusal a
-// non-private chat gets.
+// link_<code> by redeeming code through s.linker.CompleteLink — using
+// the *live* telegramUserID/telegramUsername the triggering update
+// itself carried, never conv.TelegramUserID (the *first* update that
+// ever created this bot_conversations row, which can be a different
+// Telegram user's id: Sonnet/Opus MAJOR 4, an account-takeover risk in
+// any chat more than one person can post to). isPrivateChat rejects the
+// redemption outright in a group/supergroup/channel — a link code is a
+// one-person credential, and "whoever sends /start link_<code> next" in
+// a group is never guaranteed to be the Telegram account the owner
+// meant to link. telegramUserID is 0 whenever the triggering update
+// carried no `from` at all (update.go's own zero value for that case)
+// — MINOR 4: a Telegram update with no sender identity can never redeem
+// a link code either, the same refusal a non-private chat gets.
+//
+// CompleteLink's own error classes (internal/auth/telegram.go's own doc
+// comment on it) map to three distinct replies: apierr.RateLimited
+// (D-118's shared per-Telegram-user-id budget) gets its own "too many
+// attempts" text rather than "invalid code", since retrying sooner would
+// help; ErrTelegramAlreadyLinked gets its own text too, since retrying
+// the same code at all can never help (the Telegram account, not the
+// code, is the problem); everything else (malformed, expired, used,
+// over-attempted, wrong verifier) collapses to startLinkFailed, exactly
+// as CompleteLink's own doc comment says it should.
 func (s *Service) handleStart(ctx context.Context, shop db.Shop, conv db.BotConversation, chatID int64, locale, payload, telegramUsername string, telegramUserID int64, isPrivateChat bool) {
 	if strings.HasPrefix(payload, "link_") {
 		if !isPrivateChat || telegramUserID == 0 {
@@ -99,14 +111,30 @@ func (s *Service) handleStart(ctx context.Context, shop db.Shop, conv db.BotConv
 			s.replyStaticText(ctx, shop, conv, chatID, localeTexts(locale).startLinkUnavailable)
 			return
 		}
-		if err := s.linker.LinkTelegram(ctx, code, telegramUserID, telegramUsername); err != nil {
-			s.replyStaticText(ctx, shop, conv, chatID, localeTexts(locale).startLinkFailed)
+		if err := s.linker.CompleteLink(ctx, code, telegramUserID, telegramUsername); err != nil {
+			s.replyStaticText(ctx, shop, conv, chatID, startLinkErrorText(localeTexts(locale), err))
 			return
 		}
 		s.replyStaticText(ctx, shop, conv, chatID, localeTexts(locale).startLinkSuccess)
 		return
 	}
 	s.replyStaticText(ctx, shop, conv, chatID, fmt.Sprintf(localeTexts(locale).greeting, shop.Name))
+}
+
+// startLinkErrorText maps CompleteLink's three error classes to their own
+// locale text (handleStart's own doc comment). errors.Is/errors.As, never
+// string matching, per internal/auth/telegram.go's own instruction on
+// CompleteLink.
+func startLinkErrorText(t texts, err error) string {
+	var apiErr *apierr.Error
+	switch {
+	case errors.As(err, &apiErr) && apiErr.Code == gen.RATELIMITED:
+		return t.startLinkRateLimited
+	case errors.Is(err, auth.ErrTelegramAlreadyLinked):
+		return t.startLinkAlreadyLinked
+	default:
+		return t.startLinkFailed
+	}
 }
 
 func (s *Service) handleHours(ctx context.Context, shop db.Shop, conv db.BotConversation, chatID int64, locale string) {

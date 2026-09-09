@@ -87,17 +87,17 @@ type Sender interface {
 
 // TelegramLinker is the account-linking capability `/start link_<code>`
 // redeems (docs/05-API.md § Auth: `POST /auth/telegram/link` mints the
-// code, `GET/DELETE /auth/telegram/link` read/clear the result). No type
-// in the internal/auth this task merged implements it — that is T5's own
-// file scope, not T4's, and nothing there does this today (checked
-// directly against the merged internal/auth package, 2026-09-08). Linker
-// stays nil until T5 wires a concrete implementation into
-// NewService — until then /start link_<code> always answers
-// texts.startLinkUnavailable rather than guessing at a signature T5
-// hasn't defined yet (this task's own instruction: "else reply 'not
-// available yet' and note it").
+// code, `GET/DELETE /auth/telegram/link` read/clear the result).
+// *auth.Service satisfies this structurally — its own CompleteLink
+// method (internal/auth/telegram.go) has the identical shape, and that
+// package declares its own auth.TelegramLinker interface with the same
+// one method for the same reason — cmd/bot/main.go and cmd/api/main.go
+// both wire authSvc in as this. A nil linker (e.g. a test that never
+// exercises `/start link_<code>`) still answers
+// texts.startLinkUnavailable rather than panicking (commands.go's own
+// nil check).
 type TelegramLinker interface {
-	LinkTelegram(ctx context.Context, code string, telegramUserID int64, telegramUsername string) error
+	CompleteLink(ctx context.Context, code string, telegramUserID int64, telegramUsername string) error
 }
 
 // Config is Service's static configuration, resolved once at startup by

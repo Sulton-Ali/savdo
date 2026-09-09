@@ -8,38 +8,44 @@ import "fmt"
 // plain string or a small format helper; no %-verb text is stored
 // pre-formatted, so a caller can never forget an argument silently.
 type texts struct {
-	greeting             string // %s = shop name
-	unknownCommand       string
-	rateLimited          string
-	fallback             string // %s = shop name; contact details appended separately when known
-	startLinkUnavailable string
-	startLinkFailed      string
-	startLinkSuccess     string
-	hoursUnavailable     string
-	hoursNoDaysHeader    string
-	addressUnavailable   string
-	catalogUnavailable   string
-	catalogEmpty         string
-	catalogHeader        string
+	greeting               string // %s = shop name
+	unknownCommand         string
+	rateLimited            string
+	fallback               string // %s = shop name; contact details appended separately when known
+	startLinkUnavailable   string
+	startLinkFailed        string
+	startLinkSuccess       string
+	startLinkAlreadyLinked string
+	startLinkRateLimited   string
+	otpMessage             string // %s = 6-digit code; otpTTL (internal/auth/otp.go) is 5 minutes
+	hoursUnavailable       string
+	hoursNoDaysHeader      string
+	addressUnavailable     string
+	catalogUnavailable     string
+	catalogEmpty           string
+	catalogHeader          string
 
 	dayNames map[string]string
 }
 
 var textsByLocale = map[string]texts{
 	"uz": {
-		greeting:             "Salom! Men \"%s\" do'konining Telegram yordamchisiman. Mahsulotlar, narxlar, mavjudligi, ish vaqti, manzil va aloqa haqida so'rashingiz mumkin.\n\nBuyruqlar: /hours — ish vaqti, /address — manzil, /catalog — bo'limlar.",
-		unknownCommand:       "Bu buyruqni tushunmadim. /hours, /address yoki /catalog dan foydalaning, yoki savolingizni yozing.",
-		rateLimited:          "Bir soatda savollar soni chegarasiga yetdingiz. Iltimos, birozdan so'ng qayta yozing.",
-		fallback:             "Men faqat \"%s\" do'konining mahsulotlari, narxlari, mavjudligi, ish vaqti, manzili va aloqalari bo'yicha yordam bera olaman.",
-		startLinkUnavailable: "Hisobni bog'lash hozircha ilovada mavjud emas.",
-		startLinkFailed:      "Kodni tasdiqlab bo'lmadi. Kodni admin panelidan qaytadan oling.",
-		startLinkSuccess:     "Telegram hisobingiz muvaffaqiyatli bog'landi.",
-		hoursUnavailable:     "Ish vaqti hozircha ko'rsatilmagan.",
-		hoursNoDaysHeader:    "Ish vaqti:",
-		addressUnavailable:   "Manzil hozircha ko'rsatilmagan.",
-		catalogUnavailable:   "Bo'limlar ro'yxatini olib bo'lmadi.",
-		catalogEmpty:         "Hozircha bo'limlar yo'q.",
-		catalogHeader:        "Bo'limlar:",
+		greeting:               "Salom! Men \"%s\" do'konining Telegram yordamchisiman. Mahsulotlar, narxlar, mavjudligi, ish vaqti, manzil va aloqa haqida so'rashingiz mumkin.\n\nBuyruqlar: /hours — ish vaqti, /address — manzil, /catalog — bo'limlar.",
+		unknownCommand:         "Bu buyruqni tushunmadim. /hours, /address yoki /catalog dan foydalaning, yoki savolingizni yozing.",
+		rateLimited:            "Bir soatda savollar soni chegarasiga yetdingiz. Iltimos, birozdan so'ng qayta yozing.",
+		fallback:               "Men faqat \"%s\" do'konining mahsulotlari, narxlari, mavjudligi, ish vaqti, manzili va aloqalari bo'yicha yordam bera olaman.",
+		startLinkUnavailable:   "Hisobni bog'lash hozircha ilovada mavjud emas.",
+		startLinkFailed:        "Kodni tasdiqlab bo'lmadi. Kodni admin panelidan qaytadan oling.",
+		startLinkSuccess:       "Telegram hisobingiz muvaffaqiyatli bog'landi.",
+		startLinkAlreadyLinked: "Bu Telegram hisobi allaqachon boshqa foydalanuvchiga bog'langan.",
+		startLinkRateLimited:   "Urinishlar soni juda ko'p. Iltimos, birozdan so'ng qayta urining.",
+		otpMessage:             "Savdo kodingiz: %s. 5 daqiqa amal qiladi. Agar buni siz so'ramagan bo'lsangiz, e'tiborsiz qoldiring.",
+		hoursUnavailable:       "Ish vaqti hozircha ko'rsatilmagan.",
+		hoursNoDaysHeader:      "Ish vaqti:",
+		addressUnavailable:     "Manzil hozircha ko'rsatilmagan.",
+		catalogUnavailable:     "Bo'limlar ro'yxatini olib bo'lmadi.",
+		catalogEmpty:           "Hozircha bo'limlar yo'q.",
+		catalogHeader:          "Bo'limlar:",
 
 		dayNames: map[string]string{
 			"mon": "Dushanba", "tue": "Seshanba", "wed": "Chorshanba", "thu": "Payshanba",
@@ -47,19 +53,22 @@ var textsByLocale = map[string]texts{
 		},
 	},
 	"ru": {
-		greeting:             "Здравствуйте! Я Telegram-помощник магазина \"%s\". Спросите про товары, цены, наличие, часы работы, адрес и контакты.\n\nКоманды: /hours — часы работы, /address — адрес, /catalog — разделы.",
-		unknownCommand:       "Не понял эту команду. Используйте /hours, /address или /catalog, либо напишите вопрос.",
-		rateLimited:          "Вы достигли лимита вопросов за час. Пожалуйста, напишите чуть позже.",
-		fallback:             "Я могу помочь только с товарами, ценами, наличием, часами работы, адресом и контактами магазина \"%s\".",
-		startLinkUnavailable: "Привязка аккаунта пока недоступна в боте.",
-		startLinkFailed:      "Не удалось подтвердить код. Получите новый код в панели администратора.",
-		startLinkSuccess:     "Ваш Telegram-аккаунт успешно привязан.",
-		hoursUnavailable:     "Часы работы пока не указаны.",
-		hoursNoDaysHeader:    "Часы работы:",
-		addressUnavailable:   "Адрес пока не указан.",
-		catalogUnavailable:   "Не удалось получить список разделов.",
-		catalogEmpty:         "Разделов пока нет.",
-		catalogHeader:        "Разделы:",
+		greeting:               "Здравствуйте! Я Telegram-помощник магазина \"%s\". Спросите про товары, цены, наличие, часы работы, адрес и контакты.\n\nКоманды: /hours — часы работы, /address — адрес, /catalog — разделы.",
+		unknownCommand:         "Не понял эту команду. Используйте /hours, /address или /catalog, либо напишите вопрос.",
+		rateLimited:            "Вы достигли лимита вопросов за час. Пожалуйста, напишите чуть позже.",
+		fallback:               "Я могу помочь только с товарами, ценами, наличием, часами работы, адресом и контактами магазина \"%s\".",
+		startLinkUnavailable:   "Привязка аккаунта пока недоступна в боте.",
+		startLinkFailed:        "Не удалось подтвердить код. Получите новый код в панели администратора.",
+		startLinkSuccess:       "Ваш Telegram-аккаунт успешно привязан.",
+		startLinkAlreadyLinked: "Этот Telegram-аккаунт уже привязан к другому пользователю.",
+		startLinkRateLimited:   "Слишком много попыток. Пожалуйста, повторите чуть позже.",
+		otpMessage:             "Ваш код Savdo: %s. Действителен 5 минут. Если вы не запрашивали его, проигнорируйте это сообщение.",
+		hoursUnavailable:       "Часы работы пока не указаны.",
+		hoursNoDaysHeader:      "Часы работы:",
+		addressUnavailable:     "Адрес пока не указан.",
+		catalogUnavailable:     "Не удалось получить список разделов.",
+		catalogEmpty:           "Разделов пока нет.",
+		catalogHeader:          "Разделы:",
 
 		dayNames: map[string]string{
 			"mon": "Понедельник", "tue": "Вторник", "wed": "Среда", "thu": "Четверг",
@@ -67,19 +76,22 @@ var textsByLocale = map[string]texts{
 		},
 	},
 	"en": {
-		greeting:             "Hello! I'm the Telegram assistant for \"%s\". Ask me about products, prices, availability, opening hours, address and contacts.\n\nCommands: /hours — opening hours, /address — address, /catalog — categories.",
-		unknownCommand:       "I didn't understand that command. Try /hours, /address or /catalog, or just type your question.",
-		rateLimited:          "You've reached the hourly question limit. Please write again in a little while.",
-		fallback:             "I can only help with %s's products, prices, availability, opening hours, address and contacts.",
-		startLinkUnavailable: "Account linking isn't available in the bot yet.",
-		startLinkFailed:      "That code could not be confirmed. Get a new one from the admin panel.",
-		startLinkSuccess:     "Your Telegram account is now linked.",
-		hoursUnavailable:     "Opening hours aren't published yet.",
-		hoursNoDaysHeader:    "Opening hours:",
-		addressUnavailable:   "The address isn't published yet.",
-		catalogUnavailable:   "Could not load the category list.",
-		catalogEmpty:         "No categories yet.",
-		catalogHeader:        "Categories:",
+		greeting:               "Hello! I'm the Telegram assistant for \"%s\". Ask me about products, prices, availability, opening hours, address and contacts.\n\nCommands: /hours — opening hours, /address — address, /catalog — categories.",
+		unknownCommand:         "I didn't understand that command. Try /hours, /address or /catalog, or just type your question.",
+		rateLimited:            "You've reached the hourly question limit. Please write again in a little while.",
+		fallback:               "I can only help with %s's products, prices, availability, opening hours, address and contacts.",
+		startLinkUnavailable:   "Account linking isn't available in the bot yet.",
+		startLinkFailed:        "That code could not be confirmed. Get a new one from the admin panel.",
+		startLinkSuccess:       "Your Telegram account is now linked.",
+		startLinkAlreadyLinked: "This Telegram account is already linked to a different user.",
+		startLinkRateLimited:   "Too many attempts. Please try again in a little while.",
+		otpMessage:             "Your Savdo code: %s. Valid 5 minutes. If you did not request it, ignore this message.",
+		hoursUnavailable:       "Opening hours aren't published yet.",
+		hoursNoDaysHeader:      "Opening hours:",
+		addressUnavailable:     "The address isn't published yet.",
+		catalogUnavailable:     "Could not load the category list.",
+		catalogEmpty:           "No categories yet.",
+		catalogHeader:          "Categories:",
 
 		dayNames: map[string]string{
 			"mon": "Monday", "tue": "Tuesday", "wed": "Wednesday", "thu": "Thursday",
