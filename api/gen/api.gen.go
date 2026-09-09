@@ -6306,6 +6306,20 @@ func (response ResetPassword401JSONResponse) VisitResetPasswordResponse(w http.R
 	return err
 }
 
+type ResetPassword429JSONResponse struct{ RateLimitedJSONResponse }
+
+func (response ResetPassword429JSONResponse) VisitResetPasswordResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListSessionsRequestObject struct {
 	Params ListSessionsParams
 }

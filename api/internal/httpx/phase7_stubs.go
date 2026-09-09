@@ -10,17 +10,18 @@ import (
 
 // This file is a placeholder: it exists only so gen.StrictServerInterface
 // is fully implemented (and `go build ./...`/`make verify` stay green)
-// between T3, which adds the ten operations below to
-// contracts/openapi.yaml, and T4/T5, which give them real handlers backed
-// by internal/auth (the four `/auth/telegram*`, `/auth/otp/*` and
-// `/auth/password/reset` operations, plus the three `/auth/telegram/link`
-// operations) and internal/bot (the webhook and the two
-// `/bot/conversations*` read operations). Every method here does the same
-// one thing — answer notImplemented() — and carries no business logic;
-// whichever task implements an operation deletes that operation's stub
-// from this file and adds a real one in the owning module's handler.go
-// (router.go's server struct gains the corresponding field/embed the same
-// way the other modules already do).
+// until T4 gives the three operations below real handlers backed by
+// internal/bot (the webhook and the two `/bot/conversations*` read
+// operations). The seven `/auth/telegram*`, `/auth/otp/*` and
+// `/auth/password/reset` operations this file used to stub are now real
+// (internal/auth/handler_telegram.go, handler_otp.go), forwarded the same
+// way the rest of auth's operations are — via router.go's embedded
+// *auth.Handler. Every method here does the same one thing — answer
+// notImplemented() — and carries no business logic; whichever task
+// implements an operation deletes that operation's stub from this file
+// and adds a real one in the owning module's handler.go (router.go's
+// server struct gains the corresponding field/embed the same way the
+// other modules already do).
 //
 // notImplemented is a 501 built directly as an *apierr.Error literal
 // rather than through a new apierr helper: 501 has no ErrorCode of its
@@ -39,43 +40,6 @@ func notImplemented() error {
 		Code:    gen.INTERNAL,
 		Details: map[string]any{"reason": "not_implemented"},
 	}
-}
-
-// RequestOtp — TODO(T4): internal/auth, OTP delivered via the bot to the
-// username's linked Telegram account (docs/05-API.md § Auth).
-func (server) RequestOtp(_ context.Context, _ gen.RequestOtpRequestObject) (gen.RequestOtpResponseObject, error) {
-	return nil, notImplemented()
-}
-
-// VerifyOtp — TODO(T4): internal/auth.
-func (server) VerifyOtp(_ context.Context, _ gen.VerifyOtpRequestObject) (gen.VerifyOtpResponseObject, error) {
-	return nil, notImplemented()
-}
-
-// ResetPassword — TODO(T4): internal/auth.
-func (server) ResetPassword(_ context.Context, _ gen.ResetPasswordRequestObject) (gen.ResetPasswordResponseObject, error) {
-	return nil, notImplemented()
-}
-
-// AuthenticateTelegram — TODO(T4): internal/auth, Telegram Login Widget
-// HMAC verification against TELEGRAM_BOT_TOKEN (ADR-005).
-func (server) AuthenticateTelegram(_ context.Context, _ gen.AuthenticateTelegramRequestObject) (gen.AuthenticateTelegramResponseObject, error) {
-	return nil, notImplemented()
-}
-
-// DeleteTelegramLink — TODO(T4): internal/auth.
-func (server) DeleteTelegramLink(_ context.Context, _ gen.DeleteTelegramLinkRequestObject) (gen.DeleteTelegramLinkResponseObject, error) {
-	return nil, notImplemented()
-}
-
-// GetTelegramLink — TODO(T4): internal/auth.
-func (server) GetTelegramLink(_ context.Context, _ gen.GetTelegramLinkRequestObject) (gen.GetTelegramLinkResponseObject, error) {
-	return nil, notImplemented()
-}
-
-// CreateTelegramLink — TODO(T4): internal/auth.
-func (server) CreateTelegramLink(_ context.Context, _ gen.CreateTelegramLinkRequestObject) (gen.CreateTelegramLinkResponseObject, error) {
-	return nil, notImplemented()
 }
 
 // ListBotConversations — TODO(T5): internal/bot, manager+

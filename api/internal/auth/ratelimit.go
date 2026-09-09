@@ -7,15 +7,19 @@ import (
 	"time"
 )
 
-// rateWindow is the fixed one-minute window a loginLimiter counts
-// attempts in. docs/03-ARCHITECTURE.md § Cross-cutting: "Rate limiting:
-// login and OTP endpoints per IP and per username".
+// rateWindow is the fixed one-minute window newLoginLimiter's default
+// (login's own) limiter counts attempts in. docs/03-ARCHITECTURE.md §
+// Cross-cutting: "Rate limiting: login and OTP endpoints per IP and per
+// username" — OTP's own limiters (otp.go's otpRateWindow, 15 minutes) use
+// newWindowedLimiter instead, the same type with a longer window.
 const rateWindow = time.Minute
 
 // staleAfter bounds how long a key's window is kept once it has expired,
 // so evict actually shrinks the map instead of merely resetting counts —
 // otherwise every IP or username Login ever saw would stay in memory for
-// the life of the process.
+// the life of the process. This is login's own default; a loginLimiter
+// built with newWindowedLimiter scales the same 2x factor off its own
+// window instead (the stale field below).
 const staleAfter = 2 * rateWindow
 
 // maxKeyLen bounds how much of a caller-supplied key (a username; an IP
@@ -59,6 +63,8 @@ const (
 type loginLimiter struct {
 	mu        sync.Mutex
 	limit     int
+	perWindow time.Duration // the fixed window this instance counts attempts in
+	stale     time.Duration // how long a key's window is kept once expired (2x perWindow)
 	counts    map[string]*window
 	lastEvict time.Time
 }
@@ -69,11 +75,25 @@ type window struct {
 }
 
 // newLoginLimiter builds a limiter allowing at most limit attempts per key
-// per rateWindow. limit <= 0 is treated as "never allow" rather than
-// "unlimited" — a zero-value config.Config (as a test's dummy *Service
-// might use) must fail closed, not open.
+// per rateWindow (login's own one-minute window). limit <= 0 is treated as
+// "never allow" rather than "unlimited" — a zero-value config.Config (as a
+// test's dummy *Service might use) must fail closed, not open.
 func newLoginLimiter(limit int) *loginLimiter {
-	return &loginLimiter{limit: limit, counts: map[string]*window{}}
+	return newWindowedLimiter(limit, rateWindow)
+}
+
+// newWindowedLimiter is newLoginLimiter generalized to an arbitrary
+// window: otp.go's RequestOtp/VerifyOtp rate limits
+// (docs/03-ARCHITECTURE.md § Cross-cutting: "login and OTP endpoints per
+// IP and per username") need a longer window (15 minutes) than login's
+// own one-minute rateWindow, but share every other mechanic — fixed-window
+// counting, throttled eviction, key bounding — with loginLimiter, so this
+// is the same type parameterized by window rather than a second copy of
+// it. stale scales the same 2x factor staleAfter uses for login's default
+// window: long enough that evict never drops a key while it could still
+// matter, short enough the map doesn't hold every key forever.
+func newWindowedLimiter(limit int, win time.Duration) *loginLimiter {
+	return &loginLimiter{limit: limit, perWindow: win, stale: 2 * win, counts: map[string]*window{}}
 }
 
 // allow records one attempt for key at now and reports whether it is
@@ -93,17 +113,17 @@ func (l *loginLimiter) allow(key string, now time.Time) (ok bool, retryAfter tim
 	}
 
 	if l.limit <= 0 {
-		return false, rateWindow
+		return false, l.perWindow
 	}
 
 	w, exists := l.counts[key]
-	if !exists || now.Sub(w.start) >= rateWindow {
+	if !exists || now.Sub(w.start) >= l.perWindow {
 		l.counts[key] = &window{start: now, count: 1}
 		return true, 0
 	}
 
 	if w.count >= l.limit {
-		return false, rateWindow - now.Sub(w.start)
+		return false, l.perWindow - now.Sub(w.start)
 	}
 
 	w.count++
@@ -128,7 +148,7 @@ func (l *loginLimiter) shouldEvict(now time.Time) bool {
 // since it is an O(n) scan of the whole map.
 func (l *loginLimiter) evict(now time.Time) {
 	for key, w := range l.counts {
-		if now.Sub(w.start) >= staleAfter {
+		if now.Sub(w.start) >= l.stale {
 			delete(l.counts, key)
 		}
 	}

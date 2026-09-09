@@ -75,7 +75,7 @@ func newMediaTestFixture(t *testing.T, maxBytes int64) mediaTestFixture {
 		LoginRateUserPerMin: 1000,
 		CookieSecure:        true,
 	}
-	authSvc := auth.NewService(q, cfg, shopRow.ID)
+	authSvc := auth.NewService(pool, q, cfg, shopRow.ID)
 	shopSvc := shop.NewService(pool, q)
 
 	mediaDir := t.TempDir()

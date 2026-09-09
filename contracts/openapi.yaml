@@ -365,6 +365,8 @@ paths:
           $ref: "#/components/responses/ValidationFailed"
         "401":
           $ref: "#/components/responses/Unauthenticated"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /auth/telegram/link:
     post:

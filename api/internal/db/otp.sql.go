@@ -64,10 +64,12 @@ type ExpireOTPCodesParams struct {
 }
 
 // Issuing a fresh code for the same (user, purpose) invalidates every
-// still-active one first (D-06): only one code is ever checkable at a
-// time. Already-expired-but-unused rows are also marked used here — they
-// are dead either way, and this keeps GetActiveOTPCode's "at most one
-// live row" invariant simple to reason about.
+// still-active one first: only one code is ever checkable at a time
+// ("new code invalidates old" — a service-level rule, not itself an owner
+// decision; D-06 is only "Telegram delivery, no SMS"). Already-expired-
+// but-unused rows are also marked used here — they are dead either way,
+// and this keeps GetActiveOTPCode's "at most one live row" invariant
+// simple to reason about.
 func (q *Queries) ExpireOTPCodes(ctx context.Context, arg ExpireOTPCodesParams) (int64, error) {
 	result, err := q.db.Exec(ctx, expireOTPCodes, arg.ShopID, arg.UserID, arg.Purpose)
 	if err != nil {
@@ -92,8 +94,8 @@ type GetActiveOTPCodeParams struct {
 
 // Newest unused, unexpired code for a (user, purpose) pair — the one the
 // service checks the submitted code against. "Newest" matters because
-// ExpireOTPCodes marks every earlier active code used when a new one is
-// issued (D-06's "new code invalidates old"), but this query does not
+// ExpireOTPCodes (below) marks every earlier active code used when a new
+// one is issued ("new code invalidates old"), but this query does not
 // depend on that having run: it would still pick the most recently
 // created active row even if two somehow existed at once.
 func (q *Queries) GetActiveOTPCode(ctx context.Context, arg GetActiveOTPCodeParams) (OtpCode, error) {

@@ -235,6 +235,8 @@ Amended 2026-09-06 (D-87): draft sales live in separate mutable tables `sale_dra
   required values fail fast.
 - **Health**: `GET /healthz` (process) and `GET /readyz` (DB reachable).
 - **Rate limiting**: login and OTP endpoints per IP and per username; bot per chat.
+  Password reset (`POST /auth/password/reset`) and Telegram link completion share
+  login's per-IP budget, the latter keyed by Telegram user id (D-118).
 - **Time**: everything UTC in DB; shop timezone (`Asia/Tashkent`) applied only for
   display and for "today" in reports.
 - **IDs**: UUID v7 (time-ordered) generated in Go.
