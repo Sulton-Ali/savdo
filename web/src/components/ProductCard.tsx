@@ -50,7 +50,7 @@ export function ProductCard({
       )}
       <span className="line-clamp-2 font-medium text-text">{product.name}</span>
       <PriceTag price={product.price} currency={currency} />
-      <AvailabilityBadge value={product.availability} />
+      <AvailabilityBadge value={product.availability} className="self-start" />
     </Link>
   );
 }
