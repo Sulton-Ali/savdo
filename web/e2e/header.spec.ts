@@ -61,3 +61,28 @@ for (const viewport of VIEWPORTS) {
     expect(await telegramLink.getAttribute("target")).toBe("_blank");
   });
 }
+
+/**
+ * phase-7.5 T4 polish: the header must stay a single sticky row at phone
+ * width (the design canvas's `BMobile.dc.html` header block, ~70px) rather
+ * than the three-row, ~175px stack the wrapping catalog/about `nav` used to
+ * cause at 390px — and that `nav` reappears at desktop. The catalog nav is
+ * the first `<nav>` inside `<header>` (the language switcher is the
+ * second, with its own `aria-label`); `.first()` is scoped that way rather
+ * than to translated link text, so this test does not depend on locale.
+ */
+test("header is a single row and hides the catalog nav on a phone, shows it on desktop", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/uz");
+  const header = page.locator("header");
+  const catalogNav = header.locator("nav").first();
+  await expect(catalogNav).toBeHidden();
+  const phoneBox = await header.boundingBox();
+  expect(phoneBox).not.toBeNull();
+  expect(phoneBox?.height ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(80);
+
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expect(catalogNav).toBeVisible();
+});
