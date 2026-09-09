@@ -32,6 +32,13 @@ import (
 	"github.com/Sulton-Ali/savdo/api/internal/stock"
 )
 
+// botShutdownTimeout bounds how long run() waits (botSvc.Close, MAJOR 2)
+// for an already-dispatched webhook turn to finish before closing the
+// database pool anyway — generous relative to chat.go's own worst case
+// (5 rounds * 45s chatCallTimeout), but not unbounded: a wedged turn
+// must not hold process shutdown open forever.
+const botShutdownTimeout = 30 * time.Second
+
 func main() {
 	if err := run(); err != nil {
 		slog.Error("api exited with error", "error", err)
@@ -164,7 +171,16 @@ func run() error {
 		PriceInputPerMTok: cfg.AIPriceInputPerMTok, PriceOutputPerMTok: cfg.AIPriceOutputPerMTok,
 	})
 	if err != nil {
-		return fmt.Errorf("init ai client: %w", err)
+		// MINOR 6: consistent with every other bot-adjacent
+		// misconfiguration in this block (a bad PUBLIC_SHOP_SLUG, an
+		// unreachable Telegram Bot API) — never cmd/api's own startup. A
+		// provider that fails to build (e.g. AI_PROVIDER=gemini, O-29's own
+		// "registered but not built") degrades only the bot's own free-text
+		// answers, through unavailableAIClient, to O-24's normal static
+		// fallback until the config is fixed — unlike cmd/bot, whose only
+		// job is running the bot and which still fails fast on this.
+		logger.Warn("failed to init the ai client; the bot will answer free-text questions statically until fixed", "error", err)
+		aiClient = unavailableAIClient{}
 	}
 	// botShopRow resolves PUBLIC_SHOP_SLUG (bot.Config.ShopID's own doc
 	// comment: the bot answers for the same shop the public landing
@@ -244,6 +260,20 @@ func run() error {
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			return err
 		}
+
+		// MAJOR 2: HandleBotWebhook only ever acknowledges 200 and hands
+		// off to botSvc.Dispatch's own background goroutine (internal/
+		// httpx.HandleBotWebhook's own doc comment) — srv.Shutdown draining
+		// in-flight HTTP requests says nothing about those. Wait for them
+		// here, on their own bound (independent of shutdownCtx above, which
+		// srv.Shutdown may already have spent most of), before pool.Close()
+		// (deferred earlier) runs out from under a turn that already billed
+		// a real LLM call and is only waiting to persist it.
+		botShutdownCtx, botCancel := context.WithTimeout(context.Background(), botShutdownTimeout)
+		defer botCancel()
+		if err := botSvc.Close(botShutdownCtx); err != nil {
+			logger.Warn("bot: graceful shutdown timed out; some in-flight turns may not have finished", "error", err)
+		}
 		return <-serveErr
 	}
 }
@@ -272,4 +302,20 @@ func validateBotWebhookConfig(cfg config.Config) error {
 		return errors.New("BOT_WEBHOOK_SECRET is set but TELEGRAM_BOT_TOKEN is empty; the webhook could never send a reply")
 	}
 	return nil
+}
+
+// unavailableAIClient is cmd/api's own fallback for botSvc's ai.Client
+// when ai.New itself fails (MINOR 6: e.g. AI_PROVIDER=gemini, O-29's own
+// "registered but not built") — every Chat call reports
+// ai.ErrProviderUnavailable, which internal/bot's own runFreeText
+// already treats as a normal "answer statically" outcome (O-24), the
+// same path a real provider's own transient failure takes. This is
+// deliberately not a bare nil ai.Client: a nil interface's method call
+// panics (dispatchOne's own recover, internal/bot/dispatch.go, would
+// catch it, but the customer would then get silence instead of O-24's
+// normal fallback reply).
+type unavailableAIClient struct{}
+
+func (unavailableAIClient) Chat(context.Context, ai.Request) (ai.Response, error) {
+	return ai.Response{}, ai.ErrProviderUnavailable
 }

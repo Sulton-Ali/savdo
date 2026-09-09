@@ -1,8 +1,11 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"testing"
 
+	"github.com/Sulton-Ali/savdo/api/internal/ai"
 	"github.com/Sulton-Ali/savdo/api/internal/config"
 )
 
@@ -30,5 +33,19 @@ func TestValidateBotWebhookConfig(t *testing.T) {
 				t.Fatalf("validateBotWebhookConfig() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+// TestUnavailableAIClient_reportsProviderUnavailable pins MINOR 6:
+// cmd/api's own ai.New-failure fallback must satisfy ai.Client and
+// report ai.ErrProviderUnavailable — the error class internal/bot's own
+// runFreeText already treats as a normal "answer statically" outcome
+// (O-24), so a bad AI_PROVIDER value degrades the bot's free-text
+// answers, never cmd/api's own startup.
+func TestUnavailableAIClient_reportsProviderUnavailable(t *testing.T) {
+	var client ai.Client = unavailableAIClient{}
+	_, err := client.Chat(context.Background(), ai.Request{})
+	if !errors.Is(err, ai.ErrProviderUnavailable) {
+		t.Fatalf("Chat() error = %v, want ai.ErrProviderUnavailable", err)
 	}
 }

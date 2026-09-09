@@ -35,6 +35,7 @@ package bot
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -177,9 +178,26 @@ type Service struct {
 	// dispatchOne — HandleUpdate itself remains synchronous and knows
 	// nothing about any of this, which is what every existing test calling
 	// it directly still relies on.
-	sem       chan struct{}
-	chatLocks *chatLockTable
-	seen      *seenUpdates
+	sem        chan struct{}
+	queueSlots chan struct{} // bounds maxQueuedUpdates (MINOR 2), acquired in Dispatch before spawning a goroutine
+	chatLocks  *chatLockTable
+	seen       *seenUpdates
+
+	// baseCtx is the context every dispatchOne goroutine runs
+	// HandleUpdate under — never context.Background() directly, so Close
+	// (dispatch.go) can force-cancel every still-running turn if its own
+	// shutdown deadline is reached (MAJOR 2). baseCancel is called
+	// exactly once, by Close.
+	baseCtx    context.Context
+	baseCancel context.CancelFunc
+
+	// shutdownMu guards shuttingDown and wg.Add together as one atomic
+	// step (dispatch.go's own Dispatch/Close doc comments): Close must
+	// never observe wg's count reach zero while a Dispatch call that
+	// already decided to proceed has not yet called wg.Add.
+	shutdownMu   sync.Mutex
+	shuttingDown bool
+	wg           sync.WaitGroup
 }
 
 // NewService builds a Service. now and logger may be nil (time.Now and
@@ -199,14 +217,18 @@ func NewService(pool *pgxpool.Pool, q *db.Queries, aiClient ai.Client, pub *publ
 	if sender == nil {
 		sender = nilSender{}
 	}
+	baseCtx, baseCancel := context.WithCancel(context.Background())
 	return &Service{
 		pool: pool, q: q, ai: aiClient, pub: pub, content: contentSvc,
 		sender: sender, linker: linker, cfg: cfg, now: now, logger: logger,
-		priceIn:   parsePriceOrZero(cfg.PriceInputPerMTok, logger, "PriceInputPerMTok"),
-		priceOut:  parsePriceOrZero(cfg.PriceOutputPerMTok, logger, "PriceOutputPerMTok"),
-		sem:       make(chan struct{}, maxInFlightUpdates),
-		chatLocks: newChatLockTable(),
-		seen:      newSeenUpdates(maxSeenUpdateIDs),
+		priceIn:    parsePriceOrZero(cfg.PriceInputPerMTok, logger, "PriceInputPerMTok"),
+		priceOut:   parsePriceOrZero(cfg.PriceOutputPerMTok, logger, "PriceOutputPerMTok"),
+		sem:        make(chan struct{}, maxInFlightUpdates),
+		queueSlots: make(chan struct{}, maxQueuedUpdates),
+		chatLocks:  newChatLockTable(),
+		seen:       newSeenUpdates(maxSeenUpdateIDs),
+		baseCtx:    baseCtx,
+		baseCancel: baseCancel,
 	}
 }
 

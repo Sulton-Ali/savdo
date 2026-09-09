@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	telegram "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -26,6 +27,13 @@ import (
 	"github.com/Sulton-Ali/savdo/api/internal/db"
 	"github.com/Sulton-Ali/savdo/api/internal/public"
 )
+
+// botShutdownTimeout bounds how long run() waits (svc.Close, MAJOR 2)
+// for an already-dispatched turn to finish before closing the database
+// pool anyway — generous relative to chat.go's own worst case (5 rounds
+// * 45s chatCallTimeout), but not unbounded: a wedged turn must not hold
+// process shutdown open forever.
+const botShutdownTimeout = 30 * time.Second
 
 func main() {
 	if err := run(); err != nil {
@@ -108,7 +116,12 @@ func run() error {
 	// (item 8/9 of the Phase 7 T4 fix wave).
 	tgBot, err := telegram.New(cfg.TelegramBotToken,
 		telegram.WithErrorsHandler(func(err error) {
-			logger.Error("telegram bot error", "error", err)
+			// MINOR 5: the SDK hands this handler its own HTTP/decode error,
+			// which for some failures (a malformed request the Bot API
+			// rejected) can echo request content back in its own message —
+			// log the type only, like logProviderError/logWriteError
+			// (internal/bot).
+			logger.Error("telegram bot error", "error_type", fmt.Sprintf("%T", err))
 		}),
 		telegram.WithNotAsyncHandlers(),
 	)
@@ -122,6 +135,20 @@ func run() error {
 			PriceInputPerMTok: cfg.AIPriceInputPerMTok, PriceOutputPerMTok: cfg.AIPriceOutputPerMTok,
 			DailyTokenBudget: cfg.AIDailyTokenBudget,
 		}, nil, logger)
+	// MAJOR 2: Dispatch's own goroutines run under svc's baseCtx, not this
+	// function's own ctx (internal/bot/service.go's own doc comment), so
+	// they keep running past tgBot.Start(ctx) returning on SIGTERM —
+	// svc.Close waits (bounded by botShutdownTimeout) for every already-
+	// accepted turn to finish persisting before pool.Close() (deferred
+	// above) runs out from under it; this defer is registered *after*
+	// pool.Close()'s own, so it runs first on unwind (LIFO).
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), botShutdownTimeout)
+		defer cancel()
+		if err := svc.Close(shutdownCtx); err != nil {
+			logger.Warn("bot: graceful shutdown timed out; some in-flight turns may not have finished", "error", err)
+		}
+	}()
 
 	// Customer mode only (D-111): every update reaches Dispatch, which
 	// itself ignores anything HandleUpdate would (a non-text message) —

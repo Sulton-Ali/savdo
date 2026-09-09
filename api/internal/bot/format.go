@@ -15,6 +15,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Sulton-Ali/savdo/api/internal/db"
 )
@@ -48,7 +49,11 @@ func absoluteMediaURL(siteURL, path string) string {
 }
 
 // telegramCaptionMaxLen is Telegram's own limit on a sendPhoto caption's
-// length (Bot API docs, `caption`: 0-1024 characters).
+// length (Bot API docs, `caption`: 0-1024 characters) — characters, not
+// bytes: len(string) counts UTF-8 bytes, which would cap a Cyrillic or
+// other multi-byte-per-rune answer at roughly a third of what Telegram
+// itself actually allows (MINOR 3), wrongly forcing the two-message
+// fallback for an answer that would have fit as a caption.
 const telegramCaptionMaxLen = 1024
 
 // sendAnswer sends outcome to chatID: D-116's product photo when
@@ -65,7 +70,7 @@ func (s *Service) sendAnswer(ctx context.Context, shop db.Shop, chatID int64, ou
 	if outcome.Photo != nil && outcome.Photo.CoverURL != "" {
 		url := absoluteMediaURL(s.cfg.SiteURL, outcome.Photo.CoverURL)
 		caption, sendTextAfter := outcome.Text, false
-		if len(caption) > telegramCaptionMaxLen {
+		if utf8.RuneCountInString(caption) > telegramCaptionMaxLen {
 			caption, sendTextAfter = "", true
 		}
 		if err := s.sender.SendPhoto(ctx, chatID, url, caption); err == nil {

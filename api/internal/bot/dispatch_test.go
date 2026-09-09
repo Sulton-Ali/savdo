@@ -2,6 +2,7 @@ package bot_test
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/go-telegram/bot/models"
 	"github.com/google/uuid"
 
+	"github.com/Sulton-Ali/savdo/api/internal/ai"
 	"github.com/Sulton-Ali/savdo/api/internal/bot"
 	"github.com/Sulton-Ali/savdo/api/internal/db"
 )
@@ -175,5 +177,151 @@ func TestDispatch_sameChatSerialized(t *testing.T) {
 	}
 	if got := atomic.LoadInt32(&sender.peak); got != 1 {
 		t.Fatalf("peak concurrent SendMessage calls for one chat = %d, want 1 (updates for the same chat must never overlap)", got)
+	}
+}
+
+// blockingAIClient blocks Chat until release is closed — MAJOR 2's own
+// "Close waits for an in-flight turn" test needs a turn it can hold
+// open on demand. started is closed exactly once, the first time Chat is
+// entered, so the test can wait until the turn has actually reached the
+// (simulated) LLM call before it starts asserting anything about Close.
+type blockingAIClient struct {
+	release     chan struct{}
+	started     chan struct{}
+	startedOnce sync.Once
+}
+
+func (c *blockingAIClient) Chat(ctx context.Context, _ ai.Request) (ai.Response, error) {
+	c.startedOnce.Do(func() { close(c.started) })
+	select {
+	case <-c.release:
+	case <-ctx.Done():
+		return ai.Response{}, ctx.Err()
+	}
+	return ai.Response{
+		Text: "Yes, in stock.", StopReason: "end_turn",
+		Usage: ai.Usage{Provider: "anthropic", Model: "claude-sonnet-5", InputTokens: 5, OutputTokens: 5},
+	}, nil
+}
+
+// TestServiceClose_waitsForInFlightTurn pins MAJOR 2: Close blocks until
+// an already-dispatched, still-running turn finishes — never returning
+// early just because its own shutdown deadline has not yet been
+// reached, which would let a caller (cmd/bot/main.go, cmd/api/main.go)
+// close the database pool out from under a turn that is only waiting to
+// persist an already-billed LLM call.
+func TestServiceClose_waitsForInFlightTurn(t *testing.T) {
+	env := newTestEnv(t, nil)
+	client := &blockingAIClient{release: make(chan struct{}), started: make(chan struct{})}
+	svc := bot.NewService(env.pool, env.q, client, env.pub, env.content, env.sender, nil, env.cfg, env.clock.now, testLogger())
+
+	svc.Dispatch(updateWithID(1, 70, 700, "alice", "uz", "Do you have shoes?"))
+	select {
+	case <-client.started:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("the dispatched turn never reached Chat")
+	}
+
+	closeErr := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		closeErr <- svc.Close(ctx)
+	}()
+
+	select {
+	case <-closeErr:
+		t.Fatalf("Close returned before the in-flight turn finished")
+	case <-time.After(150 * time.Millisecond):
+		// still blocked, as expected
+	}
+
+	close(client.release) // let the turn finish
+
+	select {
+	case err := <-closeErr:
+		if err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("Close did not return after the in-flight turn finished")
+	}
+}
+
+// TestDispatch_afterClose_rejected pins MAJOR 2's other half: once Close
+// has begun, a later Dispatch call is rejected outright — no new
+// conversation/message row is ever created for it.
+func TestDispatch_afterClose_rejected(t *testing.T) {
+	env := newTestEnv(t, noChatClient())
+	svc := bot.NewService(env.pool, env.q, noChatClient(), env.pub, env.content, env.sender, nil, env.cfg, env.clock.now, testLogger())
+
+	if err := svc.Close(context.Background()); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	const chatID = int64(71)
+	svc.Dispatch(updateWithID(1, chatID, 710, "alice", "uz", "/start"))
+
+	time.Sleep(150 * time.Millisecond) // give a wrongly-accepted dispatch a chance to run
+	if _, err := env.q.GetBotConversationByChat(context.Background(), db.GetBotConversationByChatParams{ShopID: env.shop.ID, TelegramChatID: chatID}); err == nil {
+		t.Fatalf("want no conversation created — Dispatch after Close must be rejected")
+	}
+}
+
+// delaySender sleeps delay on every SendMessage/SendPhoto call — MINOR
+// 1's own "one chat's backlog must not starve another chat" test uses
+// this to keep a chat's own dispatchOne goroutines busy long enough to
+// observe whether a second chat's update has to wait behind them.
+type delaySender struct{ delay time.Duration }
+
+func (d delaySender) SendMessage(context.Context, int64, string) error {
+	time.Sleep(d.delay)
+	return nil
+}
+func (d delaySender) SendPhoto(context.Context, int64, string, string) error {
+	time.Sleep(d.delay)
+	return nil
+}
+
+// TestDispatch_oneChatBacklogDoesNotStarveAnotherChat pins MINOR 1: the
+// per-chat lock is acquired *before* Service.sem (dispatch.go), so a
+// single chat's own backlog of updates can occupy at most one of
+// maxInFlightUpdates' global slots at a time — the rest block on that
+// chat's own mutex, never touching the semaphore — leaving the other
+// slots free for a second chat's update to run immediately instead of
+// queueing behind the first chat's entire backlog. chatA sends more
+// than maxInFlightUpdates (8) updates on purpose: with the semaphore
+// acquired first (the bug this pins), all 8 slots fill with chatA's own
+// goroutines immediately and chatB's own update queues behind chatA's
+// *entire* backlog draining one turn at a time; with the chat lock
+// acquired first (the fix), only one of chatA's goroutines ever touches
+// the semaphore at a time, so chatB's own update always finds a free
+// slot immediately regardless of how deep chatA's backlog is.
+func TestDispatch_oneChatBacklogDoesNotStarveAnotherChat(t *testing.T) {
+	env := newTestEnv(t, noChatClient())
+	const perSendDelay = 150 * time.Millisecond
+	svc := bot.NewService(env.pool, env.q, noChatClient(), env.pub, env.content, delaySender{delay: perSendDelay}, nil, env.cfg, env.clock.now, testLogger())
+
+	const chatA = int64(80)
+	const chatABacklog = 12 // > maxInFlightUpdates (8), see doc comment above
+	for i := 0; i < chatABacklog; i++ {
+		svc.Dispatch(updateWithID(100+i, chatA, 800+int64(i), "alice", "uz", "/hours"))
+	}
+	// Give chat A's own backlog a moment to actually start occupying
+	// dispatchOne goroutines before chat B's update is dispatched.
+	time.Sleep(30 * time.Millisecond)
+
+	const chatB = int64(81)
+	start := time.Now()
+	svc.Dispatch(updateWithID(200, chatB, 810, "bob", "uz", "/address"))
+	waitForConversation(t, env, chatB)
+	elapsed := time.Since(start)
+
+	// A free slot regardless of ordering must exist within roughly one
+	// send's worth of time (the first chatA turn to finish); the bug this
+	// pins instead makes chatB wait for several chatA turns to drain
+	// (multiple times perSendDelay) before a slot ever reaches it.
+	if elapsed > 3*perSendDelay {
+		t.Fatalf("chat B's update took %s, want well under chat A's own %d-deep backlog — it must run on its own free semaphore slot, not queue behind chat A's entire backlog", elapsed, chatABacklog)
 	}
 }

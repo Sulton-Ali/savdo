@@ -494,3 +494,31 @@ func TestHandleUpdate_refusalAfterToolCall_stillPersistsRealUsage(t *testing.T) 
 		t.Fatalf("OutputTokens = %v, want 17 (12 + 5)", assistant.OutputTokens)
 	}
 }
+
+// TestHandleUpdate_photoCaption_cyrillicRunesNotBytes pins MINOR 3: the
+// caption limit counts runes, not UTF-8 bytes — a 600-rune Cyrillic
+// answer is 1200 *bytes* (2 bytes/rune), over the old byte-counting
+// code's own threshold, but well under Telegram's real 1024-*character*
+// caption limit, and must still be sent as a single photo message, not
+// wrongly split into a photo-then-text pair.
+func TestHandleUpdate_photoCaption_cyrillicRunesNotBytes(t *testing.T) {
+	answer := strings.Repeat("д", 600) // 600 runes, 1200 UTF-8 bytes
+	fake := ai.NewFake(
+		toolCallResult("search_products", `{"q":"Classic"}`),
+		scriptedAnswer(answer),
+	)
+	fix := newBoundaryFixture(t, fake)
+	fix.attachCoverImage(t, "classic-shoes")
+
+	fix.env.svc.HandleUpdate(context.Background(), textUpdate(5, 100, "alice", "uz", "Do you have Classic Shoes?"))
+
+	if len(fix.env.sender.Photos) != 1 {
+		t.Fatalf("got %d photos, want exactly 1", len(fix.env.sender.Photos))
+	}
+	if fix.env.sender.Photos[0].Caption != answer {
+		t.Fatalf("photo caption = %q (len %d), want the full %d-rune answer as the caption, not split into two messages", fix.env.sender.Photos[0].Caption, len(fix.env.sender.Photos[0].Caption), len([]rune(answer)))
+	}
+	if len(fix.env.sender.Messages) != 0 {
+		t.Fatalf("Messages = %+v, want none (the answer fit as a caption)", fix.env.sender.Messages)
+	}
+}
