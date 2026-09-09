@@ -126,7 +126,7 @@ func newBotTestFixtureWithSender(t *testing.T, sender bot.Sender) botTestFixture
 		LoginRateUserPerMin: 1000,
 		CookieSecure:        true,
 	}
-	authSvc := auth.NewService(q, cfg, shopRow.ID)
+	authSvc := auth.NewService(pool, q, cfg, shopRow.ID)
 	shopSvc := shop.NewService(pool, q)
 	mediaSvc := media.NewService(q, nil, "/media", 10<<20, 2, 10)
 	catalogSvc := catalog.NewService(pool, q, "uz", "/media")
