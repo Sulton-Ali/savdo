@@ -24,6 +24,46 @@ func scriptedAnswer(text string) ai.FakeResult {
 	}}
 }
 
+// rateLimitedTextUz and fallbackTextUz mirror texts.go's own uz map
+// entries verbatim — MINOR 7's own fix: an external _test package
+// cannot call the unexported localeTexts/fallbackText this package's
+// own gate replies are built from, so these are the literal expected
+// strings, not a substring/non-empty check.
+const rateLimitedTextUz = "Bir soatda savollar soni chegarasiga yetdingiz. Iltimos, birozdan so'ng qayta yozing."
+
+func fallbackTextUz(shopName string) string {
+	return `Men faqat "` + shopName + `" do'konining mahsulotlari, narxlari, mavjudligi, ish vaqti, manzili va aloqalari bo'yicha yordam bera olaman.`
+}
+
+// assertPersistedUserAndAssistant pins Sonnet/Opus MAJOR 1: a gated
+// (rate-limited/over-budget) turn must still leave both the customer's
+// own question and the static reply in the transcript (O-25's own "the
+// rate-limited message is stored"; D-114's whole retention purpose) —
+// never only the assistant row with no question behind it.
+func assertPersistedUserAndAssistant(t *testing.T, env *testEnv, chatID int64, wantQuestion string) {
+	t.Helper()
+	convID := env.conversationID(t, chatID)
+	rows, err := env.q.ListBotMessages(context.Background(), db.ListBotMessagesParams{ShopID: env.shop.ID, ConversationID: convID, Limit: 1000})
+	if err != nil {
+		t.Fatalf("ListBotMessages: %v", err)
+	}
+	var sawUser, sawAssistant bool
+	for _, r := range rows {
+		if r.Role == db.BotMessageRoleUser && r.Content == wantQuestion {
+			sawUser = true
+		}
+		if r.Role == db.BotMessageRoleAssistant {
+			sawAssistant = true
+		}
+	}
+	if !sawUser {
+		t.Fatalf("want the user's own question %q persisted even though this turn was gated", wantQuestion)
+	}
+	if !sawAssistant {
+		t.Fatalf("want a static assistant reply persisted alongside the question")
+	}
+}
+
 // TestHandleUpdate_perChatRateLimit pins O-25: the 21st free-text turn in
 // a rolling hour gets the static rate-limited reply instead of ever
 // reaching the model — proven here by scripting zero ai.Fake results, so
@@ -47,12 +87,14 @@ func TestHandleUpdate_perChatRateLimit(t *testing.T) {
 		env.insertLLMMessage(t, convID, 10, 10)
 	}
 
-	env.svc.HandleUpdate(ctx, textUpdate(chatID, 100, "alice", "uz", "Do you have shoes?"))
+	const question = "Do you have shoes?"
+	env.svc.HandleUpdate(ctx, textUpdate(chatID, 100, "alice", "uz", question))
 
 	got := lastReply(t, env.sender.allReplyTexts())
-	if got == "" {
-		t.Fatalf("want a static rate-limited reply")
+	if got != rateLimitedTextUz {
+		t.Fatalf("reply = %q, want the exact O-24 rate-limited text %q", got, rateLimitedTextUz)
 	}
+	assertPersistedUserAndAssistant(t, env, chatID, question)
 }
 
 // TestHandleUpdate_perShopDailyBudget pins O-25's other gate: once the
@@ -69,12 +111,15 @@ func TestHandleUpdate_perShopDailyBudget(t *testing.T) {
 	convID := env.conversationID(t, chatID)
 	env.insertLLMMessage(t, convID, 60, 60) // 120 >= 100
 
-	env.svc.HandleUpdate(ctx, textUpdate(chatID, 200, "bob", "uz", "Do you have shoes?"))
+	const question = "Do you have shoes?"
+	env.svc.HandleUpdate(ctx, textUpdate(chatID, 200, "bob", "uz", question))
 
 	got := lastReply(t, env.sender.allReplyTexts())
-	if got == "" {
-		t.Fatalf("want a static over-budget reply")
+	want := fallbackTextUz(env.shop.Name) // no contacts seeded here -> no trailing contact line
+	if got != want {
+		t.Fatalf("reply = %q, want the exact O-24 fallback text %q", got, want)
 	}
+	assertPersistedUserAndAssistant(t, env, chatID, question)
 }
 
 // TestHandleUpdate_underBudgetCallsModel is the budget gate's converse:
@@ -258,9 +303,13 @@ func TestHandleUpdate_budgetCheckQueryFails_failsClosed(t *testing.T) {
 	q := dbNewWithErrorInjection(env.pool)
 	env.svc = bot.NewService(env.pool, q, ai.NewFake(), env.pub, env.content, env.sender, nil, env.cfg, env.clock.now, testLogger())
 
-	env.svc.HandleUpdate(ctx, textUpdate(chatID, 1400, "hank", "uz", "Do you have shoes?"))
+	const question = "Do you have shoes?"
+	env.svc.HandleUpdate(ctx, textUpdate(chatID, 1400, "hank", "uz", question))
 
 	if lastReply(t, env.sender.allReplyTexts()) == "" {
 		t.Fatalf("want a static fail-closed reply when the budget query itself errors")
 	}
+	// MAJOR 1: the question is persisted before the budget check ever
+	// runs, so a budget-query failure must not lose it either.
+	assertPersistedUserAndAssistant(t, env, chatID, question)
 }

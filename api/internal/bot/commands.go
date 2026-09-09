@@ -65,8 +65,8 @@ func splitCommand(text string) (cmd, payload string) {
 // through this one function.
 func (s *Service) replyStaticText(ctx context.Context, shop db.Shop, conv db.BotConversation, chatID int64, text string) {
 	provider := "static"
-	if err := s.persist(ctx, persistParams{ConversationID: conv.ID, ShopID: shop.ID, Role: db.BotMessageRoleAssistant, Content: text, Provider: &provider}); err != nil {
-		s.logger.Error("bot: persist static reply", "error", err)
+	if _, err := s.persist(ctx, persistParams{ConversationID: conv.ID, ShopID: shop.ID, Role: db.BotMessageRoleAssistant, Content: text, Provider: &provider}); err != nil {
+		logWriteError(s.logger, "bot: persist static reply", err)
 	}
 	if err := s.sender.SendMessage(ctx, chatID, text); err != nil {
 		s.logger.Error("bot: send message failed", "shop_id", shop.ID, "error", err)
@@ -83,10 +83,14 @@ func (s *Service) replyStaticText(ctx context.Context, shop db.Shop, conv db.Bot
 // rejects the redemption outright in a group/supergroup/channel — a
 // link code is a one-person credential, and "whoever sends /start
 // link_<code> next" in a group is never guaranteed to be the Telegram
-// account the owner meant to link.
+// account the owner meant to link. telegramUserID is 0 whenever the
+// triggering update carried no `from` at all (update.go's own zero
+// value for that case) — MINOR 4: a Telegram update with no sender
+// identity can never redeem a link code either, the same refusal a
+// non-private chat gets.
 func (s *Service) handleStart(ctx context.Context, shop db.Shop, conv db.BotConversation, chatID int64, locale, payload, telegramUsername string, telegramUserID int64, isPrivateChat bool) {
 	if strings.HasPrefix(payload, "link_") {
-		if !isPrivateChat {
+		if !isPrivateChat || telegramUserID == 0 {
 			s.replyStaticText(ctx, shop, conv, chatID, localeTexts(locale).startLinkFailed)
 			return
 		}

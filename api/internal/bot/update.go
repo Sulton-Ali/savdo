@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/go-telegram/bot/models"
+	"github.com/google/uuid"
 
 	"github.com/Sulton-Ali/savdo/api/internal/db"
 )
@@ -60,28 +61,42 @@ func (s *Service) HandleUpdate(ctx context.Context, update *models.Update) {
 
 	locale := resolveCommandLocale(languageCode, shop.DefaultLocale)
 
+	// Sonnet/Opus MAJOR 1: the user's own message is persisted first, on
+	// every path, before either of O-25's gates (chatRateLimited,
+	// shopOverBudget) or the command dispatch ever run — a rate-limited,
+	// over-budget, or gate-error turn must still leave its own question
+	// in the transcript (O-25's own "the rate-limited message is
+	// stored"; D-114's whole retention purpose), the same way a command
+	// always has. loadHistory (handleFreeText, chat.go) excludes this
+	// row by id instead of requiring persist to run after it, so the
+	// LLM's own prompt still never sees the current question twice.
+	userMsg, err := s.persist(ctx, persistParams{
+		ConversationID: conv.ID, ShopID: shop.ID, Role: db.BotMessageRoleUser, Content: text,
+		TelegramUsername: nilIfEmpty(telegramUsername),
+	})
+	if err != nil {
+		// The reply still goes out even if the audit write failed — a
+		// logging gap must never become a customer-visible outage
+		// (ADR-013's error handling is server-side, not this).
+		logWriteError(s.logger, "bot: persist user message", err)
+	}
+
 	if strings.HasPrefix(text, "/") {
-		// Commands never call the LLM (commands.go's own doc comment), so
-		// there is no history-ordering concern here — persist the user's
-		// own message unconditionally, same as every other role="user"
-		// row.
-		if err := s.persist(ctx, persistParams{
-			ConversationID: conv.ID, ShopID: shop.ID, Role: db.BotMessageRoleUser, Content: text,
-			TelegramUsername: nilIfEmpty(telegramUsername),
-		}); err != nil {
-			s.logger.Error("bot: persist user message", "error", err)
-		}
 		s.handleCommand(ctx, shop, conv, msg.Chat.ID, text, locale, telegramUsername, telegramUserID, isPrivateChat)
 		return
 	}
 
-	s.handleFreeText(ctx, shop, conv, msg.Chat.ID, locale, text, telegramUsername)
+	s.handleFreeText(ctx, shop, conv, msg.Chat.ID, locale, text, userMsg.ID)
 }
 
 // handleFreeText runs O-25's two gates (per-chat rate limit, then
 // per-shop daily budget) before ever calling the LLM, then the tool loop
-// itself (chat.go), persists the answer and sends it.
-func (s *Service) handleFreeText(ctx context.Context, shop db.Shop, conv db.BotConversation, chatID int64, locale, text, telegramUsername string) {
+// itself (chat.go), persists the answer and sends it. userMsgID is the
+// current turn's own already-persisted user-message row (HandleUpdate
+// persists it before either gate runs, MAJOR 1) — loadHistory excludes
+// it by id so the LLM's own prompt never replays the current question a
+// second time.
+func (s *Service) handleFreeText(ctx context.Context, shop db.Shop, conv db.BotConversation, chatID int64, locale, text string, userMsgID uuid.UUID) {
 	limited, err := s.chatRateLimited(ctx, shop.ID, conv.ID)
 	if err != nil {
 		s.logger.Error("bot: rate limit check", "error", err)
@@ -107,26 +122,11 @@ func (s *Service) handleFreeText(ctx context.Context, shop db.Shop, conv db.BotC
 		return
 	}
 
-	// Sonnet/Opus MAJOR 5's own fix: history is loaded, and only *then* is the user's
-	// own message persisted, so the current turn's question never
-	// appears twice in runFreeText's own prompt (once replayed from
-	// history, once appended as the current turn) and never wastes one
-	// of O-26's 20 history slots on itself.
-	history, err := s.loadHistory(ctx, shop.ID, conv.ID)
+	history, err := s.loadHistory(ctx, shop.ID, conv.ID, userMsgID)
 	if err != nil {
 		s.logger.Error("bot: load history", "error", err)
 		s.replyStaticText(ctx, shop, conv, chatID, fallbackText(shop.Name, locale, s.contactLine(ctx, shop.ID, locale)))
 		return
-	}
-
-	if err := s.persist(ctx, persistParams{
-		ConversationID: conv.ID, ShopID: shop.ID, Role: db.BotMessageRoleUser, Content: text,
-		TelegramUsername: nilIfEmpty(telegramUsername),
-	}); err != nil {
-		// The reply still goes out even if the audit write failed — a
-		// logging gap must never become a customer-visible outage
-		// (ADR-013's error handling is server-side, not this).
-		s.logger.Error("bot: persist user message", "error", err)
 	}
 
 	outcome := s.runFreeText(ctx, shop, locale, history, text)
@@ -137,12 +137,12 @@ func (s *Service) handleFreeText(ctx context.Context, shop db.Shop, conv db.BotC
 
 	provider, model, cost := outcome.Provider, outcome.Model, outcome.CostEstimate
 	inputTok, outputTok, latency := clampInt32(outcome.InputTokens), clampInt32(outcome.OutputTokens), clampInt32(outcome.LatencyMs)
-	if err := s.persist(ctx, persistParams{
+	if _, err := s.persist(ctx, persistParams{
 		ConversationID: conv.ID, ShopID: shop.ID, Role: db.BotMessageRoleAssistant, Content: outcome.Text,
 		ToolCalls: outcome.ToolCallsLog, Provider: &provider, Model: &model,
 		InputTokens: &inputTok, OutputTokens: &outputTok, LatencyMs: &latency, CostEstimate: &cost,
 	}); err != nil {
-		s.logger.Error("bot: persist assistant message", "error", err)
+		logWriteError(s.logger, "bot: persist assistant message", err)
 	}
 
 	s.sendAnswer(ctx, shop, chatID, outcome)
@@ -164,12 +164,12 @@ func (s *Service) replyStaticFallback(ctx context.Context, shop db.Shop, conv db
 
 	provider, model, cost := outcome.Provider, outcome.Model, outcome.CostEstimate
 	inputTok, outputTok, latency := clampInt32(outcome.InputTokens), clampInt32(outcome.OutputTokens), clampInt32(outcome.LatencyMs)
-	if err := s.persist(ctx, persistParams{
+	if _, err := s.persist(ctx, persistParams{
 		ConversationID: conv.ID, ShopID: shop.ID, Role: db.BotMessageRoleAssistant, Content: text,
 		ToolCalls: outcome.ToolCallsLog, Provider: &provider, Model: &model,
 		InputTokens: &inputTok, OutputTokens: &outputTok, LatencyMs: &latency, CostEstimate: &cost,
 	}); err != nil {
-		s.logger.Error("bot: persist assistant message", "error", err)
+		logWriteError(s.logger, "bot: persist assistant message", err)
 	}
 	if err := s.sender.SendMessage(ctx, chatID, text); err != nil {
 		s.logger.Error("bot: send message failed", "shop_id", shop.ID, "error", err)

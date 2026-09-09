@@ -101,30 +101,41 @@ func localeName(locale string) string {
 // live only in the assistant row's tool_calls jsonb, never their own
 // row), so this never needs to reconstruct a RoleTool message.
 //
-// Callers must call this *before* persisting the current turn's own user
-// message (update.go's handleFreeText does), never after: this query has
-// no way to tell "a message from an earlier turn" apart from "the
-// current turn's own message, already written" — persisting first would
-// make the current question appear twice in runFreeText's own prompt
-// (once here, once as the appended current turn) and waste one of the
-// window's 20 slots on itself (Sonnet/Opus MAJOR 5's own fix).
-func (s *Service) loadHistory(ctx context.Context, shopID, convID uuid.UUID) ([]ai.Message, error) {
+// excludeID is the current turn's own user-message row id — Sonnet/Opus
+// MAJOR 1 restored persisting that row *before* any of O-25's gates run
+// (so a rate-limited/over-budget/gate-error turn still leaves a question
+// in the transcript, O-25's own "the rate-limited message is stored",
+// D-114's retention purpose), which means it already exists in this
+// query's own window by the time the LLM path reaches here. Excluding it
+// by id — rather than reordering persist after this call again, which
+// would re-break the gated paths — keeps the current question out of
+// its own history (never replayed *and* appended a second time) without
+// ever skipping the persist those paths need. One extra row is fetched
+// over the window size so excluding it still leaves up to
+// promptWindowMessages real prior messages, not one fewer.
+func (s *Service) loadHistory(ctx context.Context, shopID, convID, excludeID uuid.UUID) ([]ai.Message, error) {
 	since := s.now().Add(-promptWindowDuration)
 	rows, err := s.q.ListRecentBotMessages(ctx, db.ListRecentBotMessagesParams{
-		ShopID: shopID, ConversationID: convID, Since: since, Limit: promptWindowMessages,
+		ShopID: shopID, ConversationID: convID, Since: since, Limit: promptWindowMessages + 1,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("bot: load history: %w", err)
 	}
 
-	history := make([]ai.Message, 0, len(rows))
+	history := make([]ai.Message, 0, promptWindowMessages)
 	for i := len(rows) - 1; i >= 0; i-- { // rows arrive newest first; replay oldest first
 		row := rows[i]
+		if row.ID == excludeID {
+			continue
+		}
 		switch row.Role {
 		case db.BotMessageRoleUser:
 			history = append(history, ai.Message{Role: ai.RoleUser, Text: row.Content})
 		case db.BotMessageRoleAssistant:
 			history = append(history, ai.Message{Role: ai.RoleAssistant, Text: row.Content})
+		}
+		if len(history) >= promptWindowMessages {
+			break
 		}
 	}
 	return history, nil

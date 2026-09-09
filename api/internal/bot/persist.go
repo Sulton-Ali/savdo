@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -162,15 +163,19 @@ type persistParams struct {
 
 // persist inserts one bot_messages row (append-only — 0022_bot_messages.
 // sql's own trigger rejects an UPDATE at the database level) and touches
-// its conversation. Errors are the caller's to log, never the customer's
-// to see: a failed audit write must not stop a reply from being sent
-// (update.go's own call sites all log-and-continue on this).
-func (s *Service) persist(ctx context.Context, p persistParams) error {
+// its conversation, returning the inserted row so a caller that needs
+// its ID (handleFreeText's own loadHistory exclusion, Sonnet/Opus MAJOR
+// 1's own fix) does not have to mint and pre-thread one itself. Errors
+// are the caller's to log — by class only, never err's own text
+// (logWriteError below) — and never the customer's to see: a failed
+// audit write must not stop a reply from being sent (update.go's own
+// call sites all log-and-continue on this).
+func (s *Service) persist(ctx context.Context, p persistParams) (db.BotMessage, error) {
 	var cost pgtype.Numeric
 	if p.CostEstimate != nil {
 		d, err := decimal.NewFromString(*p.CostEstimate)
 		if err != nil {
-			return fmt.Errorf("bot: parse cost estimate %q: %w", *p.CostEstimate, err)
+			return db.BotMessage{}, fmt.Errorf("bot: parse cost estimate %q: %w", *p.CostEstimate, err)
 		}
 		cost = money.ToNumeric(d)
 	}
@@ -181,14 +186,36 @@ func (s *Service) persist(ctx context.Context, p persistParams) error {
 		InputTokens: p.InputTokens, OutputTokens: p.OutputTokens, LatencyMs: p.LatencyMs, CostEstimate: cost,
 	})
 	if err != nil {
-		return fmt.Errorf("bot: insert message: %w", err)
+		return db.BotMessage{}, fmt.Errorf("bot: insert message: %w", err)
 	}
 
 	createdAt := msg.CreatedAt
 	if _, err := s.q.TouchBotConversation(ctx, db.TouchBotConversationParams{
 		LastMessageAt: &createdAt, TelegramUsername: p.TelegramUsername, ShopID: p.ShopID, ID: p.ConversationID,
 	}); err != nil {
-		return fmt.Errorf("bot: touch conversation: %w", err)
+		return msg, fmt.Errorf("bot: touch conversation: %w", err)
 	}
-	return nil
+	return msg, nil
+}
+
+// logWriteError logs a failed write whose own params can carry the
+// customer's or the model's raw text (persist's own Content field) by
+// error class only — never err's Error() text (MINOR 5). Some Postgres
+// errors embed a bound value in their own DETAIL clause (a unique-
+// violation's "Key (col)=(value) already exists", for one); this is the
+// same "never log request/response content itself" stance
+// logProviderError (chat.go) already takes for a provider error, applied
+// here to a database write error instead. Unwraps fully so the logged
+// type is the actual root cause (e.g. *pgconn.PgError), not just
+// whichever fmt.Errorf("...: %w", err) wrapper happened to return it.
+func logWriteError(logger *slog.Logger, msg string, err error) {
+	cause := err
+	for {
+		u := errors.Unwrap(cause)
+		if u == nil {
+			break
+		}
+		cause = u
+	}
+	logger.Error(msg, "error_type", fmt.Sprintf("%T", cause))
 }
