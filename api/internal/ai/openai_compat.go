@@ -3,6 +3,7 @@ package ai
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -178,7 +179,7 @@ func (c *openAICompatClient) Chat(ctx context.Context, req Request) (Response, e
 			slog.Default().WarnContext(ctx, "ai: openai_compat: skipping unsupported tool_call type", "error", errUnsupportedToolCallType, "type", tc.Type)
 			continue
 		}
-		out.ToolCalls = append(out.ToolCalls, ToolCall{ID: tc.ID, Name: tc.Function.Name, Input: json.RawMessage(tc.Function.Arguments)})
+		out.ToolCalls = append(out.ToolCalls, ToolCall{ID: encodeToolCallID(tc), Name: tc.Function.Name, Input: json.RawMessage(tc.Function.Arguments)})
 	}
 	return out, nil
 }
@@ -221,6 +222,62 @@ type openAIToolCall struct {
 	ID       string                 `json:"id"`
 	Type     string                 `json:"type"`
 	Function openAIToolCallFunction `json:"function"`
+	// ExtraContent is an opaque provider extension attached to a
+	// tool_calls entry that some OpenAI-compatible backends require
+	// echoed back verbatim on the next round's replayed assistant
+	// message — Gemini's own openai-compat endpoint rejects a replay
+	// that omits it with "Function call is missing a thought_signature
+	// in functionCall parts" (400 INVALID_ARGUMENT, captured live).
+	// Never inspected, only round-tripped byte for byte via
+	// encodeToolCallID/decodeToolCallID, since this package has no
+	// reason to know what any provider puts in it.
+	ExtraContent json.RawMessage `json:"extra_content,omitempty"`
+}
+
+// toolCallIDSeparator joins a tool_calls entry's own id with any
+// ExtraContent a provider attached to it (encodeToolCallID). ASCII unit
+// separator: not a character any provider's own id is expected to
+// contain, and never produced by this client's own id generation (it
+// never generates one — ids are always the provider's).
+const toolCallIDSeparator = '\x1f'
+
+// encodeToolCallID folds tc's own id and ExtraContent (if any) into the
+// single string this file hands the rest of the package back as
+// ai.ToolCall.ID. ai.ToolCall is shared by every provider (ADR-009), so
+// it has no field for a provider-specific extension; the caller
+// (internal/bot/chat.go) already treats a ToolCall's ID as an opaque
+// token it only ever echoes back unmodified as a ToolResult.CallID
+// (bot/tools.go's toolOK/toolErrorResult never parse or display it, and
+// it is never persisted — toolCallRecord carries Name/Input/Result, not
+// ID) — so smuggling ExtraContent through it here, and reversing that in
+// decodeToolCallID below when this file builds the next request, is
+// safe and needs no shared state or new field anywhere else.
+func encodeToolCallID(tc openAIToolCall) string {
+	if len(tc.ExtraContent) == 0 {
+		return tc.ID
+	}
+	return tc.ID + string(toolCallIDSeparator) + base64.RawURLEncoding.EncodeToString(tc.ExtraContent)
+}
+
+// decodeToolCallID reverses encodeToolCallID: realID is what the provider
+// itself issued (goes in the wire request's "id" or "tool_call_id");
+// extra is the ExtraContent to echo back on a replayed assistant
+// tool_calls entry, or nil when there was none (a provider that never
+// sent one, e.g. a plain self-hosted OpenAI-compatible backend). An id
+// with no separator — the only shape any provider other than this file's
+// own encoding ever produces — decodes to itself with no extra content;
+// a corrupt-looking suffix (never expected from this client's own
+// output) does the same rather than failing the whole request over it.
+func decodeToolCallID(id string) (realID string, extra json.RawMessage) {
+	i := strings.IndexByte(id, toolCallIDSeparator)
+	if i < 0 {
+		return id, nil
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(id[i+1:])
+	if err != nil {
+		return id[:i], nil
+	}
+	return id[:i], decoded
 }
 
 type openAIToolCallFunction struct {
@@ -246,11 +303,56 @@ type openAIUsage struct {
 }
 
 type openAIErrorResponse struct {
-	Error struct {
-		Message string `json:"message"`
-		Type    string `json:"type"`
-		Code    string `json:"code"`
-	} `json:"error"`
+	Error openAIErrorDetail `json:"error"`
+}
+
+// openAIErrorDetail is the "error" object both the standard OpenAI
+// envelope and Gemini's own openai-compat one send, with the two fields
+// Gemini adds/changes: Code is a JSON number there (its HTTP status
+// echoed back) rather than the short string a standard OpenAI-compatible
+// backend sends, so it is decoded as raw JSON and only ever stringified,
+// never parsed as either type; Status is Gemini's own machine
+// classification (e.g. "RESOURCE_EXHAUSTED", "INVALID_ARGUMENT"),
+// standard OpenAI-compatible backends do not send it.
+type openAIErrorDetail struct {
+	Message string          `json:"message"`
+	Type    string          `json:"type"`
+	Code    json.RawMessage `json:"code"`
+	Status  string          `json:"status"`
+}
+
+// parseOpenAIError decodes body as this file's error envelope, tolerating
+// the one shape difference captured live from Gemini's openai-compat
+// endpoint: a single-element JSON array (`[{"error": {...}}]`) instead of
+// the bare object (`{"error": {...}}`) every other provider and Gemini's
+// own other error responses use. Any other malformed body decodes to a
+// zero openAIErrorDetail, same as the plain json.Unmarshal this replaced
+// (mapOpenAICompatError already tolerates an empty class).
+func parseOpenAIError(body []byte) openAIErrorDetail {
+	var single openAIErrorResponse
+	if err := json.Unmarshal(body, &single); err == nil {
+		if single.Error.Message != "" || single.Error.Type != "" || single.Error.Status != "" || len(single.Error.Code) != 0 {
+			return single.Error
+		}
+	}
+	var list []openAIErrorResponse
+	if err := json.Unmarshal(body, &list); err == nil && len(list) > 0 {
+		return list[0].Error
+	}
+	return openAIErrorDetail{}
+}
+
+// classFromError picks mapOpenAICompatError's class: the envelope's own
+// "type" (the standard OpenAI field) first, then Gemini's "status", then
+// its numeric "code" stringified — never "message" (hard rule 9, D-112).
+func classFromError(d openAIErrorDetail) string {
+	if d.Type != "" {
+		return d.Type
+	}
+	if d.Status != "" {
+		return d.Status
+	}
+	return strings.Trim(string(d.Code), `"`)
 }
 
 // toOpenAIMessages converts a Request's system prompt and history into
@@ -268,15 +370,18 @@ func toOpenAIMessages(system string, messages []Message) []openAIMessage {
 		switch m.Role {
 		case RoleTool:
 			for _, tr := range m.ToolResults {
-				out = append(out, openAIMessage{Role: "tool", Content: tr.Content, ToolCallID: tr.CallID})
+				realID, _ := decodeToolCallID(tr.CallID)
+				out = append(out, openAIMessage{Role: "tool", Content: tr.Content, ToolCallID: realID})
 			}
 		case RoleAssistant:
 			msg := openAIMessage{Role: "assistant", Content: m.Text}
 			for _, tc := range m.ToolCalls {
+				realID, extra := decodeToolCallID(tc.ID)
 				msg.ToolCalls = append(msg.ToolCalls, openAIToolCall{
-					ID:       tc.ID,
-					Type:     "function",
-					Function: openAIToolCallFunction{Name: tc.Name, Arguments: string(tc.Input)},
+					ID:           realID,
+					Type:         "function",
+					Function:     openAIToolCallFunction{Name: tc.Name, Arguments: string(tc.Input)},
+					ExtraContent: extra,
 				})
 			}
 			out = append(out, msg)
@@ -314,12 +419,7 @@ func toOpenAITools(tools []Tool) []openAITool {
 // the free-text "message", which is never read here or included in any
 // returned error (hard rule 9, D-112).
 func mapOpenAICompatError(status int, body []byte) error {
-	var parsed openAIErrorResponse
-	_ = json.Unmarshal(body, &parsed)
-	class := parsed.Error.Type
-	if class == "" {
-		class = parsed.Error.Code
-	}
+	class := classFromError(parseOpenAIError(body))
 
 	switch status {
 	case http.StatusTooManyRequests:

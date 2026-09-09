@@ -160,6 +160,161 @@ func TestOpenAICompatClient_Chat_toolResultRoundTrip(t *testing.T) {
 	}
 }
 
+// TestOpenAICompatClient_Chat_toolCallExtraContentRoundTrip covers
+// phase-7/t8's bug: a provider (Gemini, live-captured) that attaches an
+// opaque extra_content to a tool_calls entry and rejects a replay that
+// does not echo it back verbatim on the assistant message, with a 400
+// "Function call is missing a thought_signature in functionCall parts".
+// Round 1 gets a tool call carrying extra_content; round 2 replays it
+// (ai.Message construction mirrors internal/bot/chat.go's runFreeText)
+// and must send the *decoded* provider id plus the *same* extra_content
+// object back, on both the assistant tool_calls entry and (id only) the
+// tool result message.
+func TestOpenAICompatClient_Chat_toolCallExtraContentRoundTrip(t *testing.T) {
+	const wantExtra = `{"google":{"thought_signature":"sig-abc"}}`
+
+	var round int
+	var round2Body openAIChatRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		round++
+		w.Header().Set("Content-Type", "application/json")
+		if round == 1 {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"choices": []map[string]any{{
+					"message": map[string]any{
+						"tool_calls": []map[string]any{{
+							"id":            "call_9",
+							"type":          "function",
+							"function":      map[string]any{"name": "variant_availability", "arguments": `{"slug":"x"}`},
+							"extra_content": json.RawMessage(wantExtra),
+						}},
+					},
+					"finish_reason": "tool_calls",
+				}},
+			})
+			return
+		}
+		_ = json.NewDecoder(r.Body).Decode(&round2Body)
+		_ = json.NewEncoder(w).Encode(openAIChatResponse{
+			Choices: []openAIChoice{{Message: openAIMessage{Content: "3 dona bor"}, FinishReason: "stop"}},
+		})
+	}))
+	defer server.Close()
+
+	client := newTestOpenAICompatClient(t, server.URL)
+
+	resp1, err := client.Chat(context.Background(), Request{Messages: []Message{{Role: RoleUser, Text: "is it in stock?"}}})
+	if err != nil {
+		t.Fatalf("round 1 Chat: %v", err)
+	}
+	if len(resp1.ToolCalls) != 1 {
+		t.Fatalf("round 1 ToolCalls = %+v, want 1", resp1.ToolCalls)
+	}
+	call := resp1.ToolCalls[0]
+	if call.ID == "call_9" {
+		t.Fatalf("round 1 ToolCalls[0].ID = %q, want it to differ from the raw provider id (extra_content must be folded in)", call.ID)
+	}
+
+	messages := []Message{
+		{Role: RoleUser, Text: "is it in stock?"},
+		{Role: RoleAssistant, Text: resp1.Text, ToolCalls: resp1.ToolCalls},
+		{Role: RoleTool, ToolResults: []ToolResult{{CallID: call.ID, Content: `{"items":[]}`}}},
+	}
+	if _, err := client.Chat(context.Background(), Request{Messages: messages}); err != nil {
+		t.Fatalf("round 2 Chat: %v", err)
+	}
+
+	if len(round2Body.Messages) != 3 {
+		t.Fatalf("round 2 Messages len = %d, want 3", len(round2Body.Messages))
+	}
+	assistantMsg := round2Body.Messages[1]
+	if len(assistantMsg.ToolCalls) != 1 {
+		t.Fatalf("round 2 assistant ToolCalls = %+v, want 1", assistantMsg.ToolCalls)
+	}
+	gotCall := assistantMsg.ToolCalls[0]
+	if gotCall.ID != "call_9" {
+		t.Fatalf("round 2 assistant tool_calls[0].id = %q, want the decoded provider id %q", gotCall.ID, "call_9")
+	}
+	if string(gotCall.ExtraContent) != wantExtra {
+		t.Fatalf("round 2 assistant tool_calls[0].extra_content = %s, want %s", gotCall.ExtraContent, wantExtra)
+	}
+	toolMsg := round2Body.Messages[2]
+	if toolMsg.Role != "tool" || toolMsg.ToolCallID != "call_9" {
+		t.Fatalf("round 2 tool message = %+v, want role tool, tool_call_id %q", toolMsg, "call_9")
+	}
+}
+
+// TestOpenAICompatClient_Chat_toolCallWithoutExtraContentOmitsField
+// covers the other direction: a plain OpenAI-compatible provider (no
+// extra_content) must never gain the field on replay, and the id must
+// pass through byte-for-byte — the encode/decode round trip is a no-op
+// when there was nothing to carry (existing self-hosted backends stay
+// unaffected by this fix).
+func TestOpenAICompatClient_Chat_toolCallWithoutExtraContentOmitsField(t *testing.T) {
+	var gotBody openAIChatRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(openAIChatResponse{Choices: []openAIChoice{{Message: openAIMessage{Content: "done"}, FinishReason: "stop"}}})
+	}))
+	defer server.Close()
+
+	client := newTestOpenAICompatClient(t, server.URL)
+	req := Request{
+		Messages: []Message{
+			{Role: RoleUser, Text: "is it in stock?"},
+			{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "call_1", Name: "variant_availability", Input: json.RawMessage(`{"sku":"X"}`)}}},
+			{Role: RoleTool, ToolResults: []ToolResult{{CallID: "call_1", Content: "3 in stock"}}},
+		},
+	}
+	if _, err := client.Chat(context.Background(), req); err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+
+	assistantMsg := gotBody.Messages[1]
+	if assistantMsg.ToolCalls[0].ID != "call_1" {
+		t.Fatalf("assistant tool_calls[0].id = %q, want call_1", assistantMsg.ToolCalls[0].ID)
+	}
+	if len(assistantMsg.ToolCalls[0].ExtraContent) != 0 {
+		t.Fatalf("assistant tool_calls[0].extra_content = %s, want empty/omitted", assistantMsg.ToolCalls[0].ExtraContent)
+	}
+}
+
+func TestEncodeDecodeToolCallID(t *testing.T) {
+	t.Run("no extra content round-trips to the same id", func(t *testing.T) {
+		id := encodeToolCallID(openAIToolCall{ID: "call_1"})
+		if id != "call_1" {
+			t.Fatalf("encodeToolCallID(no extra) = %q, want %q", id, "call_1")
+		}
+		realID, extra := decodeToolCallID(id)
+		if realID != "call_1" || extra != nil {
+			t.Fatalf("decodeToolCallID(%q) = (%q, %s), want (call_1, nil)", id, realID, extra)
+		}
+	})
+
+	t.Run("extra content round-trips exactly", func(t *testing.T) {
+		extra := json.RawMessage(`{"google":{"thought_signature":"sig-abc"}}`)
+		id := encodeToolCallID(openAIToolCall{ID: "call_9", ExtraContent: extra})
+		if id == "call_9" {
+			t.Fatalf("encodeToolCallID(extra) = %q, want it to differ from the raw id", id)
+		}
+		realID, gotExtra := decodeToolCallID(id)
+		if realID != "call_9" {
+			t.Fatalf("decodeToolCallID(%q) real = %q, want call_9", id, realID)
+		}
+		if string(gotExtra) != string(extra) {
+			t.Fatalf("decodeToolCallID(%q) extra = %s, want %s", id, gotExtra, extra)
+		}
+	})
+
+	t.Run("an id with no separator (any other provider's own id) decodes to itself", func(t *testing.T) {
+		realID, extra := decodeToolCallID("plain-provider-id")
+		if realID != "plain-provider-id" || extra != nil {
+			t.Fatalf("decodeToolCallID(plain) = (%q, %s), want (plain-provider-id, nil)", realID, extra)
+		}
+	})
+}
+
 func TestOpenAICompatClient_Chat_errorStatusMapsToTypedError(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -343,11 +498,7 @@ func (zeroReader) Read(p []byte) (int, error) {
 
 func TestMapOpenAICompatError_neverEmbedsProviderMessage(t *testing.T) {
 	const marker = "MARKER-provider-said-your-card-is-declined-do-not-log-me"
-	body, _ := json.Marshal(openAIErrorResponse{Error: struct {
-		Message string `json:"message"`
-		Type    string `json:"type"`
-		Code    string `json:"code"`
-	}{Message: marker, Type: "rate_limit_error"}})
+	body, _ := json.Marshal(openAIErrorResponse{Error: openAIErrorDetail{Message: marker, Type: "rate_limit_error"}})
 
 	err := mapOpenAICompatError(http.StatusTooManyRequests, body)
 	if !errors.Is(err, ErrRateLimited) {
@@ -363,5 +514,56 @@ func TestMapOpenAICompatError_neverEmbedsProviderMessage(t *testing.T) {
 	}
 	if se.HTTPStatus() != http.StatusTooManyRequests {
 		t.Fatalf("HTTPStatus() = %d, want %d", se.HTTPStatus(), http.StatusTooManyRequests)
+	}
+}
+
+// TestMapOpenAICompatError_geminiEnvelope covers the shape captured live
+// from Gemini's openai-compat endpoint (phase-7/t8): a single-element
+// JSON array wrapping the error object, a numeric "code" instead of a
+// string, and its own "status" field ("RESOURCE_EXHAUSTED") in place of
+// the standard envelope's "type" — mapOpenAICompatError must still map to
+// the right sentinel, classify from "status", and never leak "message".
+func TestMapOpenAICompatError_geminiEnvelope(t *testing.T) {
+	const marker = "MARKER-quota exceeded, do not log me"
+	body := []byte(`[{"error":{"code":429,"message":"` + marker + `","status":"RESOURCE_EXHAUSTED"}}]`)
+
+	err := mapOpenAICompatError(http.StatusTooManyRequests, body)
+	if !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("mapOpenAICompatError = %v, want errors.Is(_, ErrRateLimited)", err)
+	}
+	if strings.Contains(err.Error(), marker) {
+		t.Fatalf("mapOpenAICompatError().Error() = %q, must never contain the provider's free-text message", err.Error())
+	}
+	if !strings.Contains(err.Error(), "RESOURCE_EXHAUSTED") {
+		t.Fatalf("mapOpenAICompatError().Error() = %q, want it to classify as RESOURCE_EXHAUSTED", err.Error())
+	}
+}
+
+func TestClassFromError(t *testing.T) {
+	tests := []struct {
+		name string
+		d    openAIErrorDetail
+		want string
+	}{
+		{"type wins over status and code", openAIErrorDetail{Type: "rate_limit_error", Status: "RESOURCE_EXHAUSTED", Code: json.RawMessage(`429`)}, "rate_limit_error"},
+		{"status wins over code when type is empty", openAIErrorDetail{Status: "INVALID_ARGUMENT", Code: json.RawMessage(`400`)}, "INVALID_ARGUMENT"},
+		{"numeric code stringified when type and status are empty", openAIErrorDetail{Code: json.RawMessage(`400`)}, "400"},
+		{"string code unquoted when type and status are empty", openAIErrorDetail{Code: json.RawMessage(`"invalid_request_error"`)}, "invalid_request_error"},
+		{"all empty", openAIErrorDetail{}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := classFromError(tt.d); got != tt.want {
+				t.Fatalf("classFromError(%+v) = %q, want %q", tt.d, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseOpenAIError_toleratesGeminiArrayWrapping(t *testing.T) {
+	body := []byte(`[{"error":{"code":400,"message":"m","status":"INVALID_ARGUMENT"}}]`)
+	d := parseOpenAIError(body)
+	if d.Status != "INVALID_ARGUMENT" || string(d.Code) != "400" {
+		t.Fatalf("parseOpenAIError(array) = %+v, want status INVALID_ARGUMENT, code 400", d)
 	}
 }
