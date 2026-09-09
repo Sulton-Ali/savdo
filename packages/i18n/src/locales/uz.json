@@ -1107,8 +1107,11 @@
       "hoursClosed": "dam olish"
     },
     "hero": {
-      "cta": "Katalogni ko'rish"
+      "cta": "Katalogni ko'rish",
+      "eyebrow": "Oilaviy do'kon",
+      "photoPlaceholder": "Oila fotosi — do'kon ichida"
     },
+    "telegramCta": "Telegramda yozing",
     "weekdayShort": {
       "mon": "Du",
       "tue": "Se",
@@ -1120,10 +1123,24 @@
     },
     "home": {
       "categoriesTitle": "Kategoriyalar",
+      "categoryProductCount_one": "{{count}} ta mahsulot",
+      "categoryProductCount_few": "{{count}} ta mahsulot",
+      "categoryProductCount_many": "{{count}} ta mahsulot",
+      "categoryProductCount_other": "{{count}} ta mahsulot",
       "featuredTitle": "Tavsiya etilgan mahsulotlar",
-      "newProductsTitle": "Yangi mahsulotlar",
+      "productPhotoPlaceholder": "Mahsulot fotosi",
       "hoursTitle": "Ish vaqti",
-      "contactsTitle": "Aloqa"
+      "contactsTitle": "Aloqa",
+      "aboutEyebrow": "Biz haqimizda",
+      "aboutTitle": "Bizning oilaviy do'konimiz",
+      "aboutPlaceholder": "Do'kon haqida qisqacha ma'lumot tez orada shu yerda ko'rinadi.",
+      "sampleLabel": "namuna",
+      "quote1Text": "Mahsulotlar sifatli, narxlari ham qulay.",
+      "quote1Author": "[Mijoz ismi]",
+      "quote2Text": "Telegramda savolimga darrov javob berishdi.",
+      "quote2Author": "[Mijoz ismi]",
+      "ctaHeading": "Savol bormi? Telegramda so'rang",
+      "ctaSubheading": "Bir necha daqiqada javob beramiz — ish vaqtida."
     },
     "category": {
       "empty": "Bu kategoriyada hali mahsulot yo'q.",
