@@ -743,10 +743,26 @@ func TestVerifyOtpConcurrentWrongCodesNeverExceedAttemptCapAndMarkUsed(t *testin
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, _, err := svc.VerifyOtp(ctx, "owner1", db.OtpPurposePasswordReset, wrongCode, nil); err == nil {
+			// errStatus (helpers_test.go) calls t.Fatalf/FailNow, which is
+			// only legal on the goroutine running the test — calling it
+			// from here, one of n racing goroutines, would be invalid and
+			// could stop wg.Wait() from ever observing every goroutine's
+			// completion. t.Errorf is safe from any goroutine (same
+			// pattern as TestCompleteLinkConcurrentSameCodeExactlyOneSucceeds,
+			// telegram_test.go), so assert the *apierr.Error shape inline
+			// instead of through that helper.
+			_, _, err := svc.VerifyOtp(ctx, "owner1", db.OtpPurposePasswordReset, wrongCode, nil)
+			if err == nil {
 				t.Error("VerifyOtp() (wrong code) error = nil, want 401")
-			} else if errStatus(t, err) != 401 {
-				t.Errorf("VerifyOtp() (wrong code) status = %d, want 401", errStatus(t, err))
+				return
+			}
+			apiErr, ok := err.(*apierr.Error)
+			if !ok {
+				t.Errorf("VerifyOtp() (wrong code) error type = %T, want *apierr.Error", err)
+				return
+			}
+			if apiErr.Status != 401 {
+				t.Errorf("VerifyOtp() (wrong code) status = %d, want 401", apiErr.Status)
 			}
 		}()
 	}

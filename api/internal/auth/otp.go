@@ -97,6 +97,17 @@ const otpAttemptLockStripes = 256
 // and release with the returned func — never call lock twice for
 // overlapping keys on the same goroutine (there's only ever one such
 // section per call in this package, so that never happens today).
+//
+// One process, an array of in-memory mutexes: correct for Savdo's
+// single-API-process deployment (D-23/one VPS), the same assumption
+// loginLimiter's own doc comment states (ratelimit.go) — a multi-instance
+// deployment would need either a shared store for these stripes or a
+// DB-level `SELECT ... FOR UPDATE` on otp_codes in
+// api/db/queries/otp.sql instead, since two separate processes would each
+// have their own, independently-locked copy of this type and so could
+// still race the same way otpAttemptLockStripes's own doc comment
+// describes. Tracked as a follow-up, not a Phase 7 gap: Q-22
+// (docs/00-DECISIONS.md).
 type otpAttemptLock struct {
 	stripes [otpAttemptLockStripes]sync.Mutex
 }
@@ -384,10 +395,21 @@ func (s *Service) VerifyOtp(ctx context.Context, username string, purpose db.Otp
 		return "", time.Time{}, apierr.Unauthenticated()
 	}
 
-	// otpAttemptLock (above): serializes the read-check-increment section
-	// below per (shop, user, purpose) so concurrent guesses against the
-	// same code can't each read the same stale otp.Attempts and all
-	// increment past otpMaxAttempts.
+	// otpAttemptLock (above): serializes concurrent guesses against the
+	// same (shop, user, purpose) code so they can't each read the same
+	// stale otp.Attempts and all increment past otpMaxAttempts. Held via
+	// defer for the rest of this call — every remaining line below is part
+	// of the single verify-then-consume path this code goes through
+	// (wrong-code reject, already-used reject, or success minting the
+	// action token), not just the read-check-increment step, and this
+	// function has several return points among them; narrowing the
+	// critical section to just the increment would mean unlocking
+	// explicitly before every one of those returns for no real benefit —
+	// VerifyOtp's own throughput is already capped by
+	// otpVerifyIPLimiter/otpVerifyUserLimiter (a handful of requests per
+	// otpRateWindow), so holding one stripe for the rest of a single call
+	// is not a contention concern. Simplest option, no behavior change
+	// versus a narrower scope.
 	unlock := s.otpAttemptLock.lock(otpAttemptLockKey(s.shopID, user.ID, purpose))
 	defer unlock()
 

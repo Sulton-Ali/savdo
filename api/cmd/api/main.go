@@ -76,6 +76,16 @@ func run() error {
 	}
 
 	authSvc := auth.NewService(pool, queries, cfg, shopRow.ID)
+	// BOT_USERNAME/TELEGRAM_BOT_TOKEN are required only when ENV=prod
+	// (config.Load); in dev/CI they may be empty so a fresh clone's
+	// `make api`/`make seed` doesn't need Telegram credentials just to
+	// run. Loud, one-line, values-free warning so that's visible at
+	// startup rather than only discovered later as a 401/500 on
+	// /auth/telegram or /auth/telegram/link — same posture as the
+	// PUBLIC_SHOP_SLUG warm-up warning below.
+	if cfg.BotUsername == "" || cfg.TelegramBotToken == "" {
+		logger.Warn("BOT_USERNAME/TELEGRAM_BOT_TOKEN not set; Telegram login, link and OTP are disabled until both are configured")
+	}
 	shopSvc := shop.NewService(pool, queries)
 	catalogSvc := catalog.NewService(pool, queries, shopRow.DefaultLocale, cfg.MediaBaseURL)
 	stockSvc := stock.NewService(pool, queries)

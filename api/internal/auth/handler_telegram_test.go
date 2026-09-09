@@ -198,4 +198,14 @@ func TestHandlerCreateTelegramLinkRejectsEmptyBotUsername(t *testing.T) {
 	if linked {
 		t.Fatal("GetTelegramLink() linked = true, want false")
 	}
+
+	var codeCount int
+	if err := pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM otp_codes WHERE shop_id = $1 AND user_id = $2 AND purpose = $3`,
+		shop.ID, user.ID, db.OtpPurposeLinkTelegram).Scan(&codeCount); err != nil {
+		t.Fatalf("query otp_codes: %v", err)
+	}
+	if codeCount != 0 {
+		t.Fatalf("otp_codes rows for db.OtpPurposeLinkTelegram = %d, want 0 (the handler must refuse before Service.CreateTelegramLink ever mints a code)", codeCount)
+	}
 }

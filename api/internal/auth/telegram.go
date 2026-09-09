@@ -124,10 +124,12 @@ func VerifyLoginWidget(payload gen.TelegramAuthRequest, botToken string) (telegr
 	// would be SHA-256("") — a public constant anyone can compute — so a
 	// caller who forgot to configure TELEGRAM_BOT_TOKEN would silently
 	// accept a forged HMAC for any payload instead of rejecting every one
-	// (Review CRITICAL 1). config.Load already refuses to start the API
-	// with an empty token, but this check is the last line of defense in
-	// case VerifyLoginWidget is ever reached with a zero-value Config
-	// some other way (e.g. a test).
+	// (Review CRITICAL 1). TELEGRAM_BOT_TOKEN is required only when
+	// ENV=prod (config.Load); in dev it may be empty, so this check is
+	// what actually disables Telegram login there — a misconfigured prod
+	// deployment fails config.Load before ever reaching here, the same
+	// last-line-of-defense posture CreateTelegramLink's own handler takes
+	// for an empty BOT_USERNAME (handler_telegram.go).
 	if botToken == "" {
 		return 0, "", errTelegramAuthInvalid
 	}
@@ -294,30 +296,6 @@ var ErrLinkCodeInvalid = errors.New("auth: telegram link code invalid or expired
 // be reused.
 var ErrTelegramAlreadyLinked = errors.New("auth: telegram account already linked to a different user")
 
-// CompleteLink answers with exactly three error classes; T4's bot handler
-// needs to distinguish all three, since each maps to a different message
-// for the person completing the link in Telegram:
-//
-//  1. *apierr.Error with Status 429 (apierr.RateLimited) — the shared
-//     per-Telegram-user-id budget (D-118, telegramLimiterKey) is spent;
-//     the handler should tell the user to wait before trying the link
-//     again (and may use the error's RetryAfterSeconds).
-//  2. ErrTelegramAlreadyLinked — the code itself was fine, but the
-//     Telegram account is already linked to a *different* Savdo user; the
-//     handler should say that plainly rather than "invalid code", since
-//     retrying the same code can never succeed.
-//  3. ErrLinkCodeInvalid — every other rejection reason (malformed,
-//     expired, already used, over-attempted, wrong verifier, or the
-//     linked-to user no longer active); all collapse to one "invalid or
-//     expired code" message, by design (see ErrLinkCodeInvalid's own doc
-//     comment above).
-//
-// A nil error is the only success case. errors.Is/errors.As (not string
-// matching) is how T4 should tell these apart — CompleteLink never wraps
-// ErrLinkCodeInvalid/ErrTelegramAlreadyLinked, and apierr.RateLimited's
-// return value already satisfies the standard error interface as
-// *apierr.Error.
-
 // telegramLimiterKey renders telegramUserID for use as a rate-limiter key,
 // keyed the same way ipKey keys an IP — CompleteLink (below) shares
 // s.ipLimiter (D-118) with Login/ResetPassword, but the bot calls it with
@@ -343,6 +321,30 @@ func telegramLimiterKey(telegramUserID int64) string {
 // carries no HTTP IP: the link code's own entropy was otherwise the only
 // thing bounding how many verifier guesses one Telegram account could throw
 // at CompleteLink beyond otpMaxAttempts's per-code cap.
+//
+// CompleteLink answers with exactly three error classes; T4's bot handler
+// needs to distinguish all three, since each maps to a different message
+// for the person completing the link in Telegram:
+//
+//  1. *apierr.Error with Status 429 (apierr.RateLimited) — the shared
+//     per-Telegram-user-id budget (D-118, telegramLimiterKey) is spent;
+//     the handler should tell the user to wait before trying the link
+//     again (and may use the error's RetryAfterSeconds).
+//  2. ErrTelegramAlreadyLinked — the code itself was fine, but the
+//     Telegram account is already linked to a *different* Savdo user; the
+//     handler should say that plainly rather than "invalid code", since
+//     retrying the same code can never succeed.
+//  3. ErrLinkCodeInvalid — every other rejection reason (malformed,
+//     expired, already used, over-attempted, wrong verifier, or the
+//     linked-to user no longer active); all collapse to one "invalid or
+//     expired code" message, by design (see ErrLinkCodeInvalid's own doc
+//     comment above).
+//
+// A nil error is the only success case. errors.Is/errors.As (not string
+// matching) is how T4 should tell these apart — CompleteLink never wraps
+// ErrLinkCodeInvalid/ErrTelegramAlreadyLinked, and apierr.RateLimited's
+// return value already satisfies the standard error interface as
+// *apierr.Error.
 func (s *Service) CompleteLink(ctx context.Context, code string, telegramUserID int64, username string) error {
 	if ok, retryAfter := s.ipLimiter.allow(telegramLimiterKey(telegramUserID), time.Now()); !ok {
 		return apierr.RateLimited(retryAfterSeconds(retryAfter))
@@ -355,7 +357,16 @@ func (s *Service) CompleteLink(ctx context.Context, code string, telegramUserID 
 
 	// otpAttemptLock (otp.go): same fix as VerifyOtp's own, and the same
 	// reason — this function's read-check-increment section below has the
-	// identical race otherwise.
+	// identical race otherwise. Held via defer for the rest of this call,
+	// not just that section: CompleteLink has several return points after
+	// this (invalid code, already linked, success) spanning a transaction
+	// (MarkOTPUsed + LinkTelegramAccount below), and unlocking narrowly
+	// before each of them would need restructuring this function's control
+	// flow for no real benefit — CompleteLink's own throughput is already
+	// capped by the shared s.ipLimiter (a handful of requests per key per
+	// minute, D-118), so holding one stripe for the rest of a single call
+	// is not a contention concern. Simplest option, no behavior change
+	// versus a narrower scope.
 	unlock := s.otpAttemptLock.lock(otpAttemptLockKey(s.shopID, userID, db.OtpPurposeLinkTelegram))
 	defer unlock()
 
