@@ -16,6 +16,7 @@ import (
 	"github.com/Sulton-Ali/savdo/api/gen"
 	"github.com/Sulton-Ali/savdo/api/internal/apierr"
 	"github.com/Sulton-Ali/savdo/api/internal/auth"
+	"github.com/Sulton-Ali/savdo/api/internal/bot"
 	"github.com/Sulton-Ali/savdo/api/internal/catalog"
 	"github.com/Sulton-Ali/savdo/api/internal/content"
 	"github.com/Sulton-Ali/savdo/api/internal/crm"
@@ -76,8 +77,15 @@ import (
 // auth.allowlistedOperations itself, not this router: authSvc.Middleware
 // still wraps every operation, including these four, but lets them
 // through without a session (see that map's own doc comment for why the
-// skip has to live there and not here).
-func NewRouter(logger *slog.Logger, pool *pgxpool.Pool, authSvc *auth.Service, shopSvc *shop.Service, mediaSvc *media.Service, devMedia http.Handler, catalogSvc *catalog.Service, stockSvc *stock.Service, crmSvc *crm.Service, reportsSvc *reports.Service, salesSvc *sales.Service, contentSvc *content.Service, publicSvc *public.Service) http.Handler {
+// skip has to live there and not here). botSvc backs the two admin
+// `/bot/conversations*` operations and Telegram's `POST
+// /bot/webhook/{secret}` via bot.NewHandler (bot.go); botWebhookSecret is
+// BOT_WEBHOOK_SECRET, passed straight to bot.NewHandler — an empty value
+// (a deployment that has not configured a Telegram webhook at all, the
+// Phase 7 default: polling stays in cmd/bot) makes every request to that
+// route 404 (bot.Handler.HandleBotWebhook's own doc comment), never a
+// panic on a nil comparison.
+func NewRouter(logger *slog.Logger, pool *pgxpool.Pool, authSvc *auth.Service, shopSvc *shop.Service, mediaSvc *media.Service, devMedia http.Handler, catalogSvc *catalog.Service, stockSvc *stock.Service, crmSvc *crm.Service, reportsSvc *reports.Service, salesSvc *sales.Service, contentSvc *content.Service, publicSvc *public.Service, botSvc *bot.Service, botWebhookSecret string) http.Handler {
 	mux := http.NewServeMux()
 
 	strictHandler := gen.NewStrictHandlerWithOptions(
@@ -87,6 +95,7 @@ func NewRouter(logger *slog.Logger, pool *pgxpool.Pool, authSvc *auth.Service, s
 			crm: crm.NewHandler(crmSvc), stock: stock.NewHandler(stockSvc),
 			reports: reports.NewHandler(reportsSvc), sales: sales.NewHandler(salesSvc),
 			content: content.NewHandler(contentSvc), public: public.NewHandler(publicSvc),
+			bot: bot.NewHandler(botSvc, botWebhookSecret),
 		},
 		[]gen.StrictMiddlewareFunc{authSvc.Middleware, catalog.AcceptLanguageMiddleware, publicSvc.CacheMiddleware},
 		gen.StrictHTTPServerOptions{

@@ -12,9 +12,12 @@ import (
 	"syscall"
 	"time"
 
+	telegram "github.com/go-telegram/bot"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/Sulton-Ali/savdo/api/internal/ai"
 	"github.com/Sulton-Ali/savdo/api/internal/auth"
+	"github.com/Sulton-Ali/savdo/api/internal/bot"
 	"github.com/Sulton-Ali/savdo/api/internal/catalog"
 	"github.com/Sulton-Ali/savdo/api/internal/config"
 	"github.com/Sulton-Ali/savdo/api/internal/content"
@@ -28,6 +31,13 @@ import (
 	"github.com/Sulton-Ali/savdo/api/internal/shop"
 	"github.com/Sulton-Ali/savdo/api/internal/stock"
 )
+
+// botShutdownTimeout bounds how long run() waits (botSvc.Close, MAJOR 2)
+// for an already-dispatched webhook turn to finish before closing the
+// database pool anyway — generous relative to chat.go's own worst case
+// (5 rounds * 45s chatCallTimeout), but not unbounded: a wedged turn
+// must not hold process shutdown open forever.
+const botShutdownTimeout = 30 * time.Second
 
 func main() {
 	if err := run(); err != nil {
@@ -145,9 +155,114 @@ func run() error {
 		devMedia = media.DevHandler(mediaStorage)
 	}
 
+	// botSvc backs the two admin `/bot/conversations*` operations
+	// unconditionally (they only ever touch the database, never
+	// Telegram/the LLM) and `POST /bot/webhook/{secret}` only once the
+	// owner sets BOT_WEBHOOK_SECRET (Phase 7 ships polling only via
+	// cmd/bot, docs/00-DECISIONS.md D-114's own note; the default empty
+	// secret makes that route 404 for every request regardless of
+	// whether aiClient/botSender below are fully wired). aiClient is
+	// built the same way cmd/bot/main.go builds its own — a config
+	// error (a bad AI_PROVIDER/AI_PRICE_* value) fails startup the same
+	// way an unreachable database does, since it is a real
+	// misconfiguration, not "the bot isn't set up yet".
+	aiClient, err := ai.New(ai.Config{
+		Provider: cfg.AIProvider, Model: cfg.AIModel,
+		PriceInputPerMTok: cfg.AIPriceInputPerMTok, PriceOutputPerMTok: cfg.AIPriceOutputPerMTok,
+	})
+	if err != nil {
+		// MINOR 6: consistent with every other bot-adjacent
+		// misconfiguration in this block (a bad PUBLIC_SHOP_SLUG, an
+		// unreachable Telegram Bot API) — never cmd/api's own startup. A
+		// provider that fails to build (e.g. AI_PROVIDER=gemini, O-29's own
+		// "registered but not built") degrades only the bot's own free-text
+		// answers, through unavailableAIClient, to O-24's normal static
+		// fallback until the config is fixed — unlike cmd/bot, whose only
+		// job is running the bot and which still fails fast on this.
+		logger.Warn("failed to init the ai client; the bot will answer free-text questions statically until fixed", "error", err)
+		aiClient = unavailableAIClient{}
+	}
+	// botShopRow resolves PUBLIC_SHOP_SLUG (bot.Config.ShopID's own doc
+	// comment: the bot answers for the same shop the public landing
+	// does) — best-effort like publicSvc.WarmShop above: a bad
+	// PUBLIC_SHOP_SLUG only degrades /bot/webhook/*, which is unreachable
+	// anyway until BOT_WEBHOOK_SECRET is set, never the whole API.
+	botShopRow, err := queries.GetShopBySlug(ctx, cfg.PublicShopSlug)
+	if err != nil {
+		logger.Warn("PUBLIC_SHOP_SLUG did not resolve to a shop; POST /bot/webhook/* will error until fixed",
+			"slug", cfg.PublicShopSlug, "error", err)
+	}
+
+	// Item 10: BOT_WEBHOOK_SECRET set with no TELEGRAM_BOT_TOKEN means
+	// every webhook update would need to reply through a botSender that
+	// can never exist — fail fast at startup rather than let the first
+	// real webhook call discover it (bot.nilSender turns that into a
+	// logged error instead of a panic if this check is ever bypassed, but
+	// this is the real fix: a webhook nobody can ever get a reply from is
+	// a misconfiguration, not a degrade-gracefully case).
+	if err := validateBotWebhookConfig(cfg); err != nil {
+		return err
+	}
+
+	// botSender only does outgoing Telegram Bot API calls (send message/
+	// photo) — cmd/api never polls or registers a webhook itself
+	// (cmd/bot's own doc comment: "polling stays in cmd/bot"). Built
+	// with WithSkipGetMe so an unreachable/invalid TELEGRAM_BOT_TOKEN
+	// degrades only the not-yet-enabled webhook route, never cmd/api's
+	// own startup, unlike cmd/bot's own readiness check (main.go there),
+	// which must fail fast because sending replies is its only job.
+	var botSender bot.Sender
+	if cfg.TelegramBotToken != "" {
+		tgBot, err := telegram.New(cfg.TelegramBotToken, telegram.WithSkipGetMe())
+		if err != nil {
+			logger.Warn("failed to init the Telegram Bot API client; POST /bot/webhook/* will fail to send replies until fixed", "error", err)
+		} else {
+			botSender = bot.TelegramSender{Bot: tgBot}
+		}
+	}
+	// linker: authSvc satisfies bot.TelegramLinker structurally (its own
+	// CompleteLink method, internal/auth/telegram.go) — /start
+	// link_<code> redeems a POST /auth/telegram/link code through the
+	// same *auth.Service the HTTP API's own routes use (M1).
+	botSvc := bot.NewService(pool, queries, aiClient, public.NewHandler(publicSvc), contentSvc, botSender, authSvc,
+		bot.Config{
+			ShopID: botShopRow.ID, SiteURL: cfg.SiteURL,
+			PriceInputPerMTok: cfg.AIPriceInputPerMTok, PriceOutputPerMTok: cfg.AIPriceOutputPerMTok,
+			DailyTokenBudget: cfg.AIDailyTokenBudget,
+		}, nil, logger)
+	// SetOTPSender wires botSvc in as authSvc's own OTPSender (M2) — botSvc
+	// itself satisfies auth.OTPSender structurally (its own SendOTP
+	// method, internal/bot/otp.go), sending through the same botSender
+	// built above (a nil-guarded no-op-with-a-clear-error when
+	// TELEGRAM_BOT_TOKEN is unset, bot.NewService's own doc comment) —
+	// RequestOtp (internal/auth/otp.go) needs this called exactly once,
+	// before the Service starts serving requests (its own doc comment on
+	// SetOTPSender), which this satisfies: no request can reach RequestOtp
+	// until srv.ListenAndServe starts below.
+	authSvc.SetOTPSender(botSvc)
+	// MAJOR 2: HandleBotWebhook only ever acknowledges 200 and hands off
+	// to botSvc.Dispatch's own background goroutine (internal/httpx.
+	// HandleBotWebhook's own doc comment) — srv.Shutdown below draining
+	// in-flight HTTP requests says nothing about those, and neither the
+	// ListenAndServe-error nor the failed-Shutdown return path used to
+	// reach a Close call at all (minor m2). A defer here, registered
+	// after pool.Close()'s own (so it runs first on unwind, LIFO —
+	// cmd/bot/main.go's own pattern), covers every return path uniformly:
+	// wait, bounded by botShutdownTimeout, for every already-accepted turn
+	// to finish persisting before pool.Close() runs out from under one
+	// that already billed a real LLM call.
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), botShutdownTimeout)
+		defer cancel()
+		if err := botSvc.Close(shutdownCtx); err != nil {
+			logger.Warn("bot: graceful shutdown timed out; some in-flight turns may not have finished", "error", err)
+		}
+	}()
+
 	srv := &http.Server{
-		Addr:              cfg.Addr,
-		Handler:           httpx.NewRouter(logger, pool, authSvc, shopSvc, mediaSvc, devMedia, catalogSvc, stockSvc, crmSvc, reportsSvc, salesSvc, contentSvc, publicSvc),
+		Addr: cfg.Addr,
+		Handler: httpx.NewRouter(logger, pool, authSvc, shopSvc, mediaSvc, devMedia, catalogSvc, stockSvc, crmSvc, reportsSvc, salesSvc, contentSvc, publicSvc,
+			botSvc, cfg.BotWebhookSecret),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      15 * time.Second,
@@ -188,4 +303,37 @@ func newLogger(level string) *slog.Logger {
 	}
 	handler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: lvl})
 	return slog.New(handler)
+}
+
+// validateBotWebhookConfig is item 10's own startup guard: a configured
+// BOT_WEBHOOK_SECRET with an empty TELEGRAM_BOT_TOKEN would leave
+// botSender a nil bot.Sender (below) — bot.NewService's own nilSender
+// guard (internal/bot/sender.go) turns that into a logged error instead
+// of a panic if this check is ever bypassed, but the real fix is never
+// starting up in that combination at all: a webhook that can never send
+// a single reply is a misconfiguration, not something to degrade
+// gracefully into (unlike a bad PUBLIC_SHOP_SLUG or an unreachable
+// Telegram Bot API, which only degrade the not-yet-enabled webhook
+// route).
+func validateBotWebhookConfig(cfg config.Config) error {
+	if cfg.BotWebhookSecret != "" && cfg.TelegramBotToken == "" {
+		return errors.New("BOT_WEBHOOK_SECRET is set but TELEGRAM_BOT_TOKEN is empty; the webhook could never send a reply")
+	}
+	return nil
+}
+
+// unavailableAIClient is cmd/api's own fallback for botSvc's ai.Client
+// when ai.New itself fails (MINOR 6: e.g. AI_PROVIDER=gemini, O-29's own
+// "registered but not built") — every Chat call reports
+// ai.ErrProviderUnavailable, which internal/bot's own runFreeText
+// already treats as a normal "answer statically" outcome (O-24), the
+// same path a real provider's own transient failure takes. This is
+// deliberately not a bare nil ai.Client: a nil interface's method call
+// panics (dispatchOne's own recover, internal/bot/dispatch.go, would
+// catch it, but the customer would then get silence instead of O-24's
+// normal fallback reply).
+type unavailableAIClient struct{}
+
+func (unavailableAIClient) Chat(context.Context, ai.Request) (ai.Response, error) {
+	return ai.Response{}, ai.ErrProviderUnavailable
 }

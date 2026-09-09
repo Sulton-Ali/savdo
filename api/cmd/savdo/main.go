@@ -1,6 +1,7 @@
 // Command savdo is the admin CLI: database migrations, seeding the demo
-// shop (D-30), resetting the owner's password from the server (D-28) and
-// rebuilding stock_levels from the stock_movements ledger (ADR-006).
+// shop (D-30), resetting the owner's password from the server (D-28),
+// rebuilding stock_levels from the stock_movements ledger (ADR-006) and
+// pruning old bot_messages rows (D-114).
 package main
 
 import (
@@ -12,6 +13,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -39,7 +41,7 @@ func main() {
 
 func run(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: savdo <migrate|seed|reset-owner-password|stock>")
+		return fmt.Errorf("usage: savdo <migrate|seed|reset-owner-password|stock|bot-prune>")
 	}
 
 	switch args[0] {
@@ -51,6 +53,8 @@ func run(args []string) error {
 		return runResetOwnerPassword(args[1:])
 	case "stock":
 		return runStock(args[1:])
+	case "bot-prune":
+		return runBotPrune(args[1:])
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
@@ -375,6 +379,64 @@ it committed.`)
 
 	fmt.Printf("stock rebuild: shop %q: %d stock_levels rows rebuilt from %d stock_movements rows\n",
 		*shopSlug, result.Levels, result.Movements)
+	return nil
+}
+
+// botMessageRetentionDays is D-114's "Conversation retention 12 months":
+// bot_messages older than 365 days are deleted; bot_conversations rows
+// stay (docs/04-DATA-MODEL.md § 6's own note).
+const botMessageRetentionDays = 365
+
+// runBotPrune deletes one shop's bot_messages rows older than
+// botMessageRetentionDays (D-114) and prints the count removed.
+// --shop-slug (required) mirrors stock rebuild's own flag (MINOR 5):
+// this codebase has no "list every shop" query yet (ADR-004's tenant-
+// ready design is still single-shop-per-deployment in practice, D-30),
+// so a scheduled nightly run (Phase 8's own job, docs/04-DATA-MODEL.md §
+// 6) is one invocation per shop, the same way stock rebuild already is.
+func runBotPrune(args []string) error {
+	fs := flag.NewFlagSet("bot-prune", flag.ContinueOnError)
+	shopSlug := fs.String("shop-slug", "", "shop slug to prune old bot_messages for (required)")
+	fs.Usage = func() {
+		_, _ = fmt.Fprintln(fs.Output(), `usage: savdo bot-prune --shop-slug <slug>
+
+Deletes this shop's bot_messages rows older than 365 days (D-114).
+bot_conversations rows are never deleted.`)
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *shopSlug == "" {
+		fs.Usage()
+		return fmt.Errorf("bot-prune: --shop-slug is required")
+	}
+
+	dsn, err := databaseURL()
+	if err != nil {
+		return err
+	}
+
+	ctx := context.Background()
+	pool, err := openPool(ctx, dsn)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+
+	queries := apidb.New(pool)
+	shopRow, err := queries.GetShopBySlug(ctx, *shopSlug)
+	if err != nil {
+		return fmt.Errorf("bot-prune: shop %q: %w", *shopSlug, err)
+	}
+
+	before := time.Now().AddDate(0, 0, -botMessageRetentionDays)
+	deleted, err := queries.DeleteBotMessagesBefore(ctx, apidb.DeleteBotMessagesBeforeParams{ShopID: shopRow.ID, Before: before})
+	if err != nil {
+		return fmt.Errorf("bot-prune: shop %q: %w", *shopSlug, err)
+	}
+
+	fmt.Printf("bot-prune: shop %q: %d bot_messages rows deleted (older than %s)\n", *shopSlug, deleted, before.Format(time.RFC3339))
 	return nil
 }
 

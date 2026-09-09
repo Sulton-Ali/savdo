@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Sulton-Ali/savdo/api/internal/auth"
+	"github.com/Sulton-Ali/savdo/api/internal/bot"
 	"github.com/Sulton-Ali/savdo/api/internal/catalog"
 	"github.com/Sulton-Ali/savdo/api/internal/config"
 	"github.com/Sulton-Ali/savdo/api/internal/content"
@@ -75,8 +76,14 @@ func newTestRouter(pool *pgxpool.Pool, q *db.Queries, publicShopSlug string) (ht
 	contentSvc := content.NewService(q)
 	publicSvc := public.NewService(q, contentSvc, publicShopSlug, "/media")
 	contentSvc.SetInvalidator(publicSvc)
+	// botSvc is a nil-safe stand-in, same as every other service above:
+	// these tests never exercise a `/bot/*` route (internal/httpx/
+	// router_test.go's own testBotService/testWebhookSecret do the same
+	// thing for the same reason — HandleBotWebhook's secret check runs
+	// before svc is ever touched).
+	botSvc := bot.NewService(nil, nil, nil, nil, nil, nil, nil, bot.Config{}, nil, logger)
 
-	router := httpx.NewRouter(logger, pool, authSvc, shopSvc, mediaSvc, nil, catalogSvc, stockSvc, crmSvc, reportsSvc, salesSvc, contentSvc, publicSvc)
+	router := httpx.NewRouter(logger, pool, authSvc, shopSvc, mediaSvc, nil, catalogSvc, stockSvc, crmSvc, reportsSvc, salesSvc, contentSvc, publicSvc, botSvc, "test-webhook-secret")
 	return router, publicSvc
 }
 
@@ -455,5 +462,6 @@ func newTestRouterWithServices(pool *pgxpool.Pool, publicSvc *public.Service, co
 	crmSvc := crm.NewService(nil)
 	reportsSvc := reports.NewService(nil)
 	salesSvc := sales.NewService(nil)
-	return httpx.NewRouter(logger, pool, authSvc, shopSvc, mediaSvc, nil, catalogSvc, stockSvc, crmSvc, reportsSvc, salesSvc, contentSvc, publicSvc)
+	botSvc := bot.NewService(nil, nil, nil, nil, nil, nil, nil, bot.Config{}, nil, logger)
+	return httpx.NewRouter(logger, pool, authSvc, shopSvc, mediaSvc, nil, catalogSvc, stockSvc, crmSvc, reportsSvc, salesSvc, contentSvc, publicSvc, botSvc, "test-webhook-secret")
 }

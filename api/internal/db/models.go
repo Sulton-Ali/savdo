@@ -647,15 +647,16 @@ type AuditLog struct {
 }
 
 type BotConversation struct {
-	ID             uuid.UUID  `json:"id"`
-	ShopID         uuid.UUID  `json:"shop_id"`
-	TelegramChatID int64      `json:"telegram_chat_id"`
-	TelegramUserID int64      `json:"telegram_user_id"`
-	CustomerID     *uuid.UUID `json:"customer_id"`
-	Mode           BotMode    `json:"mode"`
-	MessageCount   int32      `json:"message_count"`
-	LastMessageAt  *time.Time `json:"last_message_at"`
-	CreatedAt      time.Time  `json:"created_at"`
+	ID               uuid.UUID  `json:"id"`
+	ShopID           uuid.UUID  `json:"shop_id"`
+	TelegramChatID   int64      `json:"telegram_chat_id"`
+	TelegramUserID   int64      `json:"telegram_user_id"`
+	CustomerID       *uuid.UUID `json:"customer_id"`
+	Mode             BotMode    `json:"mode"`
+	MessageCount     int32      `json:"message_count"`
+	LastMessageAt    *time.Time `json:"last_message_at"`
+	CreatedAt        time.Time  `json:"created_at"`
+	TelegramUsername *string    `json:"telegram_username"`
 }
 
 type BotMessage struct {

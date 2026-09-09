@@ -13,6 +13,7 @@ import (
 
 	"github.com/Sulton-Ali/savdo/api/gen"
 	"github.com/Sulton-Ali/savdo/api/internal/auth"
+	"github.com/Sulton-Ali/savdo/api/internal/bot"
 	"github.com/Sulton-Ali/savdo/api/internal/catalog"
 	"github.com/Sulton-Ali/savdo/api/internal/config"
 	"github.com/Sulton-Ali/savdo/api/internal/content"
@@ -105,6 +106,20 @@ func testPublicService() *public.Service {
 	return public.NewService(nil, testContentService(), "savdo-demo", "/media")
 }
 
+// testBotService builds a bot.Service safe to wire into NewRouter for
+// tests that never exercise a `/bot/*` route with a matching webhook
+// secret — HandleBotWebhook's own secret check runs before anything else
+// touches svc (bot/handler.go's own doc comment), so a nil pool/queries/
+// ai.Client/sender here are never dereferenced by the tests in this
+// package. testWebhookSecret is deliberately never the secret any test
+// path segment uses, so HandleBotWebhook always 404s rather than
+// accidentally running HandleUpdate against nil dependencies.
+const testWebhookSecret = "test-webhook-secret"
+
+func testBotService() *bot.Service {
+	return bot.NewService(nil, nil, nil, nil, nil, nil, nil, bot.Config{}, nil, testLogger())
+}
+
 func TestHealthz(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -130,7 +145,7 @@ func TestHealthz(t *testing.T) {
 		},
 	}
 
-	router := NewRouter(testLogger(), nil, testAuthService(), testShopService(), testMediaService(), nil, testCatalogService(), testStockService(), testCrmService(), testReportsService(), testSalesService(), testContentService(), testPublicService())
+	router := NewRouter(testLogger(), nil, testAuthService(), testShopService(), testMediaService(), nil, testCatalogService(), testStockService(), testCrmService(), testReportsService(), testSalesService(), testContentService(), testPublicService(), testBotService(), testWebhookSecret)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

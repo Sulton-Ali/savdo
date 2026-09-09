@@ -212,6 +212,8 @@ Public responses: availability only (`in_stock|low|out_of_stock` per O-20 rules)
 | GET    | `/bot/conversations`                | manager+  | Cursor page newest activity first; fields: chat id, telegram username (if known), message count, last message at |
 | GET    | `/bot/conversations/{id}/messages`  | manager+  | Oldest first; fields: role, content, provider, model, tokens, latency, cost |
 
+Telegram username is the conversation's last known one, refreshed opportunistically whenever a turn carries one — not guaranteed to be the customer's current username.
+
 ### Ops
 
 `GET /healthz`, `GET /readyz`, `GET /metrics` (Prometheus, internal network only).

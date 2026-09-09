@@ -11,6 +11,7 @@ require (
 	github.com/anthropics/anthropic-sdk-go v1.69.0
 	github.com/caarlos0/env/v11 v11.4.1
 	github.com/gen2brain/webp v0.6.4
+	github.com/go-telegram/bot v1.25.0
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/oapi-codegen/nullable v1.1.0

@@ -143,24 +143,60 @@ type Config struct {
 	// no bot named (telegram.go) as a last line of defense.
 	BotUsername string `env:"BOT_USERNAME"`
 
-	// TelegramBotToken is the API's own copy of the bot token (D-112,
-	// docs/07-DEVOPS.md § Environment variables) — AuthenticateTelegram
-	// uses it to verify the Telegram Login Widget's HMAC (ADR-005), a
-	// distinct read from whatever cmd/bot does with the same environment
-	// variable. Secret; owner-provided in infra/.env only, never in the
-	// repo or logs (hard rule 9). Required only when ENV=prod (same
-	// precedent as MediaDir below): an empty botToken would make
-	// VerifyLoginWidget's secret_key SHA-256("") — a public constant, not
-	// a secret — so anyone could forge a valid signature for any linked
-	// Telegram id and get a session; Load fails fast on that in prod, the
-	// same way a missing DATABASE_URL does, so a misconfigured deployment
-	// never serves traffic with the check effectively disabled. In dev it
-	// may be empty — VerifyLoginWidget itself also refuses to run with an
-	// empty botToken (telegram.go) as a last line of defense — so Telegram
-	// login/link/OTP are simply disabled on a fresh clone until an owner
-	// sets a real token, instead of blocking `make api`/`make seed`
-	// entirely.
+	// AIDailyTokenBudget is O-25/D-120's env-level daily token cap for the
+	// bot's own per-shop budget gate (bot.Service.shopOverBudget, via
+	// bot.Config.DailyTokenBudget): applied whenever a shop's own
+	// ai_daily_token_budget column is NULL. Default 200000 — a real cap,
+	// not "unlimited": D-120 reverses O-25's original "NULL means
+	// unlimited" reading, so a shop with no budget row set still has a
+	// real (generous) daily ceiling by default, not none at all. An
+	// explicit 0 here, combined with a NULL shop column, fails the bot
+	// closed instead — a static reply, no LLM call — until one of the two
+	// is configured.
+	AIDailyTokenBudget int `env:"AI_DAILY_TOKEN_BUDGET" envDefault:"200000"`
+
+	// TelegramBotToken is shared by two independent readers of the same
+	// secret (D-112, docs/07-DEVOPS.md § Environment variables):
+	// AuthenticateTelegram uses it to verify the Telegram Login Widget's
+	// HMAC (ADR-005), and cmd/bot/main.go (a distinct read of the same
+	// env var, its own Config value) uses it to authenticate every
+	// Telegram Bot API call the bot itself makes. Secret; owner-provided
+	// in infra/.env only, never in the repo or logs (hard rule 9). Not
+	// `,required` here — cmd/api shares this Config and must still start
+	// without a bot configured at all (it only degrades the webhook route
+	// and Telegram login/link/OTP, see BotWebhookSecret below) — but
+	// required when ENV=prod (same precedent as MediaDir below): an empty
+	// botToken would make VerifyLoginWidget's secret_key SHA-256("") — a
+	// public constant, not a secret — so anyone could forge a valid
+	// signature for any linked Telegram id and get a session; Load fails
+	// fast on that in prod, the same way a missing DATABASE_URL does. In
+	// dev it may be empty — VerifyLoginWidget itself also refuses to run
+	// with an empty botToken (telegram.go), and cmd/bot/main.go checks it
+	// is non-empty itself and fails fast on its own — as a last line of
+	// defense either way, so a fresh clone's `make api`/`make seed` never
+	// needs Telegram credentials just to run.
 	TelegramBotToken string `env:"TELEGRAM_BOT_TOKEN"`
+
+	// BotMode selects cmd/bot's transport: "polling" (the only one
+	// cmd/bot/main.go implements in Phase 7 — "polling stays in
+	// cmd/bot") or "webhook" (Phase 8, served by cmd/api instead;
+	// cmd/bot/main.go fails fast rather than silently doing nothing if
+	// asked for it).
+	BotMode string `env:"BOT_MODE" envDefault:"polling"`
+
+	// BotWebhookSecret is the path secret `POST /bot/webhook/{secret}`
+	// (docs/05-API.md § Bot) compares in constant time
+	// (bot.Handler.HandleBotWebhook). Empty (the default) makes that
+	// route 404 for every request — the safe state for a deployment that
+	// has not configured a real Telegram webhook yet (Phase 7 ships
+	// polling only).
+	BotWebhookSecret string `env:"BOT_WEBHOOK_SECRET"`
+
+	// SiteURL is the landing's own base URL, used to build D-115's site
+	// links (from a slug, never by the model) and D-116's absolute media
+	// URL for a product photo. D-100's placeholder until Phase 8 has a
+	// real domain.
+	SiteURL string `env:"SITE_URL" envDefault:"http://localhost:3000"`
 }
 
 // Load parses the environment into a Config, applying defaults. It fails
