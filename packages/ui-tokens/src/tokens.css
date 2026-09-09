@@ -4,6 +4,10 @@
  *
  * `--savdo-color-primary` is terracotta (#c2410c) — the owner's brand pick
  * (D-36). Provisional: may change after visual review in Phase 6.
+ *
+ * `--savdo-landing-*` (D-121) are scoped to the public landing's Variant B
+ * redesign — see the `landing` block's doc comment in `tokens.ts` for the
+ * WCAG AA contrast ratios behind the accent/secondary + hover pairs.
  */
 :root {
   --savdo-color-primary: #c2410c;
@@ -21,4 +25,14 @@
   --savdo-radius-lg: 12px;
 
   --savdo-font-family: "Inter Variable", Inter, system-ui, sans-serif;
+
+  --savdo-landing-accent: #e05a47;
+  --savdo-landing-accent-hover: #c94a39;
+  --savdo-landing-on-accent: #ffffff;
+  --savdo-landing-secondary: #1f8a80;
+  --savdo-landing-secondary-hover: #176f67;
+  --savdo-landing-on-secondary: #ffffff;
+  --savdo-landing-surface: #ffffff;
+  --savdo-landing-radius-card: 16px;
+  --savdo-landing-shadow-card: 0 4px 16px rgba(31, 41, 55, 0.08);
 }

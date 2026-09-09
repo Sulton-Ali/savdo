@@ -24,6 +24,22 @@
   --radius-lg: var(--savdo-radius-lg);
 
   --font-sans: var(--savdo-font-family);
+
+  /* Landing-scoped tokens (D-121) — Variant B "Warm cards" redesign only;
+   * coral/teal, not the shared `--color-primary` terracotta (D-36). See
+   * `packages/ui-tokens/src/tokens.ts`'s `landing` doc comment for the WCAG
+   * AA contrast ratios: use `-hover` steps for normal-size on-accent/
+   * on-secondary text, base tones for large text/UI only. */
+  --color-landing-accent: var(--savdo-landing-accent);
+  --color-landing-accent-hover: var(--savdo-landing-accent-hover);
+  --color-landing-on-accent: var(--savdo-landing-on-accent);
+  --color-landing-secondary: var(--savdo-landing-secondary);
+  --color-landing-secondary-hover: var(--savdo-landing-secondary-hover);
+  --color-landing-on-secondary: var(--savdo-landing-on-secondary);
+  --color-landing-surface: var(--savdo-landing-surface);
+
+  --radius-landing-card: var(--savdo-landing-radius-card);
+  --shadow-landing-card: var(--savdo-landing-shadow-card);
 }
 
 * {
