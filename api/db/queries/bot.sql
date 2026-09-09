@@ -3,8 +3,11 @@
 -- GetBotConversationByChat first and only reaches this on a miss; the
 -- UNIQUE(shop_id, telegram_chat_id) constraint (0021_bot_conversations.sql)
 -- is the actual guarantee, this insert is not itself an upsert.
-INSERT INTO bot_conversations (id, shop_id, telegram_chat_id, telegram_user_id, customer_id, mode)
-VALUES (sqlc.arg('id'), sqlc.arg('shop_id'), sqlc.arg('telegram_chat_id'), sqlc.arg('telegram_user_id'), sqlc.narg('customer_id'), sqlc.arg('mode'))
+-- telegram_username (0023_bot_conversations_telegram_username.sql) is
+-- whatever the triggering update's message.from.username was, NULL when
+-- Telegram gave none — nullable, never backfilled.
+INSERT INTO bot_conversations (id, shop_id, telegram_chat_id, telegram_user_id, customer_id, mode, telegram_username)
+VALUES (sqlc.arg('id'), sqlc.arg('shop_id'), sqlc.arg('telegram_chat_id'), sqlc.arg('telegram_user_id'), sqlc.narg('customer_id'), sqlc.arg('mode'), sqlc.narg('telegram_username'))
 RETURNING *;
 
 -- name: GetBotConversationByChat :one
@@ -19,9 +22,16 @@ WHERE shop_id = $1 AND id = $2;
 -- Called once per turn the bot writes to bot_messages: bumps
 -- message_count and moves last_message_at forward, so
 -- ListBotConversations' "newest activity" ordering (below) reflects it
--- immediately.
+-- immediately. telegram_username (0023_bot_conversations_telegram_
+-- username.sql) is refreshed opportunistically from the same update: the
+-- caller passes it whenever it has one at hand (a user's turn, where
+-- message.from.username is available) and NULL otherwise (an assistant
+-- reply's own persist call, which has no Telegram update to read it
+-- from) — COALESCE keeps the previously stored value in that case rather
+-- than wiping it back to null.
 UPDATE bot_conversations
-SET last_message_at = sqlc.arg('last_message_at'), message_count = message_count + 1
+SET last_message_at = sqlc.arg('last_message_at'), message_count = message_count + 1,
+    telegram_username = COALESCE(sqlc.narg('telegram_username'), telegram_username)
 WHERE shop_id = sqlc.arg('shop_id') AND id = sqlc.arg('id')
 RETURNING *;
 

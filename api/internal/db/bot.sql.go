@@ -40,24 +40,28 @@ func (q *Queries) CountLLMMessagesSince(ctx context.Context, arg CountLLMMessage
 }
 
 const createBotConversation = `-- name: CreateBotConversation :one
-INSERT INTO bot_conversations (id, shop_id, telegram_chat_id, telegram_user_id, customer_id, mode)
-VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, shop_id, telegram_chat_id, telegram_user_id, customer_id, mode, message_count, last_message_at, created_at
+INSERT INTO bot_conversations (id, shop_id, telegram_chat_id, telegram_user_id, customer_id, mode, telegram_username)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, shop_id, telegram_chat_id, telegram_user_id, customer_id, mode, message_count, last_message_at, created_at, telegram_username
 `
 
 type CreateBotConversationParams struct {
-	ID             uuid.UUID  `json:"id"`
-	ShopID         uuid.UUID  `json:"shop_id"`
-	TelegramChatID int64      `json:"telegram_chat_id"`
-	TelegramUserID int64      `json:"telegram_user_id"`
-	CustomerID     *uuid.UUID `json:"customer_id"`
-	Mode           BotMode    `json:"mode"`
+	ID               uuid.UUID  `json:"id"`
+	ShopID           uuid.UUID  `json:"shop_id"`
+	TelegramChatID   int64      `json:"telegram_chat_id"`
+	TelegramUserID   int64      `json:"telegram_user_id"`
+	CustomerID       *uuid.UUID `json:"customer_id"`
+	Mode             BotMode    `json:"mode"`
+	TelegramUsername *string    `json:"telegram_username"`
 }
 
 // O-26: one conversation per (shop, chat) — the bot's own handler calls
 // GetBotConversationByChat first and only reaches this on a miss; the
 // UNIQUE(shop_id, telegram_chat_id) constraint (0021_bot_conversations.sql)
 // is the actual guarantee, this insert is not itself an upsert.
+// telegram_username (0023_bot_conversations_telegram_username.sql) is
+// whatever the triggering update's message.from.username was, NULL when
+// Telegram gave none — nullable, never backfilled.
 func (q *Queries) CreateBotConversation(ctx context.Context, arg CreateBotConversationParams) (BotConversation, error) {
 	row := q.db.QueryRow(ctx, createBotConversation,
 		arg.ID,
@@ -66,6 +70,7 @@ func (q *Queries) CreateBotConversation(ctx context.Context, arg CreateBotConver
 		arg.TelegramUserID,
 		arg.CustomerID,
 		arg.Mode,
+		arg.TelegramUsername,
 	)
 	var i BotConversation
 	err := row.Scan(
@@ -78,6 +83,7 @@ func (q *Queries) CreateBotConversation(ctx context.Context, arg CreateBotConver
 		&i.MessageCount,
 		&i.LastMessageAt,
 		&i.CreatedAt,
+		&i.TelegramUsername,
 	)
 	return i, err
 }
@@ -106,7 +112,7 @@ func (q *Queries) DeleteBotMessagesBefore(ctx context.Context, arg DeleteBotMess
 }
 
 const getBotConversation = `-- name: GetBotConversation :one
-SELECT id, shop_id, telegram_chat_id, telegram_user_id, customer_id, mode, message_count, last_message_at, created_at FROM bot_conversations
+SELECT id, shop_id, telegram_chat_id, telegram_user_id, customer_id, mode, message_count, last_message_at, created_at, telegram_username FROM bot_conversations
 WHERE shop_id = $1 AND id = $2
 `
 
@@ -128,12 +134,13 @@ func (q *Queries) GetBotConversation(ctx context.Context, arg GetBotConversation
 		&i.MessageCount,
 		&i.LastMessageAt,
 		&i.CreatedAt,
+		&i.TelegramUsername,
 	)
 	return i, err
 }
 
 const getBotConversationByChat = `-- name: GetBotConversationByChat :one
-SELECT id, shop_id, telegram_chat_id, telegram_user_id, customer_id, mode, message_count, last_message_at, created_at FROM bot_conversations
+SELECT id, shop_id, telegram_chat_id, telegram_user_id, customer_id, mode, message_count, last_message_at, created_at, telegram_username FROM bot_conversations
 WHERE shop_id = $1 AND telegram_chat_id = $2
 `
 
@@ -155,6 +162,7 @@ func (q *Queries) GetBotConversationByChat(ctx context.Context, arg GetBotConver
 		&i.MessageCount,
 		&i.LastMessageAt,
 		&i.CreatedAt,
+		&i.TelegramUsername,
 	)
 	return i, err
 }
@@ -224,7 +232,7 @@ func (q *Queries) InsertBotMessage(ctx context.Context, arg InsertBotMessagePara
 }
 
 const listBotConversations = `-- name: ListBotConversations :many
-SELECT id, shop_id, telegram_chat_id, telegram_user_id, customer_id, mode, message_count, last_message_at, created_at FROM bot_conversations
+SELECT id, shop_id, telegram_chat_id, telegram_user_id, customer_id, mode, message_count, last_message_at, created_at, telegram_username FROM bot_conversations
 WHERE shop_id = $1
     AND (
         $2::timestamptz IS NULL
@@ -272,6 +280,7 @@ func (q *Queries) ListBotConversations(ctx context.Context, arg ListBotConversat
 			&i.MessageCount,
 			&i.LastMessageAt,
 			&i.CreatedAt,
+			&i.TelegramUsername,
 		); err != nil {
 			return nil, err
 		}
@@ -429,23 +438,36 @@ func (q *Queries) SumBotTokensSince(ctx context.Context, arg SumBotTokensSincePa
 
 const touchBotConversation = `-- name: TouchBotConversation :one
 UPDATE bot_conversations
-SET last_message_at = $1, message_count = message_count + 1
-WHERE shop_id = $2 AND id = $3
-RETURNING id, shop_id, telegram_chat_id, telegram_user_id, customer_id, mode, message_count, last_message_at, created_at
+SET last_message_at = $1, message_count = message_count + 1,
+    telegram_username = COALESCE($2, telegram_username)
+WHERE shop_id = $3 AND id = $4
+RETURNING id, shop_id, telegram_chat_id, telegram_user_id, customer_id, mode, message_count, last_message_at, created_at, telegram_username
 `
 
 type TouchBotConversationParams struct {
-	LastMessageAt *time.Time `json:"last_message_at"`
-	ShopID        uuid.UUID  `json:"shop_id"`
-	ID            uuid.UUID  `json:"id"`
+	LastMessageAt    *time.Time `json:"last_message_at"`
+	TelegramUsername *string    `json:"telegram_username"`
+	ShopID           uuid.UUID  `json:"shop_id"`
+	ID               uuid.UUID  `json:"id"`
 }
 
 // Called once per turn the bot writes to bot_messages: bumps
 // message_count and moves last_message_at forward, so
 // ListBotConversations' "newest activity" ordering (below) reflects it
-// immediately.
+// immediately. telegram_username (0023_bot_conversations_telegram_
+// username.sql) is refreshed opportunistically from the same update: the
+// caller passes it whenever it has one at hand (a user's turn, where
+// message.from.username is available) and NULL otherwise (an assistant
+// reply's own persist call, which has no Telegram update to read it
+// from) — COALESCE keeps the previously stored value in that case rather
+// than wiping it back to null.
 func (q *Queries) TouchBotConversation(ctx context.Context, arg TouchBotConversationParams) (BotConversation, error) {
-	row := q.db.QueryRow(ctx, touchBotConversation, arg.LastMessageAt, arg.ShopID, arg.ID)
+	row := q.db.QueryRow(ctx, touchBotConversation,
+		arg.LastMessageAt,
+		arg.TelegramUsername,
+		arg.ShopID,
+		arg.ID,
+	)
 	var i BotConversation
 	err := row.Scan(
 		&i.ID,
@@ -457,6 +479,7 @@ func (q *Queries) TouchBotConversation(ctx context.Context, arg TouchBotConversa
 		&i.MessageCount,
 		&i.LastMessageAt,
 		&i.CreatedAt,
+		&i.TelegramUsername,
 	)
 	return i, err
 }
