@@ -1,9 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 
-import { ContactsBlock } from "../../components/ContactsBlock";
-import { HoursTable } from "../../components/HoursTable";
-import { ClockIcon, MapPinIcon } from "../../components/icons";
+import { ContactsCard } from "../../components/landing/ContactsCard";
+import { HoursCard } from "../../components/landing/HoursCard";
 import { absoluteUrl, asRouteMatchHead, buildSeoHead, chooseOgImage } from "../../lib/seo";
 import { splitParagraphs } from "../../lib/text";
 
@@ -12,7 +11,10 @@ import { splitParagraphs } from "../../lib/text";
  * the `$locale` layout, so this route needs no loader of its own. Any
  * block that was never set in the admin (D-104 — a whole key can be
  * absent, not just one locale) is simply skipped, the same conditional
- * pattern the home page uses. */
+ * pattern the home page uses. phase-7.5 T3: the hours/contacts sections
+ * reuse the homepage's own `HoursCard`/`ContactsCard` (white
+ * `bg-landing-surface` cards) rather than the bare `HoursTable`/
+ * `ContactsBlock`, so this page's cards match the home page's per D-121. */
 export const Route = createFileRoute("/$locale/about")({
   head: ({ match }) => {
     const { shop, locale, siteUrl } = match.context;
@@ -41,40 +43,34 @@ function AboutPage() {
   const about = blocks.about;
 
   return (
-    <main className="mx-auto flex max-w-3xl flex-col gap-8 px-4 py-8">
-      <h1 className="font-bold text-2xl text-text">{about?.title ?? shop.name}</h1>
+    <main className="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-8">
+      <div className="flex flex-col gap-3 rounded-landing-card bg-landing-surface p-5 shadow-landing-card sm:p-6">
+        <h1 className="font-bold text-2xl text-text">{about?.title ?? shop.name}</h1>
 
-      {about?.body != null && about.body !== "" && (
-        <div className="flex flex-col gap-3 text-text">
-          {splitParagraphs(about.body).map((paragraph, index) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: a static, never-reordered list of paragraphs split from one string (same pattern as the product page).
-            <p key={index} className="whitespace-pre-line">
-              {paragraph}
-            </p>
-          ))}
-        </div>
-      )}
+        {about?.body != null && about.body !== "" && (
+          <div className="flex flex-col gap-3 text-text">
+            {splitParagraphs(about.body).map((paragraph, index) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: a static, never-reordered list of paragraphs split from one string (same pattern as the product page).
+              <p key={index} className="whitespace-pre-line">
+                {paragraph}
+              </p>
+            ))}
+          </div>
+        )}
+      </div>
 
       {(blocks.hours != null || blocks.contacts != null) && (
-        <div className="grid gap-8 lg:grid-cols-2">
+        <div className="grid gap-6 lg:grid-cols-2">
           {blocks.hours != null && (
-            <section>
-              <h2 className="mb-4 flex items-center gap-2 font-semibold text-text text-xl">
-                <ClockIcon className="h-5 w-5 text-primary" />
-                {t("web.home.hoursTitle")}
-              </h2>
-              <HoursTable hours={blocks.hours} />
-            </section>
+            <HoursCard hours={blocks.hours} title={t("web.home.hoursTitle")} />
           )}
 
           {blocks.contacts != null && (
-            <section>
-              <h2 className="mb-4 flex items-center gap-2 font-semibold text-text text-xl">
-                <MapPinIcon className="h-5 w-5 text-primary" />
-                {t("web.home.contactsTitle")}
-              </h2>
-              <ContactsBlock contacts={blocks.contacts} social={blocks.social} />
-            </section>
+            <ContactsCard
+              contacts={blocks.contacts}
+              social={blocks.social}
+              title={t("web.home.contactsTitle")}
+            />
           )}
         </div>
       )}

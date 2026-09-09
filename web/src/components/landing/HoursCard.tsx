@@ -7,10 +7,9 @@ type ContentHours = components["schemas"]["ContentHours"];
 /**
  * The "opening hours" twin card (D-121): the white card shell + icon badge
  * + heading are new for Variant B, the table content is the existing
- * `HoursTable` unchanged — it is also used, un-wrapped, by `/$locale/about`,
- * so its own markup stays untouched. `HoursTable` renders its own bordered
- * white box (right for the about page, where it stands alone); the
- * `[&>div]:` overrides below flatten that inner box so it does not nest
+ * `HoursTable` unchanged. `/$locale/about` reuses this same card (phase-7.5
+ * T3) so both pages match. `HoursTable` renders its own bordered white box;
+ * the `[&>div]:` overrides below flatten that inner box so it does not nest
  * inside this card's own border/shadow as a visible double frame.
  */
 export function HoursCard({ hours, title }: { hours: ContentHours; title: string }) {

@@ -8,9 +8,10 @@ type ContentSocial = components["schemas"]["ContentSocial"];
 
 /**
  * The "contacts" twin card (D-121), matching `HoursCard`'s shell. The
- * content is the existing `ContactsBlock` unchanged — also used, un-wrapped,
- * by `/$locale/about` — so the phone/address/social styling (and the
- * `mapHref` https-only rule) stays exactly as reviewed there.
+ * content is the existing `ContactsBlock` unchanged, so the phone/address/
+ * social styling (and the `mapHref` https-only rule) stays exactly as
+ * reviewed there. `/$locale/about` reuses this same card (phase-7.5 T3) so
+ * both pages match.
  */
 export function ContactsCard({
   contacts,
