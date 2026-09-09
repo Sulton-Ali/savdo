@@ -1107,8 +1107,11 @@
       "hoursClosed": "выходной"
     },
     "hero": {
-      "cta": "Смотреть каталог"
+      "cta": "Смотреть каталог",
+      "eyebrow": "Семейный магазин",
+      "photoPlaceholder": "Фото семьи — в магазине"
     },
+    "telegramCta": "Написать в Telegram",
     "weekdayShort": {
       "mon": "Пн",
       "tue": "Вт",
@@ -1120,10 +1123,24 @@
     },
     "home": {
       "categoriesTitle": "Категории",
+      "categoryProductCount_one": "{{count}} товар",
+      "categoryProductCount_few": "{{count}} товара",
+      "categoryProductCount_many": "{{count}} товаров",
+      "categoryProductCount_other": "{{count}} товара",
       "featuredTitle": "Популярные товары",
-      "newProductsTitle": "Новинки",
+      "productPhotoPlaceholder": "Фото товара",
       "hoursTitle": "Часы работы",
-      "contactsTitle": "Контакты"
+      "contactsTitle": "Контакты",
+      "aboutEyebrow": "О нас",
+      "aboutTitle": "Наш семейный магазин",
+      "aboutPlaceholder": "Краткая информация о магазине скоро появится здесь.",
+      "sampleLabel": "образец",
+      "quote1Text": "Товары качественные, а цены приятные.",
+      "quote1Author": "[Имя клиента]",
+      "quote2Text": "Быстро ответили на мой вопрос в Telegram.",
+      "quote2Author": "[Имя клиента]",
+      "ctaHeading": "Есть вопрос? Спросите в Telegram",
+      "ctaSubheading": "Ответим в течение нескольких минут — в рабочее время."
     },
     "category": {
       "empty": "В этой категории пока нет товаров.",

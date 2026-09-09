@@ -8,7 +8,7 @@ import { CategoryCard } from "./CategoryCard";
 
 type PublicCategory = components["schemas"]["PublicCategory"];
 
-const GRID_CLASS = "grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4";
+const GRID_CLASS = "grid grid-cols-1 gap-4 lg:grid-cols-3";
 
 type Block =
   | { type: "singles"; key: string; items: PublicCategory[] }
@@ -58,7 +58,9 @@ export function CategoryGrid({
 
   return (
     <section>
-      <h2 className="mb-4 font-semibold text-text text-xl">{t("web.home.categoriesTitle")}</h2>
+      <h2 className="mb-5 font-bold text-2xl text-text tracking-tight sm:text-[28px]">
+        {t("web.home.categoriesTitle")}
+      </h2>
       <div className="flex flex-col gap-8">
         {blocks.map((block) =>
           block.type === "singles" ? (
@@ -72,11 +74,14 @@ export function CategoryGrid({
               <Link
                 to="/$locale/c/$slug"
                 params={{ locale, slug: block.group.root.slug }}
-                className="flex items-baseline gap-2 font-semibold text-lg text-text hover:text-primary"
+                className="flex items-baseline gap-2 font-bold text-lg text-text hover:text-landing-secondary-hover"
               >
                 {block.group.root.name}
-                <span className="font-normal text-muted text-sm">
-                  {block.group.root.productCount}
+                {/* This row sits directly on the page's bg-bg (#f5f5f4), not
+                 * inside a white card — text-landing-muted (#5b6472), not
+                 * the shared text-muted, clears WCAG AA there (review). */}
+                <span className="font-normal text-landing-muted text-sm">
+                  {t("web.home.categoryProductCount", { count: block.group.root.productCount })}
                 </span>
               </Link>
               <div className={GRID_CLASS}>

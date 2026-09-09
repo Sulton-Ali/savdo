@@ -1107,8 +1107,11 @@
       "hoursClosed": "closed"
     },
     "hero": {
-      "cta": "View catalogue"
+      "cta": "View catalogue",
+      "eyebrow": "Family shop",
+      "photoPlaceholder": "Family photo — inside the shop"
     },
+    "telegramCta": "Chat on Telegram",
     "weekdayShort": {
       "mon": "Mon",
       "tue": "Tue",
@@ -1120,10 +1123,24 @@
     },
     "home": {
       "categoriesTitle": "Categories",
+      "categoryProductCount_one": "{{count}} product",
+      "categoryProductCount_few": "{{count}} products",
+      "categoryProductCount_many": "{{count}} products",
+      "categoryProductCount_other": "{{count}} products",
       "featuredTitle": "Featured products",
-      "newProductsTitle": "New products",
+      "productPhotoPlaceholder": "Product photo",
       "hoursTitle": "Opening hours",
-      "contactsTitle": "Contacts"
+      "contactsTitle": "Contacts",
+      "aboutEyebrow": "About us",
+      "aboutTitle": "Our family shop",
+      "aboutPlaceholder": "A short introduction to the shop will appear here soon.",
+      "sampleLabel": "sample",
+      "quote1Text": "Good quality products at fair prices.",
+      "quote1Author": "[Customer name]",
+      "quote2Text": "They replied to my question on Telegram right away.",
+      "quote2Author": "[Customer name]",
+      "ctaHeading": "Got a question? Ask on Telegram",
+      "ctaSubheading": "We reply within minutes — during business hours."
     },
     "category": {
       "empty": "No products in this category yet.",
