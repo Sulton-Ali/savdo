@@ -1,8 +1,9 @@
 /**
  * The coral "about our family shop" card (D-121). Text-on-accent uses the
- * darker `landing-accent-hover` step (see `styles.css`'s TODO(T1) block),
- * not the base tone — this card's body copy is normal-size text, not a
- * large display heading, so it needs the ~4.64:1 pairing, not ~3.67:1.
+ * darker `landing-accent-hover` step, not the base tone — this card's body
+ * copy is normal-size text, not a large display heading, so it needs the
+ * ~4.64:1 pairing, not ~3.67:1 (see `packages/ui-tokens/src/tokens.ts`'s
+ * `landing` doc comment for the full contrast table).
  */
 export function AboutCard({
   eyebrow,

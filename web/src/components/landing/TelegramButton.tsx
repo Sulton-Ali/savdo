@@ -10,8 +10,9 @@ import { TelegramIcon } from "../icons";
  * Filled with `landing-accent-hover` (the darker step), not the base
  * `landing-accent`: white text on the base tone measures ~3.67:1 (WCAG AA
  * passes only large/bold text), the darker step ~4.64:1 (passes normal
- * text too) — see `styles.css`'s TODO(T1) block. `hover:brightness-95`
- * gives a visible interactive state without a third colour token.
+ * text too) — see `packages/ui-tokens/src/tokens.ts`'s `landing` doc
+ * comment. `hover:brightness-95` gives a visible interactive state without
+ * a third colour token.
  */
 export function TelegramButton({
   href,

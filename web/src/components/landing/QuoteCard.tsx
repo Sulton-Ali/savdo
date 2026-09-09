@@ -7,7 +7,7 @@ import { QuoteIcon } from "../icons";
  * placeholder copy the shop owner is meant to replace by hand later, never
  * presented as real feedback. `text-landing-accent` here is a large (28px)
  * decorative icon, not text, so the base tone (not `-hover`) is fine — see
- * `styles.css`'s TODO(T1) contrast note.
+ * `packages/ui-tokens/src/tokens.ts`'s `landing` doc comment.
  */
 export function QuoteCard({
   quote,
