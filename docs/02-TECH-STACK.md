@@ -108,11 +108,13 @@ pattern; revisit if bundle size becomes a landing performance issue.
 | GitHub Actions  | —        | `ci.yml` from Phase 0, `deploy.yml` from Phase 8                                                                        |
 | lefthook        | 2.1.12   | Git hooks (commit-msg conventional-commit + trailer ban); installed by `pnpm install` (`prepare`), build approved in `pnpm-workspace.yaml` |
 
-## LLM for the bot (D-110: Claude Sonnet 5)
+## LLM for the bot (D-110: Gemini 3.8 Flash)
 
-Model: `claude-sonnet-5` (D-110); Go SDK version pinned by the Phase 7 adapter task.
-Config: `AI_MODEL` environment variable defaults to `claude-sonnet-5`, changeable without
-code (ADR-009 provider-agnostic adapter).
+Model: `gemini-3.8-flash` via `openai_compat` provider (D-110).
+Config: `AI_MODEL=gemini-3.8-flash`, `AI_API_KEY` from Google AI Studio (free tier),
+`AI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai`, plus
+`AI_PRICE_INPUT_PER_MTOK=0.75` and `AI_PRICE_OUTPUT_PER_MTOK=3.75` for cost estimates
+(ADR-009 provider-agnostic adapter).
 
 ## Tooling for agents
 
