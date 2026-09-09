@@ -29,11 +29,15 @@ import { stockLevelsRoute } from "./routes/app/stockLevelsRoute";
 import { stockLowRoute } from "./routes/app/stockLowRoute";
 import { stockMovementsRoute } from "./routes/app/stockMovementsRoute";
 import { suppliersRoute } from "./routes/app/suppliersRoute";
+import { telegramLinkRoute } from "./routes/app/telegramLinkRoute";
+import { forgotPasswordRoute } from "./routes/forgot-password/forgotPasswordRoute";
 import { loginRoute } from "./routes/login/loginRoute";
 import { rootRoute } from "./routes/root";
 
 const routeTree = rootRoute.addChildren([
   loginRoute,
+  // Phase 7 T7: OTP-driven password reset (ADR-005, D-28), no session.
+  forgotPasswordRoute,
   authenticatedRoute.addChildren([
     dashboardRoute,
     productsRoute,
@@ -74,6 +78,9 @@ const routeTree = rootRoute.addChildren([
     // Phase 7 T6: bot conversations list/detail (owner/manager, `bot.read`).
     botConversationsRoute,
     botConversationDetailRoute,
+    // Phase 7 T7: Telegram account link status (any authenticated role —
+    // not `shop.settings`, unlike the rest of `/settings/*`).
+    telegramLinkRoute,
   ]),
 ]);
 

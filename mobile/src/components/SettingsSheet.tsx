@@ -6,15 +6,17 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { i18next } from "@/i18n";
 import { useLogout } from "@/lib/session";
 
+import { TelegramLinkSection } from "./TelegramLinkSection";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Text } from "./ui/text";
 
 /**
- * The header's small settings sheet (deliverable 6): language switch plus
- * logout. Built from the copied `react-native-reusables` primitives and
- * React Native's own `Modal` — a dedicated `Sheet`/`Dialog` primitive isn't
- * used since this is the only place the app needs one (keep it simple).
+ * The header's small settings sheet (deliverable 6): language switch,
+ * Telegram account link (Phase 7 T7 deliverable D) and logout. Built from
+ * the copied `react-native-reusables` primitives and React Native's own
+ * `Modal` — a dedicated `Sheet`/`Dialog` primitive isn't used since this is
+ * the only place the app needs one (keep it simple).
  */
 export function SettingsSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   const { t } = useTranslation();
@@ -53,6 +55,11 @@ export function SettingsSheet({ visible, onClose }: { visible: boolean; onClose:
                   ))}
                 </View>
               </View>
+              {/* Mounted only while the sheet is open, so the status query
+               * (`useTelegramLinkStatus`) doesn't fire before the user ever
+               * opens Settings — the `Modal` itself stays mounted with
+               * `visible={false}` (RN's own behaviour), unlike this child. */}
+              {visible && <TelegramLinkSection />}
               <Button variant="destructive" disabled={logout.isPending} onPress={handleLogout}>
                 <Text>{t("auth.logout")}</Text>
               </Button>

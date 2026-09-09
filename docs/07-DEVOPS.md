@@ -180,6 +180,7 @@ in dev/CI.
 | `BOT_WEBHOOK_SECRET`| (secret)       | Webhook signing secret for Telegram (Phase 8, D-112); owner-provided in `infra/.env` only for production mode |
 | `BOT_MODE`          | `polling`      | Bot update mechanism: `polling` (dev, long-polling) or `webhook` (prod, Phase 8) |
 | `SITE_URL`          | (placeholder)  | Public site URL for bot links and OG images (D-100, D-115); Phase 8 sets the real domain |
+| `VITE_BOT_USERNAME` | (empty)        | **Admin-only** (`admin/.env.example`), read by Vite at build time, not `config.Load()`: the Telegram bot's `@username` for the Login Widget on the login page (Phase 7 T7, ADR-005). Empty hides "Log in with Telegram"; the widget also needs the admin's origin linked via `/setdomain` in @BotFather |
 
 ## Shared local services during parallel work
 

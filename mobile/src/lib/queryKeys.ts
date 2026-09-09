@@ -187,3 +187,10 @@ export const draftsKeys = {
   list: (filters: { createdBy?: string }) => ["drafts", "list", filters] as const,
   detail: (id: string) => ["drafts", "detail", id] as const,
 };
+
+/** Account query keys (Phase 7 T7): the caller's own Telegram link status
+ * (`GET /auth/telegram/link`). A single entry — there is only ever one
+ * status, the caller's own. */
+export const accountKeys = {
+  telegramLink: () => ["account", "telegramLink"] as const,
+};

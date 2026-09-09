@@ -1,10 +1,11 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
-import { Alert, Button, Card, Form, Input } from "antd";
+import { Link, useNavigate } from "@tanstack/react-router";
+import { Alert, Button, Card, Divider, Form, Input } from "antd";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { ApiAuthError, login } from "../../auth/api";
+import { ApiAuthError, authenticateTelegram, login } from "../../auth/api";
+import { TelegramLoginButton, type TelegramWidgetUser } from "../../auth/TelegramLoginButton";
 
 interface LoginFormValues {
   username: string;
@@ -25,6 +26,23 @@ function errorKeyFor(error: unknown): "invalidCredentials" | "rateLimited" | "ge
   return "generic";
 }
 
+/** Full i18n key for a `POST /auth/telegram` failure — `401
+ * UNAUTHENTICATED` here specifically means "HMAC ok, but this Telegram
+ * account isn't linked to any user" (or a bad HMAC; the API deliberately
+ * returns the same code for both, docs/05-API.md § Auth), a different
+ * message from the username/password form's `invalidCredentials`. */
+function telegramErrorKeyFor(error: unknown): string {
+  if (error instanceof ApiAuthError) {
+    if (error.code === "UNAUTHENTICATED") {
+      return "auth.telegram.errors.notLinked";
+    }
+    if (error.code === "RATE_LIMITED") {
+      return "auth.errors.rateLimited";
+    }
+  }
+  return "auth.errors.generic";
+}
+
 export function LoginPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -32,17 +50,55 @@ export function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
   const [errorKey, setErrorKey] = useState<string | null>(null);
   const [retryAfterSeconds, setRetryAfterSeconds] = useState<number | null>(null);
+  // Separate from `errorKey`/`retryAfterSeconds`: the Telegram widget
+  // callback fires outside the AntD form submit above and needs its own
+  // message set (`telegramErrorKeyFor`, distinct wording for the same
+  // `UNAUTHENTICATED` code) rather than sharing `auth.errors.*`.
+  const [telegramErrorKey, setTelegramErrorKey] = useState<string | null>(null);
+
+  const botUsername = import.meta.env.VITE_BOT_USERNAME;
+
+  async function afterAuthenticated() {
+    await queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
+    await navigate({ to: "/" });
+  }
 
   async function handleFinish(values: LoginFormValues) {
     setSubmitting(true);
     setErrorKey(null);
     setRetryAfterSeconds(null);
+    setTelegramErrorKey(null);
     try {
       await login(values);
-      await queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
-      await navigate({ to: "/" });
+      await afterAuthenticated();
     } catch (error) {
       setErrorKey(errorKeyFor(error));
+      setRetryAfterSeconds(
+        error instanceof ApiAuthError ? (error.retryAfterSeconds ?? null) : null,
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleTelegramAuth(user: TelegramWidgetUser) {
+    setSubmitting(true);
+    setErrorKey(null);
+    setRetryAfterSeconds(null);
+    setTelegramErrorKey(null);
+    try {
+      await authenticateTelegram({
+        id: String(user.id),
+        firstName: user.first_name,
+        lastName: user.last_name,
+        username: user.username,
+        photoUrl: user.photo_url,
+        authDate: user.auth_date,
+        hash: user.hash,
+      });
+      await afterAuthenticated();
+    } catch (error) {
+      setTelegramErrorKey(telegramErrorKeyFor(error));
       setRetryAfterSeconds(
         error instanceof ApiAuthError ? (error.retryAfterSeconds ?? null) : null,
       );
@@ -75,6 +131,19 @@ export function LoginPage() {
             }
           />
         )}
+        {telegramErrorKey && (
+          <Alert
+            style={{ marginBottom: 16 }}
+            type="error"
+            showIcon
+            message={t(telegramErrorKey)}
+            description={
+              retryAfterSeconds != null
+                ? t("auth.errors.retryAfter", { seconds: retryAfterSeconds })
+                : undefined
+            }
+          />
+        )}
         <Form<LoginFormValues> layout="vertical" onFinish={handleFinish} disabled={submitting}>
           <Form.Item name="username" label={t("auth.login.username")} rules={[{ required: true }]}>
             <Input autoComplete="username" />
@@ -92,6 +161,17 @@ export function LoginPage() {
             </Button>
           </Form.Item>
         </Form>
+        <div style={{ textAlign: "right", marginBottom: botUsername ? 16 : 0 }}>
+          <Link to="/forgot-password">{t("auth.login.forgotPassword")}</Link>
+        </div>
+        {botUsername && (
+          <>
+            <Divider plain>{t("auth.login.orDivider")}</Divider>
+            <div style={{ display: "flex", justifyContent: "center" }}>
+              <TelegramLoginButton botUsername={botUsername} onAuth={handleTelegramAuth} />
+            </div>
+          </>
+        )}
       </Card>
     </div>
   );

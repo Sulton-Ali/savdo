@@ -5,6 +5,8 @@ import { api } from "./api";
 export type Me = components["schemas"]["Me"];
 export type User = components["schemas"]["User"];
 export type ErrorCode = components["schemas"]["ErrorCode"];
+export type TelegramLinkCode = components["schemas"]["TelegramLinkCode"];
+export type TelegramLinkStatus = components["schemas"]["TelegramLinkStatus"];
 
 /**
  * Thrown by every function in this module on a non-2xx response. Carries
@@ -87,6 +89,36 @@ export async function login(credentials: {
 /** `POST /auth/logout` — revokes the current session. */
 export async function logout(): Promise<void> {
   const { error } = await api.POST("/auth/logout");
+  if (error) {
+    throw new ApiAuthError(errorCodeFrom(error));
+  }
+}
+
+/** `GET /auth/telegram/link` — the caller's own Telegram link status. Any
+ * authenticated role (Phase 7 T7 deliverable D). */
+export async function fetchTelegramLinkStatus(): Promise<TelegramLinkStatus> {
+  const { data, error } = await api.GET("/auth/telegram/link");
+  if (error) {
+    throw new ApiAuthError(errorCodeFrom(error));
+  }
+  return data;
+}
+
+/** `POST /auth/telegram/link` — starts linking the caller's own account;
+ * returns a single-use 10-minute code and the deep link to open in
+ * Telegram. Any authenticated role. */
+export async function createTelegramLink(): Promise<TelegramLinkCode> {
+  const { data, error } = await api.POST("/auth/telegram/link");
+  if (error) {
+    throw new ApiAuthError(errorCodeFrom(error));
+  }
+  return data;
+}
+
+/** `DELETE /auth/telegram/link` — unlinks the caller's own Telegram
+ * account. Any authenticated role. */
+export async function deleteTelegramLink(): Promise<void> {
+  const { error } = await api.DELETE("/auth/telegram/link");
   if (error) {
     throw new ApiAuthError(errorCodeFrom(error));
   }

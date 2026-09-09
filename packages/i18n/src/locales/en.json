@@ -52,14 +52,17 @@
     "quickSale": "Quick sale",
     "salesDrafts": "Sale drafts",
     "reports": "Reports",
-    "bot": "Bot"
+    "bot": "Bot",
+    "telegram": "Telegram"
   },
   "auth": {
     "login": {
       "title": "Sign in",
       "username": "Username",
       "password": "Password",
-      "submit": "Sign in"
+      "submit": "Sign in",
+      "orDivider": "or",
+      "forgotPassword": "Forgot password?"
     },
     "errors": {
       "invalidCredentials": "Incorrect username or password",
@@ -67,7 +70,52 @@
       "retryAfter": "Try again in {{seconds}}s",
       "generic": "Something went wrong. Please try again"
     },
+    "telegram": {
+      "errors": {
+        "notLinked": "This Telegram account is not linked to a user"
+      }
+    },
+    "forgotPassword": {
+      "title": "Reset password",
+      "backToLogin": "Back to login",
+      "success": "Password reset. Please sign in with your new password.",
+      "step1": {
+        "description": "Enter your username. If your account is linked to Telegram, we'll send a code there.",
+        "username": "Username",
+        "submit": "Send code"
+      },
+      "step2": {
+        "description": "If this account is linked to Telegram, a code was sent. Enter it below.",
+        "code": "Code",
+        "submit": "Verify code"
+      },
+      "step3": {
+        "newPassword": "New password",
+        "confirmPassword": "Confirm password",
+        "submit": "Reset password"
+      },
+      "errors": {
+        "codeInvalid": "Wrong or expired code. Please try again.",
+        "confirmMismatch": "Passwords do not match.",
+        "tokenExpired": "This reset session expired. Please start again."
+      }
+    },
     "logout": "Log out"
+  },
+  "telegram": {
+    "title": "Telegram",
+    "status": {
+      "linked": "Linked as @{{username}}",
+      "linkedNoUsername": "Linked",
+      "notLinked": "Not linked"
+    },
+    "link": "Link Telegram",
+    "unlink": "Unlink",
+    "unlinkConfirm": "Unlink this Telegram account?",
+    "unlinked": "Telegram account unlinked",
+    "refresh": "Check status",
+    "codeValidity": "Valid for 10 minutes",
+    "openInTelegram": "Open in Telegram"
   },
   "roles": {
     "owner": "Owner",

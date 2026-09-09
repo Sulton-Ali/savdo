@@ -15,6 +15,7 @@ import {
   MapPin,
   Package,
   Receipt,
+  Send,
   Settings,
   ShoppingCart,
   Tags,
@@ -187,6 +188,14 @@ function AppShell() {
       icon: <Bot size={16} />,
       label: <Link to="/bot/conversations">{t("nav.bot")}</Link>,
       permission: "bot.read",
+    },
+    // Phase 7 T7: Telegram account link — every role manages their own
+    // link (contract: any authenticated role), unlike `/settings` above.
+    {
+      key: "/settings/telegram",
+      icon: <Send size={16} />,
+      label: <Link to="/settings/telegram">{t("nav.telegram")}</Link>,
+      permission: null,
     },
   ];
 
