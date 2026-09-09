@@ -24,12 +24,16 @@ const maxCatalogCategories = 20
 // through (tools.go's own doc comment) — so they are persisted with
 // provider "static" the same way O-24/O-25's fallback replies are
 // (persist.go's own convention: "static" means "not a real LLM call",
-// matching CountLLMMessagesSince's own filter).
-func (s *Service) handleCommand(ctx context.Context, shop db.Shop, conv db.BotConversation, chatID int64, text, locale, telegramUsername string) {
+// matching CountLLMMessagesSince's own filter). telegramUserID and
+// isPrivateChat are the *live* update's own values (update.go), never
+// conv's stored ones — only /start link_<code> needs either, but every
+// command gets them so handleStart never has to guess which caller
+// passed the real thing (Sonnet/Opus MAJOR 4's own fix).
+func (s *Service) handleCommand(ctx context.Context, shop db.Shop, conv db.BotConversation, chatID int64, text, locale, telegramUsername string, telegramUserID int64, isPrivateChat bool) {
 	cmd, payload := splitCommand(text)
 	switch cmd {
 	case "/start":
-		s.handleStart(ctx, shop, conv, chatID, locale, payload, telegramUsername)
+		s.handleStart(ctx, shop, conv, chatID, locale, payload, telegramUsername, telegramUserID, isPrivateChat)
 	case "/hours":
 		s.handleHours(ctx, shop, conv, chatID, locale)
 	case "/address":
@@ -69,14 +73,29 @@ func (s *Service) replyStaticText(ctx context.Context, shop db.Shop, conv db.Bot
 	}
 }
 
-func (s *Service) handleStart(ctx context.Context, shop db.Shop, conv db.BotConversation, chatID int64, locale, payload, telegramUsername string) {
+// handleStart answers plain /start with D-113's greeting, and /start
+// link_<code> by redeeming code through s.linker — using the *live*
+// telegramUserID/telegramUsername the triggering update itself carried,
+// never conv.TelegramUserID (the *first* update that ever created this
+// bot_conversations row, which can be a different Telegram user's id
+// once T5 wires a real Linker: Sonnet/Opus MAJOR 4, an account-takeover
+// risk in any chat more than one person can post to). isPrivateChat
+// rejects the redemption outright in a group/supergroup/channel — a
+// link code is a one-person credential, and "whoever sends /start
+// link_<code> next" in a group is never guaranteed to be the Telegram
+// account the owner meant to link.
+func (s *Service) handleStart(ctx context.Context, shop db.Shop, conv db.BotConversation, chatID int64, locale, payload, telegramUsername string, telegramUserID int64, isPrivateChat bool) {
 	if strings.HasPrefix(payload, "link_") {
+		if !isPrivateChat {
+			s.replyStaticText(ctx, shop, conv, chatID, localeTexts(locale).startLinkFailed)
+			return
+		}
 		code := strings.TrimPrefix(payload, "link_")
 		if s.linker == nil {
 			s.replyStaticText(ctx, shop, conv, chatID, localeTexts(locale).startLinkUnavailable)
 			return
 		}
-		if err := s.linker.LinkTelegram(ctx, code, conv.TelegramUserID, telegramUsername); err != nil {
+		if err := s.linker.LinkTelegram(ctx, code, telegramUserID, telegramUsername); err != nil {
 			s.replyStaticText(ctx, shop, conv, chatID, localeTexts(locale).startLinkFailed)
 			return
 		}

@@ -180,7 +180,18 @@ func newTestEnv(t *testing.T, aiClient ai.Client) *testEnv {
 	// service's own clock has to track real time too. clock.advance lets a
 	// test move it forward within the same window without needing to wait.
 	clk := newClock(time.Now())
-	cfg := bot.Config{ShopID: shopRow.ID, SiteURL: "https://savdo.test"}
+	// PriceInputPerMTok/PriceOutputPerMTok/DailyTokenBudget mirror
+	// internal/config.Config's own envDefault values (config.go) — most
+	// tests in this package care about the free-text path reaching the
+	// model, not about cost math or the budget gate specifically, so this
+	// keeps every one of them passing under a "shop NULL -> env budget
+	// applies" default (D-120's own R2) the same way a real deployment
+	// would.
+	cfg := bot.Config{
+		ShopID: shopRow.ID, SiteURL: "https://savdo.test",
+		PriceInputPerMTok: "2.00", PriceOutputPerMTok: "10.00",
+		DailyTokenBudget: 200_000,
+	}
 
 	svc := bot.NewService(pool, q, aiClient, pubHandler, contentSvc, sender, nil, cfg, clk.now, testLogger())
 
@@ -197,6 +208,24 @@ func newTestEnv(t *testing.T, aiClient ai.Client) *testEnv {
 // fixture's catalog/content data for every one of O-27's scenarios.
 func (e *testEnv) rebuildService(aiClient ai.Client) {
 	e.svc = bot.NewService(e.pool, e.q, aiClient, e.pub, e.content, e.sender, nil, e.cfg, e.clock.now, testLogger())
+}
+
+// rebuildServiceNilSender builds a Service with a nil Sender — item 10's
+// own scenario (cmd/api/main.go's own doc comment: TELEGRAM_BOT_TOKEN
+// unset leaves botSender nil) — everything else unchanged. Returns the
+// new *bot.Service rather than mutating e.svc directly so a caller can
+// choose whether to keep e.sender's own recorded messages/photos
+// meaningful afterward (a nil-sender Service never calls it).
+func (e *testEnv) rebuildServiceNilSender() *bot.Service {
+	return bot.NewService(e.pool, e.q, ai.NewFake(), e.pub, e.content, nil, nil, e.cfg, e.clock.now, testLogger())
+}
+
+// rebuildServiceWithLinker swaps in linker (nil by default from
+// newTestEnv — service.go's own doc comment on TelegramLinker) — Sonnet/
+// Opus MAJOR 4's own account-linking tests need a fake that records what
+// it was called with.
+func (e *testEnv) rebuildServiceWithLinker(aiClient ai.Client, linker bot.TelegramLinker) {
+	e.svc = bot.NewService(e.pool, e.q, aiClient, e.pub, e.content, e.sender, linker, e.cfg, e.clock.now, testLogger())
 }
 
 // setBudget sets the shop's daily token budget (O-25) directly through
@@ -362,11 +391,21 @@ func decimalOf(t *testing.T, s string) decimal.Decimal {
 // textUpdate builds a minimal *models.Update carrying one text message —
 // the only shape HandleUpdate's own doc comment says this package acts
 // on ("customer mode only... anything that is not a text message is
-// ignored").
+// ignored"). Chat.Type is "private", the realistic case for every test
+// that does not itself care about it — real Telegram always sets this
+// field (it is never blank on the wire), and only /start link_<code>
+// (Sonnet/Opus MAJOR 4) reads it at all.
 func textUpdate(chatID, telegramUserID int64, username, langCode, text string) *models.Update {
+	return updateInChat(chatID, telegramUserID, username, langCode, text, models.ChatTypePrivate)
+}
+
+// updateInChat is textUpdate with an explicit chat type — item 4/MAJOR
+// 4's own group-chat rejection test needs one, textUpdate's callers
+// (every other test in this package) do not.
+func updateInChat(chatID, telegramUserID int64, username, langCode, text string, chatType models.ChatType) *models.Update {
 	return &models.Update{
 		Message: &models.Message{
-			Chat: models.Chat{ID: chatID},
+			Chat: models.Chat{ID: chatID, Type: chatType},
 			From: &models.User{ID: telegramUserID, Username: username, LanguageCode: langCode},
 			Text: text,
 		},

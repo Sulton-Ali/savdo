@@ -20,6 +20,22 @@ var supportedLocales = map[string]bool{"uz": true, "ru": true, "en": true}
 // the Telegram user's own language_code, then the shop's default_locale.
 // languageCode may carry a region suffix ("en-US") or be empty (some
 // Telegram clients send none); only the primary subtag is checked.
+//
+// Known mismatch (item 15, no behavior change): this locale also
+// resolves which language executeTool's tool results come back in
+// (withLocale below), but the *model itself* answers in whatever
+// language it detects the customer's own message to be written in
+// (chat.go's systemPrompt: "Detect the customer's own language... and
+// answer in that language instead"), which can differ from the
+// Telegram UI language_code this function reads. A customer whose
+// Telegram client is set to Russian but who writes in English gets tool
+// data resolved in Russian (category/content names, if translated)
+// while the model's own prose answers in English. Not fixed here: there
+// is no trivial fix — resolving tool data in the *model's* detected
+// language would mean detecting it twice (once here, before the first
+// Chat call that could tell us, and once by the model itself), or
+// changing the tool loop's shape so a tool call can carry its own
+// locale, either of which is more than this task's scope.
 func resolveCommandLocale(languageCode, shopDefaultLocale string) string {
 	tag, _, _ := strings.Cut(strings.ToLower(strings.TrimSpace(languageCode)), "-")
 	if supportedLocales[tag] {

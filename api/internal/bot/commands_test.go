@@ -49,6 +49,78 @@ func TestHandleUpdate_start_link_noLinkerConfigured(t *testing.T) {
 	}
 }
 
+// fakeLinker records every LinkTelegram call — Sonnet/Opus MAJOR 4's own
+// tests need to see exactly which telegramUserID/telegramUsername
+// handleStart passed it.
+type fakeLinker struct {
+	calls              int
+	lastTelegramUserID int64
+	lastUsername       string
+	err                error
+}
+
+func (f *fakeLinker) LinkTelegram(_ context.Context, _ string, telegramUserID int64, telegramUsername string) error {
+	f.calls++
+	f.lastTelegramUserID = telegramUserID
+	f.lastUsername = telegramUsername
+	return f.err
+}
+
+// TestHandleUpdate_startLink_usesLiveUpdateUser_notStoredConversationUser
+// pins Sonnet/Opus MAJOR 4: a bot_conversations row's own
+// TelegramUserID is whoever's message first created it (userA below) —
+// /start link_<code> from a *different* Telegram user (userB) in the
+// same chat must redeem the code for userB, the update's own live
+// message.from.id, never conv.TelegramUserID. Getting this wrong is an
+// account-takeover bug the moment a real Linker (T5) is wired in: any
+// second speaker in the same chat could link *their own* Telegram
+// account to whatever code the first speaker's admin panel minted.
+func TestHandleUpdate_startLink_usesLiveUpdateUser_notStoredConversationUser(t *testing.T) {
+	env := newTestEnv(t, noChatClient())
+	linker := &fakeLinker{}
+	env.rebuildServiceWithLinker(noChatClient(), linker)
+	const chatID = int64(1)
+	const userA, userB = int64(100), int64(200)
+
+	// userA's own message creates the conversation — conv.TelegramUserID
+	// is now userA's id.
+	env.svc.HandleUpdate(context.Background(), textUpdate(chatID, userA, "alice", "uz", "/hours"))
+
+	// userB posts /start link_<code> in the *same* chat.
+	env.svc.HandleUpdate(context.Background(), textUpdate(chatID, userB, "bob", "uz", "/start link_abc123"))
+
+	if linker.calls != 1 {
+		t.Fatalf("LinkTelegram called %d times, want 1", linker.calls)
+	}
+	if linker.lastTelegramUserID != userB {
+		t.Fatalf("LinkTelegram telegramUserID = %d, want the live update's userB (%d), not conv's stored userA (%d)", linker.lastTelegramUserID, userB, userA)
+	}
+	if linker.lastUsername != "bob" {
+		t.Fatalf("LinkTelegram telegramUsername = %q, want %q", linker.lastUsername, "bob")
+	}
+}
+
+// TestHandleUpdate_startLink_groupChatRefused pins the other half of
+// MAJOR 4: /start link_<code> is refused outright in a non-private chat
+// — a link code is a one-person credential, and "whoever sends /start
+// link_<code> next" in a group is never guaranteed to be the Telegram
+// account the owner meant to link.
+func TestHandleUpdate_startLink_groupChatRefused(t *testing.T) {
+	env := newTestEnv(t, noChatClient())
+	linker := &fakeLinker{}
+	env.rebuildServiceWithLinker(noChatClient(), linker)
+
+	env.svc.HandleUpdate(context.Background(), updateInChat(1, 100, "alice", "uz", "/start link_abc123", models.ChatTypeGroup))
+
+	if linker.calls != 0 {
+		t.Fatalf("LinkTelegram called %d times, want 0 (group chat must never redeem a link code)", linker.calls)
+	}
+	got := lastReply(t, env.sender.allReplyTexts())
+	if strings.Contains(got, "muvaffaqiyatli") {
+		t.Fatalf("reply = %q, want a refusal, not a success message", got)
+	}
+}
+
 func TestHandleUpdate_unknownCommand(t *testing.T) {
 	env := newTestEnv(t, noChatClient())
 	env.svc.HandleUpdate(context.Background(), textUpdate(1, 100, "alice", "uz", "/frobnicate"))

@@ -27,6 +27,17 @@ func isUniqueViolation(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
+// nilIfEmpty turns an empty string into a nil *string — the shape every
+// nullable TelegramUsername column/param below expects: "" (Telegram
+// gave no username at all) must store/COALESCE as NULL, never the
+// literal empty string.
+func nilIfEmpty(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
 // loadOrCreateConversation resolves the one bot_conversations row for
 // (shopID, chatID) — O-26: "one bot_conversations row per (shop, chat)
 // forever" — creating it on a miss. A concurrent miss racing this insert
@@ -34,7 +45,12 @@ func isUniqueViolation(err error) bool {
 // retrying the read once against UNIQUE(shop_id, telegram_chat_id)
 // (0021_bot_conversations.sql), the constraint that is the actual
 // guarantee here (bot.sql's own CreateBotConversation doc comment).
-func (s *Service) loadOrCreateConversation(ctx context.Context, shopID uuid.UUID, chatID, telegramUserID int64) (db.BotConversation, error) {
+// telegramUsername (0023_bot_conversations_telegram_username.sql) is
+// whatever the triggering update's message.from.username was, stored
+// only on a fresh row here — an existing conversation's own username is
+// refreshed by TouchBotConversation instead (persist below), on every
+// turn, not just the first.
+func (s *Service) loadOrCreateConversation(ctx context.Context, shopID uuid.UUID, chatID, telegramUserID int64, telegramUsername string) (db.BotConversation, error) {
 	conv, err := s.q.GetBotConversationByChat(ctx, db.GetBotConversationByChatParams{ShopID: shopID, TelegramChatID: chatID})
 	if err == nil {
 		return conv, nil
@@ -45,6 +61,7 @@ func (s *Service) loadOrCreateConversation(ctx context.Context, shopID uuid.UUID
 
 	conv, err = s.q.CreateBotConversation(ctx, db.CreateBotConversationParams{
 		ID: newID(), ShopID: shopID, TelegramChatID: chatID, TelegramUserID: telegramUserID, Mode: db.BotModeCustomer,
+		TelegramUsername: nilIfEmpty(telegramUsername),
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -93,21 +110,29 @@ func startOfDay(now time.Time, loc *time.Location) time.Time {
 
 // shopOverBudget reports whether shop's daily token spend (input+output,
 // summed since local midnight in the shop's own timezone) is at or over
-// shops.ai_daily_token_budget (O-25). A NULL budget means "no cap" — the
-// column has no default (0001_shops.sql) and nothing in this codebase
-// sets one yet, so treating NULL as "unlimited" rather than "zero" is
-// the only reading that does not silently disable every existing shop's
-// bot the moment this ships.
+// its effective daily budget (O-25, D-120): shops.ai_daily_token_budget
+// when the shop row sets one, else Config.DailyTokenBudget
+// (AI_DAILY_TOKEN_BUDGET, default 200000 — NewService's own doc
+// comment). D-120 reverses O-25's original "NULL means unlimited"
+// reading now that an env-level fallback exists to mean "unlimited"
+// would need its own explicit (very large) value instead: an effective
+// budget of zero or less — the shop column NULL *and* the env value
+// unset/zero — fails closed (no cap configured at all is never read as
+// "no limit").
 func (s *Service) shopOverBudget(ctx context.Context, shop db.Shop) (bool, error) {
-	if shop.AiDailyTokenBudget == nil {
-		return false, nil
+	budget := s.cfg.DailyTokenBudget
+	if shop.AiDailyTokenBudget != nil {
+		budget = int(*shop.AiDailyTokenBudget)
+	}
+	if budget <= 0 {
+		return true, nil
 	}
 	since := startOfDay(s.now(), shopLocation(shop))
 	total, err := s.q.SumBotTokensSince(ctx, db.SumBotTokensSinceParams{ShopID: shop.ID, Since: since})
 	if err != nil {
 		return false, fmt.Errorf("bot: sum bot tokens: %w", err)
 	}
-	return total >= int64(*shop.AiDailyTokenBudget), nil
+	return total >= int64(budget), nil
 }
 
 // persistParams is one bot_messages row to write, plus the
@@ -125,6 +150,14 @@ type persistParams struct {
 	OutputTokens   *int32
 	LatencyMs      *int32
 	CostEstimate   *string // decimal string (ADR-007); nil means the column stays NULL.
+	// TelegramUsername refreshes bot_conversations.telegram_username
+	// (0023_bot_conversations_telegram_username.sql) opportunistically:
+	// set it on a user-turn persist call (update.go has one, straight
+	// from the triggering update's message.from.username), leave it nil
+	// on every assistant persist call (there is no Telegram update to
+	// read one from) — TouchBotConversation's own COALESCE keeps the
+	// previously stored value in that case rather than wiping it to NULL.
+	TelegramUsername *string
 }
 
 // persist inserts one bot_messages row (append-only — 0022_bot_messages.
@@ -152,7 +185,9 @@ func (s *Service) persist(ctx context.Context, p persistParams) error {
 	}
 
 	createdAt := msg.CreatedAt
-	if _, err := s.q.TouchBotConversation(ctx, db.TouchBotConversationParams{LastMessageAt: &createdAt, ShopID: p.ShopID, ID: p.ConversationID}); err != nil {
+	if _, err := s.q.TouchBotConversation(ctx, db.TouchBotConversationParams{
+		LastMessageAt: &createdAt, TelegramUsername: p.TelegramUsername, ShopID: p.ShopID, ID: p.ConversationID,
+	}); err != nil {
 		return fmt.Errorf("bot: touch conversation: %w", err)
 	}
 	return nil

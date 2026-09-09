@@ -143,6 +143,18 @@ type Config struct {
 	// no bot named (telegram.go) as a last line of defense.
 	BotUsername string `env:"BOT_USERNAME"`
 
+	// AIDailyTokenBudget is O-25/D-120's env-level daily token cap for the
+	// bot's own per-shop budget gate (bot.Service.shopOverBudget, via
+	// bot.Config.DailyTokenBudget): applied whenever a shop's own
+	// ai_daily_token_budget column is NULL. Default 200000 — a real cap,
+	// not "unlimited": D-120 reverses O-25's original "NULL means
+	// unlimited" reading, so a shop with no budget row set still has a
+	// real (generous) daily ceiling by default, not none at all. An
+	// explicit 0 here, combined with a NULL shop column, fails the bot
+	// closed instead — a static reply, no LLM call — until one of the two
+	// is configured.
+	AIDailyTokenBudget int `env:"AI_DAILY_TOKEN_BUDGET" envDefault:"200000"`
+
 	// TelegramBotToken is shared by two independent readers of the same
 	// secret (D-112, docs/07-DEVOPS.md § Environment variables):
 	// AuthenticateTelegram uses it to verify the Telegram Login Widget's

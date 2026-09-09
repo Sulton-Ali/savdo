@@ -20,8 +20,16 @@ import (
 // distinctive strings (never a plausible coincidental substring of an
 // allowed value such as a price or a slug).
 const (
-	forbiddenCostPrice   = "94371.50" // products.cost_price (hard rule 5 / ADR-010)
-	forbiddenExactQty    = "137"      // the real stock qty behind an "in_stock"/"low"/"out_of_stock" word (never a number, chat.go's system prompt)
+	forbiddenCostPrice = "94371.50" // products.cost_price (hard rule 5 / ADR-010)
+	// forbiddenExactQty is the real stock qty behind an "in_stock"/"low"/
+	// "out_of_stock" word (never a number, chat.go's system prompt) — a
+	// decimal, not a bare small integer like the old "137" sentinel: every
+	// other id this fixture seeds is a UUID (32 hex digits, 0-9a-f), and a
+	// short run of decimal digits has real odds of turning up as a
+	// substring of one of them by pure chance across a whole transcript
+	// (item 12) — a "." never appears inside a UUID's own text form, so
+	// this can only ever match itself.
+	forbiddenExactQty    = "84.213"
 	forbiddenStaffName   = "Zulfiqar Toshmatov"
 	forbiddenCustomer    = "Gulnora Yusupova"
 	forbiddenCustomerTel = "+998907654321"
@@ -35,13 +43,15 @@ const (
 // "shoes") the scripted questions below reference directly, so callers
 // need nothing back from this beyond the shared env.
 type boundaryFixture struct {
-	env *testEnv
+	env      *testEnv
+	products map[string]db.Product // slug -> row, for chat_test.go's own attachCoverImage
 }
 
 func newBoundaryFixture(t *testing.T, aiClient ai.Client) *boundaryFixture {
 	t.Helper()
 	env := newTestEnv(t, aiClient)
 	ctx := context.Background()
+	products := make(map[string]db.Product)
 
 	unit := seedUnit(ctx, t, env.q, env.shop.ID)
 	loc := seedLocation(ctx, t, env.q, env.shop.ID, "Main")
@@ -57,17 +67,20 @@ func newBoundaryFixture(t *testing.T, aiClient ai.Client) *boundaryFixture {
 	inStock := seedProduct(ctx, t, env.q, env.shop.ID, unit.ID, productSpec{
 		CategoryID: &cat.ID, Slug: "classic-shoes", Name: "Classic Shoes", BasePrice: "150000.00", CostPrice: forbiddenCostPrice, IsActive: true,
 	})
+	products["classic-shoes"] = inStock
 	inStockVariant := seedVariant(ctx, t, env.q, env.shop.ID, inStock.ID)
 	stockIn(ctx, t, env.pool, env.q, env.shop.ID, inStockVariant.ID, loc.ID, forbiddenExactQty)
 
 	outOfStock := seedProduct(ctx, t, env.q, env.shop.ID, unit.ID, productSpec{
 		CategoryID: &cat.ID, Slug: "limited-shoes", Name: "Limited Shoes", BasePrice: "300000.00", CostPrice: forbiddenCostPrice, IsActive: true,
 	})
+	products["limited-shoes"] = outOfStock
 	seedVariant(ctx, t, env.q, env.shop.ID, outOfStock.ID) // never stocked -> out_of_stock
 
 	promo := seedProduct(ctx, t, env.q, env.shop.ID, unit.ID, productSpec{
 		CategoryID: &cat.ID, Slug: "promo-shoes", Name: "Promo Shoes", BasePrice: "200000.00", PromoPrice: "150000.00", CostPrice: forbiddenCostPrice, IsActive: true,
 	})
+	products["promo-shoes"] = promo
 	promoVariant := seedVariant(ctx, t, env.q, env.shop.ID, promo.ID)
 	stockIn(ctx, t, env.pool, env.q, env.shop.ID, promoVariant.ID, loc.ID, "5")
 
@@ -97,7 +110,32 @@ func newBoundaryFixture(t *testing.T, aiClient ai.Client) *boundaryFixture {
 		t.Fatalf("seed customer: %v", err)
 	}
 
-	return &boundaryFixture{env: env}
+	return &boundaryFixture{env: env, products: products}
+}
+
+// attachCoverImage seeds one media file and links it as slug's product-
+// level cover image (IsCover: true, no VariantID) — chat_test.go's own
+// MAJOR 7/item 16 photo-caption tests need a real cover image, unlike
+// every O-27 boundary scenario above, which deliberately seeds none.
+func (f *boundaryFixture) attachCoverImage(t *testing.T, slug string) {
+	t.Helper()
+	product, ok := f.products[slug]
+	if !ok {
+		t.Fatalf("attachCoverImage(%q): no such seeded product", slug)
+	}
+	ctx := context.Background()
+	sha := uuid.New()
+	mediaFile, err := f.env.q.CreateMediaFile(ctx, db.CreateMediaFileParams{
+		ID: uuid.New(), ShopID: f.env.shop.ID, StorageKey: f.env.shop.ID.String() + "/" + slug, Mime: "image/webp", SizeBytes: 1024, Sha256: sha[:],
+	})
+	if err != nil {
+		t.Fatalf("attachCoverImage(%q): CreateMediaFile: %v", slug, err)
+	}
+	if _, err := f.env.q.AddProductImage(ctx, db.AddProductImageParams{
+		ID: uuid.New(), ShopID: f.env.shop.ID, ProductID: product.ID, MediaID: mediaFile.ID, SortOrder: 0, IsCover: true,
+	}); err != nil {
+		t.Fatalf("attachCoverImage(%q): AddProductImage: %v", slug, err)
+	}
 }
 
 // toolCallResult scripts one tool_use round: the "model" asks to call
