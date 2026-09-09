@@ -158,6 +158,21 @@ owner links Telegram and resets their password via OTP; conversations appear in 
 
 ---
 
+## Phase 7.5 — Landing redesign
+
+- [ ] Landing token definitions: coral accent #e05a47, teal secondary #1f8a80 in packages/ui-tokens as `landing.accent`, `landing.secondary` (D-36 terracotta stays shared)
+- [ ] Homepage rebuilt per Variant B "Warm cards": hero card with Telegram CTA, category row cards, product cards with price and availability badge, hours and contacts twin cards with icon badges, about our family shop section, customer quote cards, Telegram CTA card before footer
+- [ ] i18n copy (uz/ru/en) for hero tagline, about section, customer quotes placeholder, and CTA text
+- [ ] Responsive design and accessibility: mobile-first, desktop layout, WCAG AA contrast ratio on coral/teal pairs, keyboard navigation
+- [ ] Playwright e2e: homepage sections render correctly in uz/ru/en on 390 px phone and desktop
+
+**Done when:** the homepage at / renders the four Variant-B sections in uz/ru/en
+on desktop and a 390 px phone, matches the design canvas within reason (owner accepts
+visually), Lighthouse accessibility ≥ 90 locally, `make verify` and `pnpm -r test:e2e`
+green.
+
+---
+
 ## Phase 8 — Production, onboarding the first shop
 
 - [ ] VPS provisioned; Docker Compose prod file; Caddy with TLS on the real domain; env secrets
