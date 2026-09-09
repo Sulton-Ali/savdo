@@ -79,11 +79,35 @@ export function TelegramLoginButton({
     script.setAttribute("data-onauth", "onTelegramAuth(user)");
     container.appendChild(script);
 
+    // The widget script loads asynchronously and, once it does, inserts an
+    // `<iframe id="telegram-login-<botname>">` next to the script tag
+    // above. That iframe picks its own `color-scheme`, which can differ
+    // from the admin's (always light — no dark mode yet, see
+    // `AppConfigProvider`); when it does, Chromium paints the iframe's
+    // transparent background solid black instead of see-through. There is
+    // no load event to hook, so watch the container until the iframe
+    // shows up and fix its `color-scheme` then.
+    const observer = new MutationObserver(() => {
+      const iframe = container.querySelector<HTMLIFrameElement>("iframe");
+      if (iframe) {
+        iframe.style.colorScheme = "light";
+        observer.disconnect();
+      }
+    });
+    observer.observe(container, { childList: true, subtree: true });
+
     return () => {
+      observer.disconnect();
       container.removeChild(script);
       delete window.onTelegramAuth;
     };
   }, [botUsername]);
 
-  return <div ref={containerRef} data-testid="telegram-login-widget" />;
+  return (
+    <div
+      ref={containerRef}
+      data-testid="telegram-login-widget"
+      style={{ background: "transparent" }}
+    />
+  );
 }

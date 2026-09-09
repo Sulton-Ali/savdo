@@ -168,6 +168,21 @@ describe("LoginPage", () => {
       await waitFor(() => expect(router.state.location.pathname).toBe("/"));
     });
 
+    it("sets color-scheme on the widget iframe once Telegram inserts it, so Chromium keeps it transparent", async () => {
+      vi.stubEnv("VITE_BOT_USERNAME", "savdo_bot");
+      renderLoginPage();
+
+      const container = await screen.findByTestId("telegram-login-widget");
+      // Telegram's script loads async and, once it does, inserts an iframe
+      // next to the script tag it replaces — simulate that here rather
+      // than loading the real widget.
+      const iframe = document.createElement("iframe");
+      iframe.id = "telegram-login-savdo_bot";
+      container.appendChild(iframe);
+
+      await waitFor(() => expect(iframe.style.colorScheme).toBe("light"));
+    });
+
     it("shows the not-linked message on an UNAUTHENTICATED callback error", async () => {
       vi.stubEnv("VITE_BOT_USERNAME", "savdo_bot");
       mockedAuthenticateTelegram.mockRejectedValueOnce(new ApiAuthError("UNAUTHENTICATED"));
