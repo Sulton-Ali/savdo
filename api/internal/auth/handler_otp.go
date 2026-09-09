@@ -127,7 +127,9 @@ func (h *Handler) ResetPassword(ctx context.Context, req gen.ResetPasswordReques
 		return nil, apierr.Validation(fields)
 	}
 
-	if err := h.svc.ResetPassword(ctx, req.Body.ActionToken, req.Body.NewPassword); err != nil {
+	ri, _ := requestInfoFromContext(ctx)
+
+	if err := h.svc.ResetPassword(ctx, req.Body.ActionToken, req.Body.NewPassword, ri.ip); err != nil {
 		return nil, err
 	}
 

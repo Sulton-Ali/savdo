@@ -113,12 +113,33 @@ func TestVerifyLoginWidget(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "stale auth_date (correctly signed, but > 24h old)",
+			name: "stale auth_date (correctly signed, but far past telegramAuthMaxAge)",
 			payload: gen.TelegramAuthRequest{
 				Id: "123456789", AuthDate: 1000000000,
 				Hash: "4a3170e4f8075756ad3f08f2a93462defda492699faea983f2121fd673323017",
 			},
 			wantErr: true,
+		},
+		{
+			// D-117: the widget window is 5 minutes. A payload 6 minutes old
+			// must already be rejected.
+			name: "auth_date 6 minutes old is rejected",
+			payload: func() gen.TelegramAuthRequest {
+				past := int(time.Now().Add(-6 * time.Minute).Unix())
+				return signPayload(gen.TelegramAuthRequest{Id: "123456789", AuthDate: past}, testBotToken)
+			}(),
+			wantErr: true,
+		},
+		{
+			// D-117: a payload 4 minutes old is still within the 5-minute
+			// window and must be accepted.
+			name: "auth_date 4 minutes old is accepted",
+			payload: func() gen.TelegramAuthRequest {
+				past := int(time.Now().Add(-4 * time.Minute).Unix())
+				return signPayload(gen.TelegramAuthRequest{Id: "123456789", Username: strPtr("testuser"), AuthDate: past}, testBotToken)
+			}(),
+			wantID:      123456789,
+			wantUserame: "testuser",
 		},
 		{
 			name:    "wrong bot token",
@@ -530,6 +551,48 @@ func TestCompleteLinkSecondAttemptWithSameCodeFailsAndDoesNotRelink(t *testing.T
 	}
 	if username == nil || *username != "first_username" {
 		t.Fatalf("GetTelegramLink() username = %v, want first_username (the 2nd CompleteLink call must not have relinked)", username)
+	}
+}
+
+// TestCompleteLinkRateLimitedByTelegramUserID mirrors
+// TestAuthenticateTelegramRateLimitedByIP: CompleteLink shares Login's own
+// ipLimiter (D-118), keyed by telegramUserID since it has no HTTP IP to
+// key on (telegramLimiterKey) — every call here reuses the same
+// telegramUserID so it lands in the same bucket.
+func TestCompleteLinkRateLimitedByTelegramUserID(t *testing.T) {
+	pool := testdb.New(t)
+	testdb.Truncate(t, pool)
+	ctx := context.Background()
+	q := db.New(pool)
+
+	shop := seedShop(ctx, t, q, "shop-a")
+	cfg := testTelegramConfig()
+	cfg.LoginRateIPPerMin = 2
+	svc := NewService(pool, q, cfg, shop.ID)
+
+	// Every call here uses a garbage code, so it fails on parseSelectorToken
+	// (ErrLinkCodeInvalid) — same ordering as the other rate-limit tests:
+	// the limiter check runs first.
+	const rateLimitedTelegramID = int64(4242)
+
+	for i := 0; i < 2; i++ {
+		err := svc.CompleteLink(ctx, "not-a-real-code", rateLimitedTelegramID, "")
+		if err != ErrLinkCodeInvalid {
+			t.Fatalf("attempt %d: error = %v, want ErrLinkCodeInvalid (still under the rate limit)", i+1, err)
+		}
+	}
+
+	err := svc.CompleteLink(ctx, "not-a-real-code", rateLimitedTelegramID, "")
+	if err == nil {
+		t.Fatal("3rd attempt: error = nil, want RateLimited")
+	}
+	if got := errStatus(t, err); got != 429 {
+		t.Fatalf("3rd attempt status = %d, want 429", got)
+	}
+
+	// A different Telegram id is a different bucket and is unaffected.
+	if err := svc.CompleteLink(ctx, "not-a-real-code", rateLimitedTelegramID+1, ""); err != ErrLinkCodeInvalid {
+		t.Fatalf("different telegram id: error = %v, want ErrLinkCodeInvalid (own bucket, not rate limited)", err)
 	}
 }
 

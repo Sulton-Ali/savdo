@@ -428,7 +428,7 @@ func TestVerifyOtpThenResetPasswordFullFlow(t *testing.T) {
 		t.Fatal("VerifyOtp() (code reused) error = nil, want 401")
 	}
 
-	if err := svc.ResetPassword(ctx, actionToken, "new-password-2"); err != nil {
+	if err := svc.ResetPassword(ctx, actionToken, "new-password-2", nil); err != nil {
 		t.Fatalf("ResetPassword() error = %v", err)
 	}
 
@@ -441,7 +441,7 @@ func TestVerifyOtpThenResetPasswordFullFlow(t *testing.T) {
 	}
 
 	// The action token is single use.
-	if err := svc.ResetPassword(ctx, actionToken, "yet-another-password-3"); err == nil {
+	if err := svc.ResetPassword(ctx, actionToken, "yet-another-password-3", nil); err == nil {
 		t.Fatal("ResetPassword() (token reused) error = nil, want 401")
 	}
 
@@ -477,8 +477,39 @@ func TestResetPasswordRejectsMalformedToken(t *testing.T) {
 	shop := seedShop(ctx, t, q, "shop-a")
 	svc := NewService(pool, q, testConfig(), shop.ID)
 
-	if err := svc.ResetPassword(ctx, "not-a-real-token", "some-new-password"); err == nil || errStatus(t, err) != 401 {
+	if err := svc.ResetPassword(ctx, "not-a-real-token", "some-new-password", nil); err == nil || errStatus(t, err) != 401 {
 		t.Fatalf("ResetPassword() error = %v, want 401", err)
+	}
+}
+
+// TestResetPasswordRateLimitedByIP mirrors
+// TestAuthenticateTelegramRateLimitedByIP (telegram_test.go): ResetPassword
+// shares Login's own ipLimiter (D-118), so it must be rate limited the same
+// way, checked before the (here, malformed) action token is ever parsed.
+func TestResetPasswordRateLimitedByIP(t *testing.T) {
+	pool := testdb.New(t)
+	testdb.Truncate(t, pool)
+	ctx := context.Background()
+	q := db.New(pool)
+
+	shop := seedShop(ctx, t, q, "shop-a")
+	cfg := testConfig()
+	cfg.LoginRateIPPerMin = 2
+	svc := NewService(pool, q, cfg, shop.ID)
+
+	for i := 0; i < 2; i++ {
+		err := svc.ResetPassword(ctx, "not-a-real-token", "some-new-password", nil)
+		if err == nil || errStatus(t, err) != 401 {
+			t.Fatalf("attempt %d: want 401 (still under the rate limit), got %v", i+1, err)
+		}
+	}
+
+	err := svc.ResetPassword(ctx, "not-a-real-token", "some-new-password", nil)
+	if err == nil {
+		t.Fatal("3rd attempt: error = nil, want RateLimited")
+	}
+	if got := errStatus(t, err); got != 429 {
+		t.Fatalf("3rd attempt status = %d, want 429", got)
 	}
 }
 
@@ -623,7 +654,7 @@ func TestResetPasswordRejectsInactiveUser(t *testing.T) {
 		t.Fatalf("deactivate user: %v", err)
 	}
 
-	if err := svc.ResetPassword(ctx, actionToken, "new-password-2"); err == nil || errStatus(t, err) != 401 {
+	if err := svc.ResetPassword(ctx, actionToken, "new-password-2", nil); err == nil || errStatus(t, err) != 401 {
 		t.Fatalf("ResetPassword() (inactive user) error = %v, want 401", err)
 	}
 

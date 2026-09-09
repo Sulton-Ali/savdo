@@ -389,7 +389,19 @@ func (s *Service) VerifyOtp(ctx context.Context, username string, purpose db.Otp
 // (shop.Service.SetStaffPassword's own doc comment): every session goes.
 // A malformed, expired, already-used or mismatched token all answer the
 // same apierr.Unauthenticated(), same reasoning as VerifyOtp.
-func (s *Service) ResetPassword(ctx context.Context, actionToken, newPassword string) error {
+//
+// ResetPassword needs no session — actionToken is itself the credential —
+// so unlike every other write in this package it has no username to key a
+// per-account limiter on; it shares s.ipLimiter, Login's own per-IP budget,
+// instead (D-118, 2026-09-09): the action token already carries
+// actionVerifierN bytes of entropy, but that alone was the endpoint's only
+// defense before this change, exactly the gap VerifyLoginWidget's authDate
+// window closes for the widget (D-117's own reasoning).
+func (s *Service) ResetPassword(ctx context.Context, actionToken, newPassword string, ip *netip.Addr) error {
+	if ok, retryAfter := s.ipLimiter.allow(ipKey(ip), time.Now()); !ok {
+		return apierr.RateLimited(retryAfterSeconds(retryAfter))
+	}
+
 	userID, verifier, err := parseSelectorToken(actionToken)
 	if err != nil {
 		return apierr.Unauthenticated()

@@ -27,20 +27,25 @@ import (
 // before VerifyLoginWidget rejects it (ADR-005), matching Telegram's own
 // documented advice ("you can additionally check the auth_date field ...
 // to prevent the use of outdated data" —
-// https://core.telegram.org/widgets/login-legacy#checking-authorization):
-// 24 hours.
+// https://core.telegram.org/widgets/login-legacy#checking-authorization).
+// 5 minutes (owner decision D-117, 2026-09-09, superseding this file's
+// original 24h pick): the widget's payload carries no nonce, so this
+// window is the only thing bounding how long a captured payload stays
+// replayable — 24 hours left an unacceptably wide replay window for that
+// reason; 5 minutes is generous clock-drift headroom for a widget click
+// that is, in practice, submitted within seconds of being signed.
 //
 // telegramAuthMaxSkew bounds how far into the future an authDate may claim
 // to be before VerifyLoginWidget rejects it too — a correctly-HMAC'd
 // payload timestamped hours or days ahead of "now" is not something the
 // real widget would ever produce, and rejecting it costs nothing (Review
-// finding 8's "trivial half": the 24h replay-window question itself is
-// left to the owner, but a future-dated auth_date has no legitimate
-// explanation regardless of how that question is answered). 60 seconds
-// gives normal clock drift between this server and Telegram's headroom
-// without accepting anything meaningfully "from the future".
+// finding 8's "trivial half": the replay-window question itself is left to
+// the owner, but a future-dated auth_date has no legitimate explanation
+// regardless of how that question is answered). 60 seconds gives normal
+// clock drift between this server and Telegram's headroom without
+// accepting anything meaningfully "from the future".
 const (
-	telegramAuthMaxAge  = 24 * time.Hour
+	telegramAuthMaxAge  = 5 * time.Minute
 	telegramAuthMaxSkew = 60 * time.Second
 )
 
@@ -289,6 +294,17 @@ var ErrLinkCodeInvalid = errors.New("auth: telegram link code invalid or expired
 // be reused.
 var ErrTelegramAlreadyLinked = errors.New("auth: telegram account already linked to a different user")
 
+// telegramLimiterKey renders telegramUserID for use as a rate-limiter key,
+// keyed the same way ipKey keys an IP — CompleteLink (below) shares
+// s.ipLimiter (D-118) with Login/ResetPassword, but the bot calls it with
+// no HTTP request behind it, so there is no IP to key on; the Telegram user
+// id is the caller's only stable identity here, and the "telegram:" prefix
+// keeps its keys visibly distinct in the shared map from an IP's own
+// ipKey-rendered string (ipKey never produces this shape).
+func telegramLimiterKey(telegramUserID int64) string {
+	return "telegram:" + strconv.FormatInt(telegramUserID, 10)
+}
+
 // CompleteLink implements TelegramLinker: it parses code (newSelectorToken's
 // "selector.verifier" shape) to recover the userID that requested it, then
 // verifies the verifier half against the active
@@ -296,7 +312,18 @@ var ErrTelegramAlreadyLinked = errors.New("auth: telegram account already linked
 // otpMaxAttempts the same way VerifyOtp's 6-digit code is — before linking
 // telegramUserID/username to that user (LinkTelegramAccount) and marking
 // the code used.
+//
+// It shares s.ipLimiter — Login's own per-IP budget — with Login,
+// AuthenticateTelegram and ResetPassword (D-118, 2026-09-09), keyed by
+// telegramUserID (telegramLimiterKey) since the bot's call to this method
+// carries no HTTP IP: the link code's own entropy was otherwise the only
+// thing bounding how many verifier guesses one Telegram account could throw
+// at CompleteLink beyond otpMaxAttempts's per-code cap.
 func (s *Service) CompleteLink(ctx context.Context, code string, telegramUserID int64, username string) error {
+	if ok, retryAfter := s.ipLimiter.allow(telegramLimiterKey(telegramUserID), time.Now()); !ok {
+		return apierr.RateLimited(retryAfterSeconds(retryAfter))
+	}
+
 	userID, verifier, err := parseSelectorToken(code)
 	if err != nil {
 		return ErrLinkCodeInvalid
