@@ -42,22 +42,18 @@ func nullableInt(v *int32) nullable.Nullable[int] {
 }
 
 // toGenBotConversation converts one db.BotConversation row into the
-// contract's shape. TelegramUsername is always null: 0021_bot_
-// conversations.sql (T1) stores no such column, even though the contract
-// (T3) and docs/05-API.md § Bot both describe it as "if known" — this
-// package cannot add the column (out of its own file scope, and never
-// edits a merged migration), so it reports the field as never known, the
-// literal reading "if known" allows. Flagged in T4's own final report as
-// a follow-up: a migration adding bot_conversations.telegram_username,
-// populated from the Telegram update's `From.Username` alongside
-// telegram_user_id, would let this stop being permanently null.
+// contract's shape. TelegramUsername (0023_bot_conversations_telegram_
+// username.sql) is whatever the conversation's most recent turn's
+// message.from.username was — nullable, null when Telegram never gave
+// one (item 11's own fix; see persist.go's loadOrCreateConversation/
+// TouchBotConversation doc comments for how it is kept fresh).
 func toGenBotConversation(row db.BotConversation) gen.BotConversation {
 	return gen.BotConversation{
 		Id: row.ID, CreatedAt: row.CreatedAt, MessageCount: int(row.MessageCount),
 		Mode: gen.BotConversationMode(row.Mode), CustomerId: nullableUUID(row.CustomerID),
 		LastMessageAt:    nullableTime(row.LastMessageAt),
 		TelegramChatId:   formatInt64(row.TelegramChatID),
-		TelegramUsername: nullable.NewNullNullable[string](),
+		TelegramUsername: nullableString(row.TelegramUsername),
 	}
 }
 
@@ -77,7 +73,10 @@ func toGenBotMessage(row db.BotMessage) (gen.BotMessage, error) {
 		if err != nil {
 			return gen.BotMessage{}, err
 		}
-		msg.CostEstimate = nullable.NewNullableWithValue(money.String(d))
+		// bot_messages.cost_estimate is NUMERIC(10,6) (0022_bot_messages.sql,
+		// O-28), not money's own NUMERIC(14,2) — money.String's 2dp rounding
+		// would collapse a real "0.000140" estimate down to "0.00" (item 6).
+		msg.CostEstimate = nullable.NewNullableWithValue(d.StringFixed(6))
 	} else {
 		msg.CostEstimate = nullable.NewNullNullable[string]()
 	}

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/Sulton-Ali/savdo/api/gen"
 	"github.com/Sulton-Ali/savdo/api/internal/auth"
@@ -36,6 +37,21 @@ type noopBotSender struct{}
 func (noopBotSender) SendMessage(context.Context, int64, string) error       { return nil }
 func (noopBotSender) SendPhoto(context.Context, int64, string, string) error { return nil }
 
+// slowBotSender sleeps delay before every SendMessage/SendPhoto call —
+// item 8's own stand-in for "a slow fake service still running" (this
+// package cannot build a slow ai.Client, see newBotTestFixtureWithSender's
+// own doc comment).
+type slowBotSender struct{ delay time.Duration }
+
+func (s slowBotSender) SendMessage(_ context.Context, _ int64, _ string) error {
+	time.Sleep(s.delay)
+	return nil
+}
+func (s slowBotSender) SendPhoto(_ context.Context, _ int64, _, _ string) error {
+	time.Sleep(s.delay)
+	return nil
+}
+
 // botTestFixture wires a full router (real auth middleware, real
 // bot.Handler) against a real Postgres, with one shop, an owner and a
 // cashier — end-to-end coverage of the webhook's secret check and the
@@ -52,6 +68,20 @@ type botTestFixture struct {
 }
 
 func newBotTestFixture(t *testing.T) botTestFixture {
+	t.Helper()
+	return newBotTestFixtureWithSender(t, noopBotSender{})
+}
+
+// newBotTestFixtureWithSender is newBotTestFixture with an injectable
+// bot.Sender — item 8's own "handler returns fast while a slow update
+// is still processing" test needs a sender slow enough to observe, and
+// this package cannot import internal/ai to build a slow ai.Client
+// instead (scripts/guards.sh's own boundary rule, hard rule 12: "only
+// internal/bot and cmd/* wiring") — a slash-command-only scenario with a
+// slow *Sender* proves the same thing this handler actually promises
+// (HandleBotWebhook itself never blocks on Service.HandleUpdate), without
+// needing a real or fake LLM call at all.
+func newBotTestFixtureWithSender(t *testing.T, sender bot.Sender) botTestFixture {
 	t.Helper()
 	pool := testdb.New(t)
 	testdb.Truncate(t, pool)
@@ -116,7 +146,7 @@ func newBotTestFixture(t *testing.T) botTestFixture {
 	// router-level one. Avoids this package needing to import
 	// internal/ai at all (scripts/guards.sh's own boundary rule: "only
 	// internal/bot and cmd/* wiring").
-	botSvc := bot.NewService(pool, q, nil, pubHandler, contentSvc, noopBotSender{}, nil,
+	botSvc := bot.NewService(pool, q, nil, pubHandler, contentSvc, sender, nil,
 		bot.Config{ShopID: shopRow.ID, SiteURL: "https://savdo.test"}, nil, testLogger())
 
 	router := NewRouter(testLogger(), pool, authSvc, shopSvc, mediaSvc, nil, catalogSvc, stockSvc, crmSvc,
@@ -166,17 +196,29 @@ func (f botTestFixture) get(t *testing.T, path string, cookie *http.Cookie) *htt
 // telegramUpdateJSON builds a minimal Telegram Update JSON body for one
 // text message — the exact shape HandleBotWebhook decodes into
 // models.Update (handler.go's own json.Marshal/json.Unmarshal round
-// trip).
+// trip). No username: item 11's own "nil when Telegram gives none" case.
 func telegramUpdateJSON(updateID int, chatID, userID int64, text string) []byte {
+	return telegramUpdateJSONFull(updateID, chatID, userID, "", "private", text)
+}
+
+// telegramUpdateJSONFull is telegramUpdateJSON with a username and an
+// explicit chat type — item 11 (username persisted) and Sonnet/Opus
+// MAJOR 4 (group chats reject /start link_<code>) both need one of
+// those telegramUpdateJSON itself does not carry.
+func telegramUpdateJSONFull(updateID int, chatID, userID int64, username, chatType, text string) []byte {
+	fromUsername := ""
+	if username != "" {
+		fromUsername = fmt.Sprintf(`, "username": %q`, username)
+	}
 	body := fmt.Sprintf(`{
 		"update_id": %d,
 		"message": {
 			"message_id": 1, "date": 1700000000,
-			"chat": {"id": %d, "type": "private"},
-			"from": {"id": %d, "is_bot": false, "first_name": "Test", "language_code": "uz"},
+			"chat": {"id": %d, "type": %q},
+			"from": {"id": %d, "is_bot": false, "first_name": "Test", "language_code": "uz"%s},
 			"text": %q
 		}
-	}`, updateID, chatID, userID, text)
+	}`, updateID, chatID, chatType, userID, fromUsername, text)
 	return []byte(body)
 }
 
@@ -199,8 +241,12 @@ func TestHandleBotWebhook_wrongSecretIs404(t *testing.T) {
 
 // TestHandleBotWebhook_correctSecretProcessesUpdate proves a matching
 // secret both 200s and actually runs the update through
-// Service.HandleUpdate (a real bot_conversations/bot_messages row
-// appears) — not just an auth check with no effect.
+// Service.Dispatch (a real bot_conversations/bot_messages row appears)
+// — not just an auth check with no effect. HandleBotWebhook itself only
+// acknowledges 200 and hands off to Dispatch's own background goroutine
+// (item 8), so the conversation row can still be missing for a few
+// milliseconds after ServeHTTP returns — pollUntil below waits for it
+// instead of asserting immediately.
 func TestHandleBotWebhook_correctSecretProcessesUpdate(t *testing.T) {
 	f := newBotTestFixture(t)
 
@@ -213,13 +259,32 @@ func TestHandleBotWebhook_correctSecretProcessesUpdate(t *testing.T) {
 		t.Fatalf("status = %d, body = %s, want 200", rec.Code, rec.Body.String())
 	}
 
-	conv, err := f.q.GetBotConversationByChat(context.Background(), db.GetBotConversationByChatParams{ShopID: f.shopID, TelegramChatID: 555})
-	if err != nil {
-		t.Fatalf("GetBotConversationByChat: %v, want a conversation row created by the real update", err)
-	}
+	conv := pollForConversation(t, f.q, f.shopID, 555)
 	if conv.TelegramUserID != 600 {
 		t.Fatalf("TelegramUserID = %d, want 600", conv.TelegramUserID)
 	}
+}
+
+// pollForConversation waits (up to 2s, 10ms between attempts — generous
+// for HandleUpdate's own real work here, a single /start command against
+// a real but tiny Postgres, no LLM call) for chatID's conversation row to
+// appear, the way an assertion right after ServeHTTP returns no longer
+// can once HandleBotWebhook hands off to Service.Dispatch's own
+// background goroutine instead of running synchronously (item 8).
+func pollForConversation(t *testing.T, q *db.Queries, shopID uuid.UUID, chatID int64) db.BotConversation {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		conv, err := q.GetBotConversationByChat(context.Background(), db.GetBotConversationByChatParams{ShopID: shopID, TelegramChatID: chatID})
+		if err == nil {
+			return conv
+		}
+		lastErr = err
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("GetBotConversationByChat: %v, want a conversation row created by the real (async) update within the poll window", lastErr)
+	return db.BotConversation{}
 }
 
 // TestHandleBotWebhook_emptySecretConfiguredAlwaysIs404 pins the safe
@@ -334,4 +399,128 @@ func TestListBotConversationMessages_ownerSeesRealData_wrongShopIs404(t *testing
 	if crossRec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404 for another shop's conversation id", crossRec.Code)
 	}
+}
+
+// TestListBotConversationMessages_costEstimateSixDecimals pins item 6:
+// bot_messages.cost_estimate is NUMERIC(10,6) (0022_bot_messages.sql,
+// O-28), not money's own NUMERIC(14,2) — the contract field must render
+// all six fractional digits ("0.000140"), never rounded down to money's
+// 2dp ("0.00"), or a real (small, sub-cent) LLM cost reads as free.
+func TestListBotConversationMessages_costEstimateSixDecimals(t *testing.T) {
+	f := newBotTestFixture(t)
+	ctx := context.Background()
+
+	conv, err := f.q.CreateBotConversation(ctx, db.CreateBotConversationParams{
+		ID: uuid.New(), ShopID: f.shopID, TelegramChatID: 900, TelegramUserID: 901, Mode: db.BotModeCustomer,
+	})
+	if err != nil {
+		t.Fatalf("CreateBotConversation: %v", err)
+	}
+
+	var cost pgtype.Numeric
+	if err := cost.Scan("0.000140"); err != nil {
+		t.Fatalf("cost.Scan: %v", err)
+	}
+	provider, model := "anthropic", "claude-sonnet-5"
+	var inTok, outTok, lat int32 = 30, 8, 500
+	if _, err := f.q.InsertBotMessage(ctx, db.InsertBotMessageParams{
+		ID: uuid.New(), ConversationID: conv.ID, ShopID: f.shopID, Role: db.BotMessageRoleAssistant, Content: "Yes, in stock.",
+		Provider: &provider, Model: &model, InputTokens: &inTok, OutputTokens: &outTok, LatencyMs: &lat, CostEstimate: cost,
+	}); err != nil {
+		t.Fatalf("InsertBotMessage: %v", err)
+	}
+
+	ownerCookie := f.login(t, f.ownerUsername, f.ownerPassword)
+	rec := f.get(t, "/v1/bot/conversations/"+conv.ID.String()+"/messages", ownerCookie)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var list gen.BotMessageList
+	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(list.Items) != 1 {
+		t.Fatalf("Items = %+v, want exactly the one seeded message", list.Items)
+	}
+	got, err := list.Items[0].CostEstimate.Get()
+	if err != nil {
+		t.Fatalf("CostEstimate.Get: %v (want a value, not null)", err)
+	}
+	if got != "0.000140" {
+		t.Fatalf("CostEstimate = %q, want \"0.000140\" (6dp), not money's 2dp rounding", got)
+	}
+}
+
+// TestHandleBotWebhook_telegramUsernamePersistedAndShownInAdminList
+// pins item 11: bot_conversations.telegram_username is set from the
+// triggering update's message.from.username, and the admin's own GET
+// /bot/conversations surfaces it as a real string (not always null, the
+// pre-fix behavior).
+func TestHandleBotWebhook_telegramUsernamePersistedAndShownInAdminList(t *testing.T) {
+	f := newBotTestFixture(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/bot/webhook/"+f.secret, bytes.NewReader(telegramUpdateJSONFull(2, 777, 778, "alice_tg", "private", "/start")))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	f.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s, want 200", rec.Code, rec.Body.String())
+	}
+	pollForConversation(t, f.q, f.shopID, 777)
+
+	ownerCookie := f.login(t, f.ownerUsername, f.ownerPassword)
+	listRec := f.get(t, "/v1/bot/conversations", ownerCookie)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", listRec.Code, listRec.Body.String())
+	}
+	var list gen.BotConversationList
+	if err := json.Unmarshal(listRec.Body.Bytes(), &list); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	var found *gen.BotConversation
+	for i := range list.Items {
+		if list.Items[i].TelegramChatId == "777" {
+			found = &list.Items[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("Items = %+v, want the conversation for chat 777", list.Items)
+	}
+	username, err := found.TelegramUsername.Get()
+	if err != nil {
+		t.Fatalf("TelegramUsername.Get: %v (want \"alice_tg\", not null)", err)
+	}
+	if username != "alice_tg" {
+		t.Fatalf("TelegramUsername = %q, want %q", username, "alice_tg")
+	}
+}
+
+// TestHandleBotWebhook_returnsFastWhileUpdateStillProcessing pins item
+// 8: HandleBotWebhook itself only validates the secret and decodes the
+// body, then hands off to Service.Dispatch and acknowledges 200 —
+// ServeHTTP must return in low milliseconds even though the update it
+// just accepted is still running (here, blocked inside a slow Sender)
+// well past that.
+func TestHandleBotWebhook_returnsFastWhileUpdateStillProcessing(t *testing.T) {
+	const sendDelay = 300 * time.Millisecond
+	f := newBotTestFixtureWithSender(t, slowBotSender{delay: sendDelay})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/bot/webhook/"+f.secret, bytes.NewReader(telegramUpdateJSON(3, 999, 1000, "/start")))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	start := time.Now()
+	f.router.ServeHTTP(rec, req)
+	elapsed := time.Since(start)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s, want 200", rec.Code, rec.Body.String())
+	}
+	if elapsed >= sendDelay {
+		t.Fatalf("ServeHTTP took %s, want well under the slow sender's own %s delay (the update must run in the background, not inline)", elapsed, sendDelay)
+	}
+
+	// The update did eventually run (proof this is really async, not
+	// just "the sender's own error was swallowed").
+	pollForConversation(t, f.q, f.shopID, 999)
 }

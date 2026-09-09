@@ -1,11 +1,11 @@
 // This file is reply formatting. It deliberately never sends Telegram's
-// MarkdownV2 parse mode: docs/00-DECISIONS.md's task spec allows "plain
-// text or Telegram MarkdownV2 escaped properly", and MarkdownV2's escaping
-// rules (a fixed set of ASCII punctuation must be backslash-escaped
-// *everywhere*, including inside what would otherwise look like an
-// already-escaped sequence) are exactly the "known trap" this task calls
-// out — a single missed character turns into a Telegram 400 that drops
-// the whole reply. Plain text sidesteps it entirely: Telegram still
+// MarkdownV2 parse mode (D-119: "Bot replies stay plain text in Phase 7
+// (no MarkdownV2); MarkdownV2 is a Phase 8 polish candidate"):
+// MarkdownV2's escaping rules (a fixed set of ASCII punctuation must be
+// backslash-escaped *everywhere*, including inside what would otherwise
+// look like an already-escaped sequence) are exactly the kind of trap a
+// single missed character turns into a Telegram 400 that drops the
+// whole reply. Plain text sidesteps it entirely: Telegram still
 // auto-links bare http(s) URLs in a plain-text message, so D-115's site
 // links stay clickable without either risk.
 
@@ -16,7 +16,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Sulton-Ali/savdo/api/gen"
 	"github.com/Sulton-Ali/savdo/api/internal/db"
 )
 
@@ -48,31 +47,33 @@ func absoluteMediaURL(siteURL, path string) string {
 	return strings.TrimRight(siteURL, "/") + path
 }
 
-// availabilityWord renders a gen.Availability for a plain-text caption/
-// tool text a customer reads directly — never the raw enum value, which
-// would read as an internal code rather than a sentence a customer
-// understands, in the message's own language (D-113).
-func availabilityWord(a, locale string) string {
-	t := localeTexts(locale)
-	switch gen.Availability(a) {
-	case gen.InStock:
-		return t.availabilityInStock
-	case gen.Low:
-		return t.availabilityLow
-	default:
-		return t.availabilityOutOfStock
-	}
-}
+// telegramCaptionMaxLen is Telegram's own limit on a sendPhoto caption's
+// length (Bot API docs, `caption`: 0-1024 characters).
+const telegramCaptionMaxLen = 1024
 
 // sendAnswer sends outcome to chatID: D-116's product photo when
-// outcome.Photo names one (falling back to plain text if the photo has
-// no cover image, or if sending it fails), otherwise the plain-text
-// answer itself.
-func (s *Service) sendAnswer(ctx context.Context, shop db.Shop, chatID int64, locale string, outcome llmOutcome) {
+// outcome.Photo names one with a cover image, captioned with the
+// model's own answer text (never a synthesized "name/price/availability"
+// string — MAJOR 7's own fix: the *answer* accompanies the photo, so the
+// admin transcript, which persists outcome.Text as the row's content,
+// always matches what the customer actually read). An answer longer
+// than Telegram's own 1024-character caption limit is sent as a bare
+// photo followed by the answer as its own text message instead of being
+// truncated. Falls back to a plain text message when there is no cover
+// image, or when sending the photo fails.
+func (s *Service) sendAnswer(ctx context.Context, shop db.Shop, chatID int64, outcome llmOutcome) {
 	if outcome.Photo != nil && outcome.Photo.CoverURL != "" {
 		url := absoluteMediaURL(s.cfg.SiteURL, outcome.Photo.CoverURL)
-		caption := fmt.Sprintf("%s\n%s %s — %s", outcome.Photo.Name, outcome.Photo.Price, shop.Currency, availabilityWord(outcome.Photo.Availability, locale))
+		caption, sendTextAfter := outcome.Text, false
+		if len(caption) > telegramCaptionMaxLen {
+			caption, sendTextAfter = "", true
+		}
 		if err := s.sender.SendPhoto(ctx, chatID, url, caption); err == nil {
+			if sendTextAfter {
+				if err := s.sender.SendMessage(ctx, chatID, outcome.Text); err != nil {
+					s.logger.Error("bot: send message failed", "shop_id", shop.ID, "error", err)
+				}
+			}
 			return
 		}
 		s.logger.Warn("bot: send photo failed, falling back to text", "shop_id", shop.ID)

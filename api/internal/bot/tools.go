@@ -89,12 +89,13 @@ func toolDefinitions() []ai.Tool {
 // tool call's single-product result" — overwritten every round, so only
 // the *last* round's value survives to sendAnswer, matching D-116's own
 // "the model's final tool call was variant_availability, or a single
-// search hit".
+// search hit". CoverURL is the only field format.go needs: MAJOR 7's fix
+// sends the model's own answer text as the photo's caption, never a
+// synthesized "name/price/availability" string, so this no longer
+// carries those separately (they were already in the tool result the
+// model's own answer is grounded in).
 type photoCandidate struct {
-	Name         string
-	Price        string
-	Availability string
-	CoverURL     string // relative (MediaUrls.Card); format.go resolves it against SiteURL. Empty when the product has no cover image.
+	CoverURL string // relative (MediaUrls.Card); format.go resolves it against SiteURL. Empty when the product has no cover image.
 }
 
 // strictUnmarshal decodes raw into out, rejecting unknown fields and any
@@ -220,7 +221,7 @@ func (s *Service) toolCallSearchProducts(ctx context.Context, locale string, cal
 		if page.Items[0].CoverImage != nil {
 			coverURL = page.Items[0].CoverImage.Urls.Card
 		}
-		photo = &photoCandidate{Name: items[0].Name, Price: items[0].Price, Availability: items[0].Availability, CoverURL: coverURL}
+		photo = &photoCandidate{CoverURL: coverURL}
 	}
 
 	return toolOK(call.ID, map[string]any{"items": items}), photo
@@ -273,20 +274,11 @@ func (s *Service) toolCallVariantAvailability(ctx context.Context, locale string
 		Variants []toolVariant `json:"variants"`
 	}{Slug: product.Slug, Name: product.Name, URL: productURL(s.cfg.SiteURL, locale, product.Slug), Variants: variants}
 
-	var coverURL, price, availability string
+	var coverURL string
 	if product.Images != nil {
 		coverURL = coverImageURL(*product.Images)
 	}
-	if len(variants) > 0 {
-		price, availability = variants[0].Price, variants[0].Availability
-		for _, v := range variants {
-			if v.Availability == string(gen.InStock) {
-				price, availability = v.Price, v.Availability
-				break
-			}
-		}
-	}
-	photo := &photoCandidate{Name: product.Name, Price: price, Availability: availability, CoverURL: coverURL}
+	photo := &photoCandidate{CoverURL: coverURL}
 
 	return toolOK(call.ID, out), photo
 }

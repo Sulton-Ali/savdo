@@ -22,10 +22,6 @@ type texts struct {
 	catalogEmpty         string
 	catalogHeader        string
 
-	availabilityInStock    string
-	availabilityLow        string
-	availabilityOutOfStock string
-
 	dayNames map[string]string
 }
 
@@ -44,10 +40,6 @@ var textsByLocale = map[string]texts{
 		catalogUnavailable:   "Bo'limlar ro'yxatini olib bo'lmadi.",
 		catalogEmpty:         "Hozircha bo'limlar yo'q.",
 		catalogHeader:        "Bo'limlar:",
-
-		availabilityInStock:    "mavjud",
-		availabilityLow:        "kam qoldi",
-		availabilityOutOfStock: "mavjud emas",
 
 		dayNames: map[string]string{
 			"mon": "Dushanba", "tue": "Seshanba", "wed": "Chorshanba", "thu": "Payshanba",
@@ -69,10 +61,6 @@ var textsByLocale = map[string]texts{
 		catalogEmpty:         "Разделов пока нет.",
 		catalogHeader:        "Разделы:",
 
-		availabilityInStock:    "в наличии",
-		availabilityLow:        "заканчивается",
-		availabilityOutOfStock: "нет в наличии",
-
 		dayNames: map[string]string{
 			"mon": "Понедельник", "tue": "Вторник", "wed": "Среда", "thu": "Четверг",
 			"fri": "Пятница", "sat": "Суббота", "sun": "Воскресенье",
@@ -92,10 +80,6 @@ var textsByLocale = map[string]texts{
 		catalogUnavailable:   "Could not load the category list.",
 		catalogEmpty:         "No categories yet.",
 		catalogHeader:        "Categories:",
-
-		availabilityInStock:    "in stock",
-		availabilityLow:        "low stock",
-		availabilityOutOfStock: "out of stock",
 
 		dayNames: map[string]string{
 			"mon": "Monday", "tue": "Tuesday", "wed": "Wednesday", "thu": "Thursday",
