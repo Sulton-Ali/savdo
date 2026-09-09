@@ -327,6 +327,31 @@ func TestDispatch_oneChatBacklogDoesNotStarveAnotherChat(t *testing.T) {
 	}
 }
 
+// gatedSender blocks every SendMessage/SendPhoto call on release, closed
+// exactly once by the test that owns it — item m1's own determinism fix:
+// a fixed delay races the test's own setup (how many of a backlog have
+// actually been *dispatched*, not just how much wall time has passed);
+// this makes "hold every slot open until I say so" exact instead of
+// probabilistic.
+type gatedSender struct{ release chan struct{} }
+
+func (g gatedSender) SendMessage(ctx context.Context, _ int64, _ string) error {
+	select {
+	case <-g.release:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	return nil
+}
+func (g gatedSender) SendPhoto(ctx context.Context, _ int64, _, _ string) error {
+	select {
+	case <-g.release:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	return nil
+}
+
 // TestDispatch_queueFullDropIsNotPermanentlyMarkedSeen pins minor m1: an
 // update dropped because the queue was full must not be recorded in
 // seenUpdates — a genuine Telegram retry of that same update_id, arriving
@@ -334,16 +359,20 @@ func TestDispatch_oneChatBacklogDoesNotStarveAnotherChat(t *testing.T) {
 // of being discarded forever as "already seen".
 func TestDispatch_queueFullDropIsNotPermanentlyMarkedSeen(t *testing.T) {
 	env := newTestEnv(t, noChatClient())
-	const perSendDelay = 20 * time.Millisecond
-	svc := bot.NewService(env.pool, env.q, noChatClient(), env.pub, env.content, delaySender{delay: perSendDelay}, nil, env.cfg, env.clock.now, testLogger())
+	sender := gatedSender{release: make(chan struct{})}
+	svc := bot.NewService(env.pool, env.q, noChatClient(), env.pub, env.content, sender, nil, env.cfg, env.clock.now, testLogger())
 
 	// Fill every one of maxQueuedUpdates' slots with one chat's own
-	// backlog: each of these goroutines holds a queue slot for as long
-	// as it is running *or* still waiting on the shared per-chat lock, so
-	// dispatching more than maxQueuedUpdates (64) of them for the same
-	// chat saturates the queue almost immediately, well before any of
-	// them can finish (each takes at least perSendDelay to even reach
-	// the front of that chat's own lock).
+	// backlog: each of these goroutines holds a queue slot for as long as
+	// it is running *or* still waiting on the shared per-chat lock. Every
+	// Dispatch call here is synchronous up through acquiring (or being
+	// refused) its own queue slot — dispatchOne's own goroutine only
+	// starts *after* that — so by the time this loop returns, all
+	// maxQueuedUpdates(64) slots are deterministically occupied: no sleep,
+	// no race, nothing here depends on wall-clock timing at all. None of
+	// them can finish and free a slot back up until this test closes
+	// sender.release below, since sender.SendMessage blocks on it and
+	// every one of these updates ends in a reply send.
 	const chatA = int64(85)
 	const backlog = 64
 	for i := 0; i < backlog; i++ {
@@ -354,19 +383,17 @@ func TestDispatch_queueFullDropIsNotPermanentlyMarkedSeen(t *testing.T) {
 	const probeChat = int64(86)
 	svc.Dispatch(updateWithID(dupID, probeChat, 860000, "y", "uz", "/hours")) // must be dropped: queue full
 
-	// Confirm it really was dropped, not just slow — poll for a bounded
-	// window shorter than the backlog's own full drain time.
-	deadline := time.Now().Add(500 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		if _, err := env.q.GetBotConversationByChat(context.Background(), db.GetBotConversationByChatParams{ShopID: env.shop.ID, TelegramChatID: probeChat}); err == nil {
-			t.Fatalf("probe update was processed immediately — queue was not actually full, this test's own setup is wrong")
-		}
-		time.Sleep(10 * time.Millisecond)
+	// The queue is deterministically full at this point (see the loop's
+	// own comment above) — no polling needed to confirm the drop; check
+	// once.
+	if _, err := env.q.GetBotConversationByChat(context.Background(), db.GetBotConversationByChatParams{ShopID: env.shop.ID, TelegramChatID: probeChat}); err == nil {
+		t.Fatalf("probe update was processed — queue was not actually full, this test's own setup is wrong")
 	}
 
-	// Let chatA's whole backlog drain, freeing every slot.
+	// Let chatA's whole backlog run and finish, freeing every slot.
+	close(sender.release)
 	waitForConversation(t, env, chatA)
-	deadline = time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		convID, err := env.q.GetBotConversationByChat(context.Background(), db.GetBotConversationByChatParams{ShopID: env.shop.ID, TelegramChatID: chatA})
 		if err == nil {

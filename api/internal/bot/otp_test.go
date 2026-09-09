@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -11,9 +12,25 @@ import (
 	"github.com/Sulton-Ali/savdo/api/internal/bot"
 )
 
-// otpMessageUz mirrors texts.go's own uz otpMessage entry verbatim (same
-// convention as commands_test.go's startLink*TextUz consts).
+// otpMessageUzFmt/RuFmt/EnFmt mirror texts.go's own otpMessage entries
+// verbatim, one per locale (same convention as commands_test.go's
+// startLink*TextUz consts).
 const otpMessageUzFmt = "Savdo kodingiz: %s. 5 daqiqa amal qiladi. Agar buni siz so'ramagan bo'lsangiz, e'tiborsiz qoldiring."
+const otpMessageRuFmt = "Ваш код Savdo: %s. Действителен 5 минут. Если вы не запрашивали его, проигнорируйте это сообщение."
+const otpMessageEnFmt = "Your Savdo code: %s. Valid 5 minutes. If you did not request it, ignore this message."
+
+// otpTTLMinutesForTest documents minor 7's own coupling: texts.go's own
+// otpMessage hardcodes "5" (daqiqa/минут/minutes) in all three locales,
+// matching internal/auth/otp.go's own otpTTL (5 * time.Minute) — otpTTL
+// itself cannot be referenced here: it is unexported, and internal/auth
+// is out of this task's own file scope (exporting it would be a change
+// there; the coordinator's own instruction was to stop and report
+// instead of making one). This constant, and the test below, are the
+// closest coupling check reachable from this package; if either otpTTL
+// or texts.go's own wording changes without the other, this constant
+// has to be updated by hand and is the one place that would catch the
+// drift.
+const otpTTLMinutesForTest = 5
 
 // TestSendOTP_deliversCodeInLocaleText pins MAJOR 2: SendOTP sends the
 // code, formatted into the locale's own text, to chat id ==
@@ -38,6 +55,40 @@ func TestSendOTP_deliversCodeInLocaleText(t *testing.T) {
 	}
 	if len(env.sender.Messages) != 1 || env.sender.Messages[0].ChatID != telegramUserID {
 		t.Fatalf("Messages = %+v, want one message to chat id %d (== telegramUserID)", env.sender.Messages, telegramUserID)
+	}
+}
+
+// TestSendOTP_mentionsAuthsOwnOTPValidityMinutes pins minor 7: every
+// locale's own otpMessage text is exactly right (matching texts.go
+// verbatim, not just "mentions 5 somewhere") and its minute figure
+// matches otpTTLMinutesForTest's own documented value.
+func TestSendOTP_mentionsAuthsOwnOTPValidityMinutes(t *testing.T) {
+	tests := []struct {
+		locale string
+		want   string // %s format string, texts.go's own otpMessage
+	}{
+		{"uz", otpMessageUzFmt},
+		{"ru", otpMessageRuFmt},
+		{"en", otpMessageEnFmt},
+	}
+	for i, tt := range tests {
+		t.Run(tt.locale, func(t *testing.T) {
+			env := newTestEnv(t, noChatClient())
+			const code = "246810"
+			telegramUserID := int64(701 + i)
+			if err := env.svc.SendOTP(context.Background(), telegramUserID, code, tt.locale); err != nil {
+				t.Fatalf("SendOTP: %v", err)
+			}
+			got := lastReply(t, env.sender.allReplyTexts())
+			want := strings.Replace(tt.want, "%s", code, 1)
+			if got != want {
+				t.Fatalf("otpMessage(%s) = %q, want %q", tt.locale, got, want)
+			}
+			wantMinutes := fmt.Sprintf("%d", otpTTLMinutesForTest)
+			if !strings.Contains(got, wantMinutes) {
+				t.Fatalf("otpMessage(%s) = %q, want it to mention %q minutes (documented to match internal/auth/otp.go's own otpTTL)", tt.locale, got, wantMinutes)
+			}
+		})
 	}
 }
 
