@@ -24,7 +24,10 @@ export function QuoteCard({
       <blockquote className="m-0 text-base text-text leading-relaxed">{quote}</blockquote>
       <figcaption className="flex items-center justify-between gap-2 text-muted text-sm">
         <span>{author}</span>
-        <span className="rounded-full bg-bg px-2 py-0.5 font-semibold text-[11px] text-muted uppercase tracking-wide">
+        {/* This pill's own background is bg-bg (#f5f5f4), not the card's
+         * white — text-landing-muted, not the inherited text-muted, clears
+         * WCAG AA against that fill (review). */}
+        <span className="rounded-full bg-bg px-2 py-0.5 font-semibold text-[11px] text-landing-muted uppercase tracking-wide">
           {sampleLabel}
         </span>
       </figcaption>

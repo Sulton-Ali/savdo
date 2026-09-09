@@ -13,6 +13,12 @@ import type { ReactNode } from "react";
  * an empty photo slot, not for a screen reader. Every caller already gives
  * the surrounding heading/link its own accessible name (product name,
  * category name, the hero `<h1>`), so this never needs one of its own.
+ *
+ * `#6d4d43` (icon/label colour) at full opacity measures 5.9:1–6.2:1
+ * against every tone below — comfortably past WCAG AA. An earlier
+ * `opacity-80` on the label dropped that to ~3.9:1 on peach (review); the
+ * label now renders at the same full opacity as the icon, no dimming.
+ * `PlaceholderPhoto.test.tsx` asserts each tone pair stays ≥ 4.5:1.
  */
 const TONE_CLASS: Record<"peach" | "teal" | "sand" | "lilac", string> = {
   peach: "bg-[#fbe2d9]",
@@ -68,7 +74,7 @@ export function PlaceholderPhoto({
       className={`flex ${ASPECT_CLASS[aspect]} w-full flex-col items-center justify-center gap-3 rounded-xl text-[#6d4d43] ${TONE_CLASS[tone]} ${className}`}
     >
       {icon}
-      <span className="px-4 text-center font-medium text-xs opacity-80">{label}</span>
+      <span className="px-4 text-center font-medium text-xs">{label}</span>
     </div>
   );
 }

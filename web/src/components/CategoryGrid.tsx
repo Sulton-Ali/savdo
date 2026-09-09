@@ -77,7 +77,10 @@ export function CategoryGrid({
                 className="flex items-baseline gap-2 font-bold text-lg text-text hover:text-landing-secondary-hover"
               >
                 {block.group.root.name}
-                <span className="font-normal text-muted text-sm">
+                {/* This row sits directly on the page's bg-bg (#f5f5f4), not
+                 * inside a white card — text-landing-muted (#5b6472), not
+                 * the shared text-muted, clears WCAG AA there (review). */}
+                <span className="font-normal text-landing-muted text-sm">
                   {t("web.home.categoryProductCount", { count: block.group.root.productCount })}
                 </span>
               </Link>

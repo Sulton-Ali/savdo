@@ -20,4 +20,10 @@ describe("AboutCard", () => {
       screen.getByText("Savdo Demo — Toshkentdagi oilaviy kiyim-kechak do'koni."),
     ).toBeTruthy();
   });
+
+  it("renders every line at full opacity (review: /85 and /95 dropped contrast below WCAG AA)", () => {
+    render(<AboutCard eyebrow="Biz haqimizda" title="Sarlavha" body="Matn." />);
+    expect(screen.getByText("Biz haqimizda").className).not.toMatch(/\/\d/);
+    expect(screen.getByText("Matn.").className).not.toMatch(/\/\d/);
+  });
 });
