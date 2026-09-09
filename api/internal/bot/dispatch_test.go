@@ -100,6 +100,9 @@ func (panicSender) SendMessage(context.Context, int64, string) error {
 func (panicSender) SendPhoto(context.Context, int64, string, string) error {
 	panic("simulated handler panic")
 }
+func (panicSender) SendTyping(context.Context, int64) error {
+	panic("simulated handler panic")
+}
 
 // TestDispatch_panicRecovered_perChatLockStillReleased pins item 9's own
 // two guarantees together: a panic inside one dispatched update never
@@ -153,6 +156,7 @@ func (s *concurrencySender) SendMessage(context.Context, int64, string) error {
 	return nil
 }
 func (s *concurrencySender) SendPhoto(context.Context, int64, string, string) error { return nil }
+func (s *concurrencySender) SendTyping(context.Context, int64) error                { return nil }
 
 // TestDispatch_sameChatSerialized pins item 9's own per-chat
 // serialization: two updates dispatched at once for the *same* chat
@@ -283,6 +287,10 @@ func (d delaySender) SendPhoto(context.Context, int64, string, string) error {
 	time.Sleep(d.delay)
 	return nil
 }
+func (d delaySender) SendTyping(context.Context, int64) error {
+	time.Sleep(d.delay)
+	return nil
+}
 
 // TestDispatch_oneChatBacklogDoesNotStarveAnotherChat pins MINOR 1: the
 // per-chat lock is acquired *before* Service.sem (dispatch.go), so a
@@ -344,6 +352,14 @@ func (g gatedSender) SendMessage(ctx context.Context, _ int64, _ string) error {
 	return nil
 }
 func (g gatedSender) SendPhoto(ctx context.Context, _ int64, _, _ string) error {
+	select {
+	case <-g.release:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	return nil
+}
+func (g gatedSender) SendTyping(ctx context.Context, _ int64) error {
 	select {
 	case <-g.release:
 	case <-ctx.Done():

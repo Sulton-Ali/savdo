@@ -36,6 +36,7 @@ type noopBotSender struct{}
 
 func (noopBotSender) SendMessage(context.Context, int64, string) error       { return nil }
 func (noopBotSender) SendPhoto(context.Context, int64, string, string) error { return nil }
+func (noopBotSender) SendTyping(context.Context, int64) error                { return nil }
 
 // slowBotSender sleeps delay before every SendMessage/SendPhoto call —
 // item 8's own stand-in for "a slow fake service still running" (this
@@ -48,6 +49,10 @@ func (s slowBotSender) SendMessage(_ context.Context, _ int64, _ string) error {
 	return nil
 }
 func (s slowBotSender) SendPhoto(_ context.Context, _ int64, _, _ string) error {
+	time.Sleep(s.delay)
+	return nil
+}
+func (s slowBotSender) SendTyping(_ context.Context, _ int64) error {
 	time.Sleep(s.delay)
 	return nil
 }

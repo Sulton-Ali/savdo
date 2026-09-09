@@ -128,5 +128,8 @@ func (brokenSender) SendMessage(context.Context, int64, string) error {
 func (brokenSender) SendPhoto(context.Context, int64, string, string) error {
 	return errBrokenSender
 }
+func (brokenSender) SendTyping(context.Context, int64) error {
+	return errBrokenSender
+}
 
 var errBrokenSender = errors.New("broken sender: simulated delivery failure")

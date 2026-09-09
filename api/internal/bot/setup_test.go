@@ -38,7 +38,8 @@ type fakeSender struct {
 	mu       sync.Mutex
 	Messages []sentMessage
 	Photos   []sentPhoto
-	SendErr  error // when set, every SendMessage/SendPhoto call fails with it
+	Typings  []int64 // chatIDs SendTyping was called with, in call order (O-30)
+	SendErr  error   // when set, every SendMessage/SendPhoto call fails with it
 }
 
 type sentMessage struct {
@@ -70,6 +71,29 @@ func (f *fakeSender) SendPhoto(_ context.Context, chatID int64, url, caption str
 	}
 	f.Photos = append(f.Photos, sentPhoto{ChatID: chatID, URL: url, Caption: caption})
 	return nil
+}
+
+// SendTyping records chatID (O-30) — never fails, even when SendErr is
+// set: SendErr scripts a SendMessage/SendPhoto reply failure, a
+// different concern from the typing indicator, which chat.go's
+// startTyping never lets fail the turn either way.
+func (f *fakeSender) SendTyping(_ context.Context, chatID int64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Typings = append(f.Typings, chatID)
+	return nil
+}
+
+// typingCount reads len(Typings) under the lock — safe to call while
+// startTyping's own background goroutine may still be running, unlike a
+// direct field read (allReplyTexts' own doc comment notes the same
+// concern for Messages/Photos, though every test here calls this only
+// after HandleUpdate has returned, by which point handleFreeText's own
+// deferred stopTyping has already joined that goroutine).
+func (f *fakeSender) typingCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.Typings)
 }
 
 // last returns every reply's own text — a SendMessage's Text or a
@@ -226,6 +250,16 @@ func (e *testEnv) rebuildServiceNilSender() *bot.Service {
 // it was called with.
 func (e *testEnv) rebuildServiceWithLinker(aiClient ai.Client, linker bot.TelegramLinker) {
 	e.svc = bot.NewService(e.pool, e.q, aiClient, e.pub, e.content, e.sender, linker, e.cfg, e.clock.now, testLogger())
+}
+
+// rebuildServiceWithTypingInterval swaps in aiClient and shrinks
+// Config.TypingInterval (default e.cfg leaves it zero -> NewService's
+// own defaultTypingInterval, 4s) — chat_test.go's own typing tests need
+// at least two re-sends without waiting 4+ real seconds per assertion.
+func (e *testEnv) rebuildServiceWithTypingInterval(aiClient ai.Client, interval time.Duration) {
+	cfg := e.cfg
+	cfg.TypingInterval = interval
+	e.svc = bot.NewService(e.pool, e.q, aiClient, e.pub, e.content, e.sender, nil, cfg, e.clock.now, testLogger())
 }
 
 // setBudget sets the shop's daily token budget (O-25) directly through

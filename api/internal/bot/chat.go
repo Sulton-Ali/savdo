@@ -309,3 +309,60 @@ func (s *Service) logProviderError(shopID uuid.UUID, err error) {
 		s.logger.Error("bot: unclassified provider error", "shop_id", shopID)
 	}
 }
+
+// startTyping shows Telegram's "typing…" chat action (O-30) for chatID
+// immediately (synchronously, before this returns — so a caller that
+// sends the reply right after knows the indicator was requested first)
+// and keeps re-sending it every s.typingInterval, from a background
+// goroutine, until the returned stop func is called — Telegram only
+// displays a chat action for about 5 seconds (Bot API docs,
+// sendChatAction), so a single send would go stale partway through a
+// multi-round tool loop. handleFreeText (update.go) is this loop's only
+// caller, deferred immediately after starting it, so it stops on every
+// exit from that turn: a normal answer, a Static fallback, a panic
+// unwinding through dispatch.go's own recover, or Close's own shutdown
+// (baseCtx cancellation propagates through ctx, the parent this derives
+// from). Never called for a slash command (handleCommand's own path
+// never reaches here) or a turn one of O-25's gates rejects
+// (handleFreeText returns before this is called), both of which already
+// answer instantly. stop blocks until the background goroutine has
+// actually exited, so no goroutine — and no further SendTyping call —
+// outlives the turn it belongs to.
+func (s *Service) startTyping(ctx context.Context, chatID int64) (stop func()) {
+	typingCtx, cancel := context.WithCancel(ctx)
+	s.sendTypingOnce(typingCtx, chatID)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(s.typingInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-typingCtx.Done():
+				return
+			case <-ticker.C:
+				s.sendTypingOnce(typingCtx, chatID)
+			}
+		}
+	}()
+
+	return func() {
+		cancel()
+		<-done
+	}
+}
+
+// sendTypingOnce sends one typing chat action, logging a failure by
+// class only (never err's own text, the same discipline
+// logProviderError follows for a provider error) and never failing the
+// turn — a lost "typing…" indicator is a cosmetic gap, not a reason to
+// abandon or delay the actual reply.
+func (s *Service) sendTypingOnce(ctx context.Context, chatID int64) {
+	if err := s.sender.SendTyping(ctx, chatID); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return
+		}
+		s.logger.Warn("bot: send typing action failed", "error_class", "send_failed")
+	}
+}

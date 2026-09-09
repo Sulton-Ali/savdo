@@ -27,6 +27,7 @@ func (nilSender) SendMessage(context.Context, int64, string) error { return errS
 func (nilSender) SendPhoto(context.Context, int64, string, string) error {
 	return errSenderNotConfigured
 }
+func (nilSender) SendTyping(context.Context, int64) error { return errSenderNotConfigured }
 
 // TelegramSender adapts a real *telegram.Bot to the Sender interface
 // HandleUpdate calls to reply — the only thing in this package that
@@ -53,5 +54,16 @@ func (s TelegramSender) SendPhoto(ctx context.Context, chatID int64, photoURL, c
 	_, err := s.Bot.SendPhoto(ctx, &telegram.SendPhotoParams{
 		ChatID: chatID, Photo: &models.InputFileString{Data: photoURL}, Caption: caption,
 	})
+	return err
+}
+
+// SendTyping implements Sender: Telegram's "typing…" chat action
+// (O-30), shown while chat.go's runFreeText waits on a model call. A
+// chat action is a fire-and-forget status, not a message — Telegram
+// itself displays it for about 5 seconds (Bot API docs, sendChatAction),
+// which is why the typing loop (chat.go's startTyping) re-sends it
+// periodically rather than once.
+func (s TelegramSender) SendTyping(ctx context.Context, chatID int64) error {
+	_, err := s.Bot.SendChatAction(ctx, &telegram.SendChatActionParams{ChatID: chatID, Action: models.ChatActionTyping})
 	return err
 }

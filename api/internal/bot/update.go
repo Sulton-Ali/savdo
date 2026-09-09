@@ -139,6 +139,16 @@ func (s *Service) handleFreeText(ctx context.Context, shop db.Shop, conv db.BotC
 		return
 	}
 
+	// O-30: the typing indicator only covers the model call itself —
+	// every gate above already answered instantly, so a rate-limited or
+	// over-budget turn (or a history-load failure) never shows it.
+	// stopTyping is deferred, not called only on the success path, so it
+	// still runs if runFreeText panics (dispatch.go's own recover
+	// unwinds through this defer first) or ctx is canceled mid-call
+	// (Close's own shutdown, baseCtx).
+	stopTyping := s.startTyping(ctx, chatID)
+	defer stopTyping()
+
 	outcome := s.runFreeText(ctx, shop, locale, history, text)
 	if outcome.Static {
 		s.replyStaticFallback(ctx, shop, conv, chatID, locale, outcome)
