@@ -34,7 +34,12 @@ function RootDocument({ children }: { children: React.ReactNode }) {
       <head>
         <HeadContent />
       </head>
-      <body>
+      {/* phase-7.5 T3: the page background lives here, not on a per-route
+       * `<main>` — `bg-bg` (#f5f5f4) on `<body>` reaches the full-width
+       * viewport (the routed content's own `max-w-*` column sits transparent
+       * on top of it), so every public route shares one page background,
+       * edge to edge, instead of each route opting in on its own `<main>`. */}
+      <body className="bg-bg">
         {children}
         <Scripts />
       </body>

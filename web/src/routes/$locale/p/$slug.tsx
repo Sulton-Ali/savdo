@@ -46,66 +46,68 @@ function ProductPage() {
   const main = images[activeImage] ?? images[0];
 
   return (
-    <main className="mx-auto flex max-w-5xl flex-col gap-8 px-4 py-8 sm:grid sm:grid-cols-2 sm:items-start">
-      <div className="flex flex-col gap-2">
-        <CoverImage image={main?.urls} size="full" alt={product.name} loading="eager" />
-        {images.length > 1 && (
-          <div className="flex gap-2">
-            {images.map((image, index) => (
-              <button
-                key={image.id}
-                type="button"
-                onClick={() => setActiveImage(index)}
-                aria-label={t("web.product.galleryImageAlt", { name: product.name })}
-                className={`overflow-hidden rounded-md ${index === activeImage ? "ring-2 ring-primary" : ""}`}
-              >
-                <CoverImage image={image.urls} size="thumb" alt="" className="w-16" />
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className="flex flex-col gap-4">
-        <h1 className="font-bold text-2xl text-text">{product.name}</h1>
-
-        {product.description != null && product.description !== "" && (
-          <div className="flex flex-col gap-2 text-text">
-            {splitParagraphs(product.description).map((paragraph, index) => (
-              // biome-ignore lint/suspicious/noArrayIndexKey: a static, never-reordered list of paragraphs split from one string (per review).
-              <p key={index} className="whitespace-pre-line">
-                {paragraph}
-              </p>
-            ))}
-          </div>
-        )}
-
-        {product.variants != null && product.variants.length > 0 && (
-          <div>
-            <h2 className="mb-2 font-semibold text-lg text-text">
-              {t("web.product.variantsTitle")}
-            </h2>
-            <ul className="flex flex-col gap-3">
-              {product.variants.map((variant) => (
-                <li
-                  key={variant.id}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-bg p-3"
+    <main className="mx-auto max-w-5xl px-4 py-8">
+      <div className="flex flex-col gap-8 rounded-landing-card bg-landing-surface p-5 shadow-landing-card sm:grid sm:grid-cols-2 sm:items-start sm:p-8">
+        <div className="flex flex-col gap-2">
+          <CoverImage image={main?.urls} size="full" alt={product.name} loading="eager" />
+          {images.length > 1 && (
+            <div className="flex gap-2">
+              {images.map((image, index) => (
+                <button
+                  key={image.id}
+                  type="button"
+                  onClick={() => setActiveImage(index)}
+                  aria-label={t("web.product.galleryImageAlt", { name: product.name })}
+                  className={`overflow-hidden rounded-md ${index === activeImage ? "ring-2 ring-primary" : ""}`}
                 >
-                  <span className="text-text">
-                    {Object.entries(variant.attributes)
-                      .map(
-                        ([code, value]) =>
-                          `${code.charAt(0).toUpperCase()}${code.slice(1)}: ${value}`,
-                      )
-                      .join(", ")}
-                  </span>
-                  <PriceTag price={variant.price} currency={shop.currency} />
-                  <AvailabilityBadge value={variant.availability} />
-                </li>
+                  <CoverImage image={image.urls} size="thumb" alt="" className="w-16" />
+                </button>
               ))}
-            </ul>
-          </div>
-        )}
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-4">
+          <h1 className="font-bold text-2xl text-text">{product.name}</h1>
+
+          {product.description != null && product.description !== "" && (
+            <div className="flex flex-col gap-2 text-text">
+              {splitParagraphs(product.description).map((paragraph, index) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: a static, never-reordered list of paragraphs split from one string (per review).
+                <p key={index} className="whitespace-pre-line">
+                  {paragraph}
+                </p>
+              ))}
+            </div>
+          )}
+
+          {product.variants != null && product.variants.length > 0 && (
+            <div>
+              <h2 className="mb-2 font-semibold text-lg text-text">
+                {t("web.product.variantsTitle")}
+              </h2>
+              <ul className="flex flex-col gap-3">
+                {product.variants.map((variant) => (
+                  <li
+                    key={variant.id}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-bg p-3"
+                  >
+                    <span className="text-text">
+                      {Object.entries(variant.attributes)
+                        .map(
+                          ([code, value]) =>
+                            `${code.charAt(0).toUpperCase()}${code.slice(1)}: ${value}`,
+                        )
+                        .join(", ")}
+                    </span>
+                    <PriceTag price={variant.price} currency={shop.currency} />
+                    <AvailabilityBadge value={variant.availability} />
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
       </div>
     </main>
   );

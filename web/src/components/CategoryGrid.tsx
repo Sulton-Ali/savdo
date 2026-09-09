@@ -78,9 +78,9 @@ export function CategoryGrid({
               >
                 {block.group.root.name}
                 {/* This row sits directly on the page's bg-bg (#f5f5f4), not
-                 * inside a white card — text-landing-muted (#5b6472), not
-                 * the shared text-muted, clears WCAG AA there (review). */}
-                <span className="font-normal text-landing-muted text-sm">
+                 * inside a white card — `text-muted` clears WCAG AA there
+                 * (web's `--color-muted` is #5b6472, see styles.css). */}
+                <span className="font-normal text-muted text-sm">
                   {t("web.home.categoryProductCount", { count: block.group.root.productCount })}
                 </span>
               </Link>

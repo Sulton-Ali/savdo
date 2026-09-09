@@ -14,7 +14,15 @@
   --color-bg: var(--savdo-color-bg);
   --color-surface: var(--savdo-color-surface);
   --color-text: var(--savdo-color-text);
-  --color-muted: var(--savdo-color-muted);
+  /* Web-only override (phase-7.5 T3), not `var(--savdo-color-muted)` —
+   * `--savdo-color-muted` (#6b7280) measures 4.43:1 on the site's own
+   * #f5f5f4 page background, just under WCAG AA's 4.5:1 for normal text
+   * (phase-7.5 T2 review). #5b6472 measures ~5.48:1 there and still clears
+   * AA on white cards (~6.4:1), so every `text-muted` use on the public web
+   * app is safe wherever it lands. Scoped to `web/` only — the shared
+   * `packages/ui-tokens` value (and admin/mobile, which never sit text
+   * directly on this grey) is unchanged. */
+  --color-muted: #5b6472;
   --color-success: var(--savdo-color-success);
   --color-warning: var(--savdo-color-warning);
   --color-danger: var(--savdo-color-danger);
@@ -40,14 +48,6 @@
 
   --radius-landing-card: var(--savdo-landing-radius-card);
   --shadow-landing-card: var(--savdo-landing-shadow-card);
-
-  /* Not part of T1's landing.* set — a darker "muted" step for text that
-   * sits directly on the page's #f5f5f4 background (`bg-bg`), outside a
-   * white card. The shared `--color-muted` (#6b7280) measures 4.43:1 there,
-   * just under WCAG AA's 4.5:1 for normal text (phase-7.5 T2 review);
-   * #5b6472 measures ~5.48:1. Scoped to the landing page only — the shared
-   * `muted` token itself is unchanged (admin/mobile still use it). */
-  --color-landing-muted: #5b6472;
 }
 
 * {
