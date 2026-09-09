@@ -21,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Sulton-Ali/savdo/api/internal/ai"
+	"github.com/Sulton-Ali/savdo/api/internal/auth"
 	"github.com/Sulton-Ali/savdo/api/internal/bot"
 	"github.com/Sulton-Ali/savdo/api/internal/config"
 	"github.com/Sulton-Ali/savdo/api/internal/content"
@@ -101,6 +102,17 @@ func run() error {
 	publicSvc := public.NewService(queries, contentSvc, cfg.PublicShopSlug, cfg.MediaBaseURL)
 	pubHandler := public.NewHandler(publicSvc)
 
+	// authSvc backs /start link_<code> (M1): CompleteLink is the one
+	// method bot.TelegramLinker needs, and *auth.Service satisfies it
+	// structurally the same way it does in cmd/api/main.go — this is the
+	// binary the /start update actually arrives at in polling mode
+	// (BOT_MODE=polling, this file's own doc comment), so this is where
+	// the link has to be redeemable, not just in cmd/api's webhook path.
+	// Built the same way cmd/api/main.go builds its own: pool, queries,
+	// cfg, and the shop this binary already resolved above (shopRow.ID,
+	// from PUBLIC_SHOP_SLUG — the same shop the bot itself answers for).
+	authSvc := auth.NewService(pool, queries, cfg, shopRow.ID)
+
 	// tgBot both polls Telegram for updates (Start, below) and sends
 	// every reply (bot.TelegramSender wraps this same instance) — one
 	// long-lived client for the process's whole life. New's own GetMe
@@ -129,7 +141,7 @@ func run() error {
 		return fmt.Errorf("init telegram bot client: %w", err)
 	}
 
-	svc := bot.NewService(pool, queries, aiClient, pubHandler, contentSvc, bot.TelegramSender{Bot: tgBot}, nil,
+	svc := bot.NewService(pool, queries, aiClient, pubHandler, contentSvc, bot.TelegramSender{Bot: tgBot}, authSvc,
 		bot.Config{
 			ShopID: shopRow.ID, SiteURL: cfg.SiteURL,
 			PriceInputPerMTok: cfg.AIPriceInputPerMTok, PriceOutputPerMTok: cfg.AIPriceOutputPerMTok,

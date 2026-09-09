@@ -220,12 +220,44 @@ func run() error {
 			botSender = bot.TelegramSender{Bot: tgBot}
 		}
 	}
-	botSvc := bot.NewService(pool, queries, aiClient, public.NewHandler(publicSvc), contentSvc, botSender, nil,
+	// linker: authSvc satisfies bot.TelegramLinker structurally (its own
+	// CompleteLink method, internal/auth/telegram.go) — /start
+	// link_<code> redeems a POST /auth/telegram/link code through the
+	// same *auth.Service the HTTP API's own routes use (M1).
+	botSvc := bot.NewService(pool, queries, aiClient, public.NewHandler(publicSvc), contentSvc, botSender, authSvc,
 		bot.Config{
 			ShopID: botShopRow.ID, SiteURL: cfg.SiteURL,
 			PriceInputPerMTok: cfg.AIPriceInputPerMTok, PriceOutputPerMTok: cfg.AIPriceOutputPerMTok,
 			DailyTokenBudget: cfg.AIDailyTokenBudget,
 		}, nil, logger)
+	// SetOTPSender wires botSvc in as authSvc's own OTPSender (M2) — botSvc
+	// itself satisfies auth.OTPSender structurally (its own SendOTP
+	// method, internal/bot/otp.go), sending through the same botSender
+	// built above (a nil-guarded no-op-with-a-clear-error when
+	// TELEGRAM_BOT_TOKEN is unset, bot.NewService's own doc comment) —
+	// RequestOtp (internal/auth/otp.go) needs this called exactly once,
+	// before the Service starts serving requests (its own doc comment on
+	// SetOTPSender), which this satisfies: no request can reach RequestOtp
+	// until srv.ListenAndServe starts below.
+	authSvc.SetOTPSender(botSvc)
+	// MAJOR 2: HandleBotWebhook only ever acknowledges 200 and hands off
+	// to botSvc.Dispatch's own background goroutine (internal/httpx.
+	// HandleBotWebhook's own doc comment) — srv.Shutdown below draining
+	// in-flight HTTP requests says nothing about those, and neither the
+	// ListenAndServe-error nor the failed-Shutdown return path used to
+	// reach a Close call at all (minor m2). A defer here, registered
+	// after pool.Close()'s own (so it runs first on unwind, LIFO —
+	// cmd/bot/main.go's own pattern), covers every return path uniformly:
+	// wait, bounded by botShutdownTimeout, for every already-accepted turn
+	// to finish persisting before pool.Close() runs out from under one
+	// that already billed a real LLM call.
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), botShutdownTimeout)
+		defer cancel()
+		if err := botSvc.Close(shutdownCtx); err != nil {
+			logger.Warn("bot: graceful shutdown timed out; some in-flight turns may not have finished", "error", err)
+		}
+	}()
 
 	srv := &http.Server{
 		Addr: cfg.Addr,
@@ -259,20 +291,6 @@ func run() error {
 
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			return err
-		}
-
-		// MAJOR 2: HandleBotWebhook only ever acknowledges 200 and hands
-		// off to botSvc.Dispatch's own background goroutine (internal/
-		// httpx.HandleBotWebhook's own doc comment) — srv.Shutdown draining
-		// in-flight HTTP requests says nothing about those. Wait for them
-		// here, on their own bound (independent of shutdownCtx above, which
-		// srv.Shutdown may already have spent most of), before pool.Close()
-		// (deferred earlier) runs out from under a turn that already billed
-		// a real LLM call and is only waiting to persist it.
-		botShutdownCtx, botCancel := context.WithTimeout(context.Background(), botShutdownTimeout)
-		defer botCancel()
-		if err := botSvc.Close(botShutdownCtx); err != nil {
-			logger.Warn("bot: graceful shutdown timed out; some in-flight turns may not have finished", "error", err)
 		}
 		return <-serveErr
 	}
