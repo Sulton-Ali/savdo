@@ -9,7 +9,7 @@ import { createI18nInstance } from "../../lib/i18n";
 import { isLocale } from "../../lib/locale";
 import { getPublicShop } from "../../lib/publicApi.functions";
 import { getSiteUrl } from "../../lib/site.functions";
-import { isSafeHttpsUrl } from "../../lib/url";
+import { getTelegramHref } from "../../lib/telegramHref";
 
 /**
  * The `$locale` layout: validates the locale segment (404 for anything
@@ -40,10 +40,7 @@ function LocaleLayout() {
   // Telegram buttons (`$locale/index.tsx`'s `telegramHref`) — computed once
   // here so the header (every route, via this layout) and the homepage
   // never disagree about whether the shop has a Telegram link.
-  const telegramHref =
-    shop.blocks.social?.telegram != null && isSafeHttpsUrl(shop.blocks.social.telegram)
-      ? shop.blocks.social.telegram
-      : null;
+  const telegramHref = getTelegramHref(shop.blocks.social);
 
   return (
     <I18nextProvider i18n={i18n}>

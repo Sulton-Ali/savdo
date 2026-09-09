@@ -113,7 +113,7 @@ function CategoryPage() {
         )}
       </div>
       {items.length === 0 ? (
-        <p className="rounded-md border border-bg border-dashed px-4 py-10 text-center text-muted">
+        <p className="rounded-md border border-landing-line border-dashed px-4 py-10 text-center text-muted">
           {t("web.category.empty")}
         </p>
       ) : (
