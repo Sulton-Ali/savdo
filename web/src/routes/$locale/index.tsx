@@ -2,24 +2,26 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 
 import { CategoryGrid } from "../../components/CategoryGrid";
-import { ContactsBlock } from "../../components/ContactsBlock";
-import { HeroSection } from "../../components/HeroSection";
-import { HoursTable } from "../../components/HoursTable";
-import { ClockIcon, MapPinIcon } from "../../components/icons";
-import { ProductCard } from "../../components/ProductCard";
+import { AboutSection, type SampleQuote } from "../../components/landing/AboutSection";
+import { ContactsCard } from "../../components/landing/ContactsCard";
+import { FeaturedProducts } from "../../components/landing/FeaturedProducts";
+import { HeroCard } from "../../components/landing/HeroCard";
+import { HoursCard } from "../../components/landing/HoursCard";
+import { TelegramCtaSection } from "../../components/landing/TelegramCtaSection";
 import { listPublicCategories, listPublicProducts } from "../../lib/publicApi.functions";
 import { absoluteUrl, asRouteMatchHead, buildSeoHead, chooseOgImage } from "../../lib/seo";
+import { splitParagraphs } from "../../lib/text";
+import { isSafeHttpsUrl } from "../../lib/url";
 
 const PAGE_LIMIT = 8;
 
 export const Route = createFileRoute("/$locale/")({
   loader: async ({ context: { locale } }) => {
-    const [categories, featured, newest] = await Promise.all([
+    const [categories, featured] = await Promise.all([
       listPublicCategories({ data: { locale } }),
       listPublicProducts({ data: { locale, featured: true, limit: PAGE_LIMIT } }),
-      listPublicProducts({ data: { locale, limit: PAGE_LIMIT } }),
     ]);
-    return { categories, featured, newest };
+    return { categories, featured };
   },
   head: ({ match }) => {
     const { shop, locale, siteUrl } = match.context;
@@ -39,75 +41,77 @@ export const Route = createFileRoute("/$locale/")({
 function HomePage() {
   const { t } = useTranslation();
   const { locale, shop } = Route.useRouteContext();
-  const { categories, featured, newest } = Route.useLoaderData();
+  const { categories, featured } = Route.useLoaderData();
   const blocks = shop.blocks;
+  const about = blocks.about;
+
+  const telegramHref =
+    blocks.social?.telegram != null && isSafeHttpsUrl(blocks.social.telegram)
+      ? blocks.social.telegram
+      : null;
+
+  const aboutBody =
+    about?.body != null && about.body !== ""
+      ? (splitParagraphs(about.body)[0] ?? t("web.home.aboutPlaceholder"))
+      : t("web.home.aboutPlaceholder");
+
+  const quotes: SampleQuote[] = [
+    { text: t("web.home.quote1Text"), author: t("web.home.quote1Author") },
+    { text: t("web.home.quote2Text"), author: t("web.home.quote2Author") },
+  ];
 
   return (
-    <main className="mx-auto flex max-w-5xl flex-col gap-12 px-4 py-8">
-      <HeroSection
+    <main className="mx-auto flex max-w-5xl flex-col gap-8 bg-bg px-4 py-6 sm:gap-10 sm:px-6 sm:py-10">
+      <HeroCard
         hero={blocks.hero}
         fallbackTitle={shop.name}
-        ctaHref="#products"
-        ctaLabel={t("web.hero.cta")}
+        eyebrow={t("web.hero.eyebrow")}
+        telegramHref={telegramHref}
+        telegramLabel={t("web.telegramCta")}
+        catalogLabel={t("web.hero.cta")}
+        catalogHref="#products"
+        photoLabel={t("web.hero.photoPlaceholder")}
       />
 
       <CategoryGrid categories={categories.items} locale={locale} />
 
-      {featured.items.length > 0 && (
-        <section>
-          <h2 className="mb-4 font-semibold text-text text-xl">{t("web.home.featuredTitle")}</h2>
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
-            {featured.items.map((product) => (
-              <ProductCard
-                key={product.id}
-                product={product}
-                locale={locale}
-                currency={shop.currency}
-              />
-            ))}
-          </div>
-        </section>
-      )}
-
-      {newest.items.length > 0 && (
-        <section id="products">
-          <h2 className="mb-4 font-semibold text-text text-xl">{t("web.home.newProductsTitle")}</h2>
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
-            {newest.items.map((product) => (
-              <ProductCard
-                key={product.id}
-                product={product}
-                locale={locale}
-                currency={shop.currency}
-              />
-            ))}
-          </div>
-        </section>
-      )}
+      <FeaturedProducts
+        id="products"
+        title={t("web.home.featuredTitle")}
+        products={featured.items}
+        locale={locale}
+        currency={shop.currency}
+      />
 
       {(blocks.hours != null || blocks.contacts != null) && (
-        <div className="grid gap-10 lg:grid-cols-2 lg:gap-8">
+        <div className="grid gap-4 lg:grid-cols-2">
           {blocks.hours != null && (
-            <section>
-              <h2 className="mb-4 flex items-center gap-2 font-semibold text-text text-xl">
-                <ClockIcon className="h-5 w-5 text-primary" />
-                {t("web.home.hoursTitle")}
-              </h2>
-              <HoursTable hours={blocks.hours} />
-            </section>
+            <HoursCard hours={blocks.hours} title={t("web.home.hoursTitle")} />
           )}
-
           {blocks.contacts != null && (
-            <section>
-              <h2 className="mb-4 flex items-center gap-2 font-semibold text-text text-xl">
-                <MapPinIcon className="h-5 w-5 text-primary" />
-                {t("web.home.contactsTitle")}
-              </h2>
-              <ContactsBlock contacts={blocks.contacts} social={blocks.social} />
-            </section>
+            <ContactsCard
+              contacts={blocks.contacts}
+              social={blocks.social}
+              title={t("web.home.contactsTitle")}
+            />
           )}
         </div>
       )}
+
+      <AboutSection
+        eyebrow={t("web.home.aboutEyebrow")}
+        title={about?.title ?? t("web.home.aboutTitle")}
+        body={aboutBody}
+        quotes={quotes}
+        sampleLabel={t("web.home.sampleLabel")}
+      />
+
+      <TelegramCtaSection
+        telegramHref={telegramHref}
+        telegramLabel={t("web.telegramCta")}
+        heading={t("web.home.ctaHeading")}
+        subheading={t("web.home.ctaSubheading")}
+      />
     </main>
   );
 }
