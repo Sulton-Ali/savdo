@@ -55,6 +55,7 @@
     "bot": "Бот",
     "telegram": "Telegram",
     "openMenu": "Меню",
+    "accountMenu": "Меню аккаунта",
     "groups": {
       "sales": "Продажи",
       "catalog": "Каталог",

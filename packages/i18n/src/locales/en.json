@@ -55,6 +55,7 @@
     "bot": "Bot",
     "telegram": "Telegram",
     "openMenu": "Menu",
+    "accountMenu": "Account menu",
     "groups": {
       "sales": "Sales",
       "catalog": "Catalog",

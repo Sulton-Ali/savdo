@@ -318,6 +318,51 @@ describe("AppLayout navigation", () => {
     });
   });
 
+  // D-122 fix pass (MAJOR 2): the role tag, language switcher and logout
+  // button stay inline above `lg`, but below it they'd overflow a
+  // phone-width header — they move behind a compact account button.
+  describe("header account cluster", () => {
+    it("renders the role, language switcher and logout inline above lg", async () => {
+      mockMatchMedia(true);
+      fetchMeMock.mockResolvedValueOnce(buildMe([]));
+      const { router, queryClient } = buildRouterAndClient();
+      render(
+        <QueryClientProvider client={queryClient}>
+          <RouterProvider router={router} />
+        </QueryClientProvider>,
+      );
+
+      await waitFor(() => expect(screen.getByText("Test Shop")).toBeTruthy());
+      expect(screen.getByText("Cashier")).toBeTruthy();
+      expect(screen.getByRole("radiogroup", { name: "Select language" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Log out" })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Account menu" })).toBeNull();
+    });
+
+    it("hides the role, language switcher and logout behind the account menu below lg, until opened", async () => {
+      mockMatchMedia(false);
+      fetchMeMock.mockResolvedValueOnce(buildMe([]));
+      const { router, queryClient } = buildRouterAndClient();
+      render(
+        <QueryClientProvider client={queryClient}>
+          <RouterProvider router={router} />
+        </QueryClientProvider>,
+      );
+
+      await waitFor(() => expect(screen.getByText("Test User")).toBeTruthy());
+      expect(screen.queryByRole("button", { name: "Log out" })).toBeNull();
+      expect(screen.queryByRole("radiogroup", { name: "Select language" })).toBeNull();
+      expect(screen.queryByText("Cashier")).toBeNull();
+
+      const accountButton = screen.getByRole("button", { name: "Account menu" });
+      fireEvent.click(accountButton);
+
+      expect(await screen.findByRole("button", { name: "Log out" })).toBeTruthy();
+      expect(screen.getByRole("radiogroup", { name: "Select language" })).toBeTruthy();
+      expect(screen.getByText("Cashier")).toBeTruthy();
+    });
+  });
+
   // D-122: mobile drawer.
   describe("below the lg breakpoint", () => {
     beforeEach(() => {
