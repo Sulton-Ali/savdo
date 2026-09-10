@@ -173,6 +173,21 @@ green.
 
 ---
 
+## Phase 7.6 — Admin UX polish
+
+- [ ] Fixed shell + grouped nav + mobile drawer (D-122): sidebar and header stay in place while content scrolls; sidebar nav scrolls independently on overflow; nav grouped by section (Sales, Catalog, Stock, People, Settings) with permission filtering per item; below `lg` breakpoint drawer replaces sidebar with a menu button in the header; nested routes highlight parent item
+- [ ] FormGrid on four page forms (D-123): shared responsive component with 1 column below `md`, 2 columns from `md`, 3 columns from `xl`; short fields take 1 cell, TextArea/Upload/per-language groups/tables/editors span full row; apply to product, purchase, quick sale, shop settings pages
+- [ ] FilterBar on /stock/movements with URL-synced state (D-124): reusable component with labels above, date-range presets (today/7 days/30 days/this month), Reset button, result count, search params sync for reload and back navigation
+- [ ] FilterBar rollout to the other list pages (follow-up): sales, purchases, stock levels, products, customers, suppliers lists
+
+**Done when:** on a 1280 px desktop the admin header and sidebar stay in place while
+a long page scrolls, the nav scrolls when it overflows; on a 768 px tablet the sidebar
+becomes a drawer opened from a header menu button; the product form displays fields
+in 2–3 columns with text areas full width; the movements filter has date presets, reset
+button, result count and survives reload and back navigation; Vitest green, `make verify` green.
+
+---
+
 ## Phase 8 — Production, onboarding the first shop
 
 - [ ] VPS provisioned; Docker Compose prod file; Caddy with TLS on the real domain; env secrets
