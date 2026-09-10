@@ -4,6 +4,7 @@ import { useRouter } from "@tanstack/react-router";
 import { App, Button, Card, Form, Input, InputNumber, Select, Skeleton, Switch } from "antd";
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
+import { FormGrid } from "../../components/FormGrid";
 import { applyApiErrorToForm, notifyApiError } from "../../lib/errors";
 import { fetchShop, type ShopPatch, updateShop } from "../../settings/api";
 
@@ -86,60 +87,81 @@ export function SettingsPage() {
       <Form<SettingsFormValues>
         form={form}
         layout="vertical"
-        style={{ maxWidth: 480 }}
         onFinish={(values) => saveMutation.mutate(values)}
       >
-        <Form.Item label={t("settings.fields.slug")}>
-          <Input value={shop.slug} disabled />
-        </Form.Item>
-        <Form.Item label={t("settings.fields.currency")}>
-          <Input value={shop.currency} disabled />
-        </Form.Item>
-        <Form.Item name="name" label={t("settings.fields.name")} rules={[{ required: true }]}>
-          <Input />
-        </Form.Item>
-        <Form.Item
-          name="timezone"
-          label={t("settings.fields.timezone")}
-          rules={[{ required: true }]}
-        >
-          <Select options={TIMEZONES.map((timezone) => ({ value: timezone, label: timezone }))} />
-        </Form.Item>
-        <Form.Item
-          name="defaultLocale"
-          label={t("settings.fields.defaultLocale")}
-          rules={[{ required: true }]}
-        >
-          <Select
-            options={locales.map((locale) => ({ value: locale, label: t(`lang.${locale}`) }))}
-          />
-        </Form.Item>
-        <Form.Item
-          name="allowNegativeStock"
-          label={t("settings.fields.allowNegativeStock")}
-          valuePropName="checked"
-        >
-          <Switch />
-        </Form.Item>
-        <Form.Item
-          name="updateCostOnPurchase"
-          label={t("settings.fields.updateCostOnPurchase")}
-          valuePropName="checked"
-        >
-          <Switch />
-        </Form.Item>
-        <Form.Item
-          name="lowStockThreshold"
-          label={t("settings.fields.lowStockThreshold")}
-          rules={[{ required: true, type: "integer", min: 0 }]}
-        >
-          <InputNumber min={0} precision={0} style={{ width: "100%" }} />
-        </Form.Item>
-        <Form.Item>
-          <Button type="primary" htmlType="submit" loading={saveMutation.isPending}>
-            {t("settings.save")}
-          </Button>
-        </Form.Item>
+        <FormGrid>
+          <FormGrid.Item>
+            <Form.Item label={t("settings.fields.slug")}>
+              <Input value={shop.slug} disabled />
+            </Form.Item>
+          </FormGrid.Item>
+          <FormGrid.Item>
+            <Form.Item label={t("settings.fields.currency")}>
+              <Input value={shop.currency} disabled />
+            </Form.Item>
+          </FormGrid.Item>
+          <FormGrid.Item>
+            <Form.Item name="name" label={t("settings.fields.name")} rules={[{ required: true }]}>
+              <Input />
+            </Form.Item>
+          </FormGrid.Item>
+          <FormGrid.Item>
+            <Form.Item
+              name="timezone"
+              label={t("settings.fields.timezone")}
+              rules={[{ required: true }]}
+            >
+              <Select
+                options={TIMEZONES.map((timezone) => ({ value: timezone, label: timezone }))}
+              />
+            </Form.Item>
+          </FormGrid.Item>
+          <FormGrid.Item>
+            <Form.Item
+              name="defaultLocale"
+              label={t("settings.fields.defaultLocale")}
+              rules={[{ required: true }]}
+            >
+              <Select
+                options={locales.map((locale) => ({ value: locale, label: t(`lang.${locale}`) }))}
+              />
+            </Form.Item>
+          </FormGrid.Item>
+          <FormGrid.Item>
+            <Form.Item
+              name="lowStockThreshold"
+              label={t("settings.fields.lowStockThreshold")}
+              rules={[{ required: true, type: "integer", min: 0 }]}
+            >
+              <InputNumber min={0} precision={0} style={{ width: "100%" }} />
+            </Form.Item>
+          </FormGrid.Item>
+          <FormGrid.Item>
+            <Form.Item
+              name="allowNegativeStock"
+              label={t("settings.fields.allowNegativeStock")}
+              valuePropName="checked"
+            >
+              <Switch />
+            </Form.Item>
+          </FormGrid.Item>
+          <FormGrid.Item>
+            <Form.Item
+              name="updateCostOnPurchase"
+              label={t("settings.fields.updateCostOnPurchase")}
+              valuePropName="checked"
+            >
+              <Switch />
+            </Form.Item>
+          </FormGrid.Item>
+          <FormGrid.Item span="full">
+            <Form.Item>
+              <Button type="primary" htmlType="submit" loading={saveMutation.isPending}>
+                {t("settings.save")}
+              </Button>
+            </Form.Item>
+          </FormGrid.Item>
+        </FormGrid>
       </Form>
     </Card>
   );
