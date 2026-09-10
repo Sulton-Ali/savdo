@@ -14,7 +14,21 @@
     "search": "Search",
     "showInactive": "Show inactive",
     "fieldWithLang": "{{field}} ({{lang}})",
-    "back": "Back"
+    "back": "Back",
+    "reset": "Reset"
+  },
+  "filterBar": {
+    "presets": {
+      "today": "Today",
+      "last7Days": "Last 7 days",
+      "last30Days": "Last 30 days",
+      "thisMonth": "This month"
+    },
+    "resultCount_one": "{{count}} result",
+    "resultCount_few": "{{count}} results",
+    "resultCount_many": "{{count}} results",
+    "resultCount_other": "{{count}} results",
+    "moreAvailable": "more available"
   },
   "errors": {
     "serviceUnavailable": "Service unavailable. Please try again.",

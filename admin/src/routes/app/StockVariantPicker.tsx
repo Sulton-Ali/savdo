@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Select, Space } from "antd";
-import { useEffect, useState } from "react";
+import type { CSSProperties } from "react";
+import { useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { fetchProductsPage, fetchVariants, type Variant } from "../../catalog/api";
@@ -16,6 +17,22 @@ export interface StockVariantValue {
 }
 
 const EMPTY_VALUE: StockVariantValue = { productId: null, variantId: null };
+
+/** Standard "sr-only" pattern — visually hidden but still readable by
+ * assistive tech and by `aria-labelledby` references (unlike `display:
+ * none`, which some ARIA implementations skip). Used only to give each
+ * select its own accessible-name text when `labelId` is set (see below). */
+const visuallyHiddenStyle: CSSProperties = {
+  position: "absolute",
+  width: 1,
+  height: 1,
+  padding: 0,
+  margin: -1,
+  overflow: "hidden",
+  clip: "rect(0, 0, 0, 0)",
+  whiteSpace: "nowrap",
+  border: 0,
+};
 
 function formatVariantLabel(variant: Variant): string {
   const attrs = Object.entries(variant.attributes)
@@ -40,13 +57,24 @@ export function StockVariantPicker({
   value,
   onChange,
   disabled,
+  labelId,
 }: {
   value?: StockVariantValue;
   onChange?: (value: StockVariantValue) => void;
   disabled?: boolean;
+  /** The id of an external visible label (e.g. `FilterBar.Field`'s) whose
+   * text should lead each select's accessible name, via `aria-labelledby`
+   * (MINOR 1, phase-7.6 filter-bar review) — combined with this
+   * component's own hidden per-select label so "Search product" and
+   * "Select variant" stay distinguishable. Omit for standalone uses (the
+   * adjustment/transfer drawers, `QuickSalePage`), which keep the plain
+   * `aria-label` they already had. */
+  labelId?: string;
 }) {
   const { t } = useTranslation();
   const current = value ?? EMPTY_VALUE;
+  const productLabelId = useId();
+  const variantLabelId = useId();
 
   const [rawQuery, setRawQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
@@ -74,11 +102,17 @@ export function StockVariantPicker({
 
   return (
     <Space direction="vertical" style={{ width: "100%" }}>
+      {labelId != null && (
+        <span id={productLabelId} style={visuallyHiddenStyle}>
+          {t("stock.picker.product")}
+        </span>
+      )}
       <Select
         showSearch
         allowClear
         disabled={disabled}
-        aria-label={t("stock.picker.product")}
+        aria-label={labelId == null ? t("stock.picker.product") : undefined}
+        aria-labelledby={labelId != null ? `${labelId} ${productLabelId}` : undefined}
         placeholder={t("stock.picker.product")}
         value={current.productId ?? undefined}
         loading={productsLoading}
@@ -88,11 +122,17 @@ export function StockVariantPicker({
         onClear={() => onChange?.(EMPTY_VALUE)}
         options={products.map((product) => ({ value: product.id, label: product.name }))}
       />
+      {labelId != null && (
+        <span id={variantLabelId} style={visuallyHiddenStyle}>
+          {t("stock.picker.variant")}
+        </span>
+      )}
       <Select
         showSearch
         allowClear
         disabled={disabled || current.productId == null}
-        aria-label={t("stock.picker.variant")}
+        aria-label={labelId == null ? t("stock.picker.variant") : undefined}
+        aria-labelledby={labelId != null ? `${labelId} ${variantLabelId}` : undefined}
         placeholder={t("stock.picker.variant")}
         value={current.variantId ?? undefined}
         loading={variantsLoading}
