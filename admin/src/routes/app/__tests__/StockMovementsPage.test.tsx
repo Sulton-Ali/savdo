@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { App as AntApp, ConfigProvider } from "antd";
 import dayjs from "dayjs";
+import { useState } from "react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../../lib/api", () => ({
@@ -12,6 +13,7 @@ vi.mock("../../../lib/api", () => ({
 import { i18next } from "../../../i18n";
 import { api } from "../../../lib/api";
 import { StockMovementsPage } from "../StockMovementsPage";
+import type { StockMovementsSearch } from "../stockMovementsRoute";
 
 type StockMovement = components["schemas"]["StockMovement"];
 type Location = components["schemas"]["Location"];
@@ -71,17 +73,38 @@ const movement: StockMovement = {
   createdAt: "2026-01-05T10:00:00Z",
 };
 
-function renderPage() {
+/** Mirrors how `stockMovementsRoute`'s wrapper drives `StockMovementsPage`
+ * (`search`/`onSearchChange`), except the search state lives in this test
+ * harness instead of the router — `onSearchChangeSpy` observes every call
+ * the page makes while `useState` keeps the page controlled, same as a real
+ * `navigate({ search })` round-trip would. */
+function renderPage(initialSearch: StockMovementsSearch = {}) {
+  const onSearchChangeSpy = vi.fn<(next: StockMovementsSearch) => void>();
+
+  function Harness() {
+    const [search, setSearch] = useState<StockMovementsSearch>(initialSearch);
+    return (
+      <StockMovementsPage
+        search={search}
+        onSearchChange={(next) => {
+          onSearchChangeSpy(next);
+          setSearch(next);
+        }}
+      />
+    );
+  }
+
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  const utils = render(
     <ConfigProvider theme={{ token: { motion: false } }}>
       <QueryClientProvider client={queryClient}>
         <AntApp>
-          <StockMovementsPage />
+          <Harness />
         </AntApp>
       </QueryClientProvider>
     </ConfigProvider>,
   );
+  return { ...utils, onSearchChangeSpy };
 }
 
 function mockEndpoints() {
@@ -137,6 +160,14 @@ async function selectOption(text: string) {
   fireEvent.click(matches[matches.length - 1] as HTMLElement);
 }
 
+function lastMovementsQuery() {
+  const call = [...mockedApi.GET.mock.calls]
+    .reverse()
+    .find((entry) => entry[0] === "/stock/movements");
+  return (call?.[1] as never as { params: { query: Record<string, unknown> } } | undefined)?.params
+    .query;
+}
+
 describe("StockMovementsPage", () => {
   beforeAll(async () => {
     await i18next.changeLanguage("en");
@@ -169,26 +200,14 @@ describe("StockMovementsPage", () => {
     fireEvent.click(await screen.findByText("Main Store"));
 
     await waitFor(() => {
-      const call = mockedApi.GET.mock.calls.find(
-        (entry) =>
-          entry[0] === "/stock/movements" &&
-          (entry[1] as never as { params: { query: { locationId?: string } } })?.params?.query
-            ?.locationId === "l1",
-      );
-      expect(call).toBeTruthy();
+      expect(lastMovementsQuery()?.locationId).toBe("l1");
     });
 
     fireEvent.mouseDown(screen.getByLabelText("All kinds"));
     fireEvent.click(await screen.findByText("Adjustment"));
 
     await waitFor(() => {
-      const call = mockedApi.GET.mock.calls.find(
-        (entry) =>
-          entry[0] === "/stock/movements" &&
-          (entry[1] as never as { params: { query: { kind?: string; locationId?: string } } })
-            ?.params?.query?.kind === "adjustment",
-      );
-      expect(call).toBeTruthy();
+      expect(lastMovementsQuery()?.kind).toBe("adjustment");
     });
   });
 
@@ -203,13 +222,7 @@ describe("StockMovementsPage", () => {
     await selectOption("size: M — SKU SKU1");
 
     await waitFor(() => {
-      const call = mockedApi.GET.mock.calls.find(
-        (entry) =>
-          entry[0] === "/stock/movements" &&
-          (entry[1] as never as { params: { query: { variantId?: string } } })?.params?.query
-            ?.variantId === "v1",
-      );
-      expect(call).toBeTruthy();
+      expect(lastMovementsQuery()?.variantId).toBe("v1");
     });
   });
 
@@ -229,19 +242,53 @@ describe("StockMovementsPage", () => {
     const expectedTo = dayjs("2026-01-10").endOf("day").toISOString();
 
     await waitFor(() => {
-      const call = mockedApi.GET.mock.calls.find(
-        (entry) =>
-          entry[0] === "/stock/movements" &&
-          (entry[1] as never as { params: { query: { from?: string; to?: string } } })?.params
-            ?.query?.from === expectedFrom,
-      );
-      expect(call).toBeTruthy();
-      if (!call) {
-        return;
-      }
-      const query = (call[1] as never as { params: { query: { from?: string; to?: string } } })
-        .params.query;
-      expect(query.to).toBe(expectedTo);
+      expect(lastMovementsQuery()?.from).toBe(expectedFrom);
+      expect(lastMovementsQuery()?.to).toBe(expectedTo);
     });
   });
+
+  it("seeds filters from the initial search (URL) and requests the mapped API params", async () => {
+    mockEndpoints();
+    renderPage({
+      variantId: "v1",
+      locationId: "l1",
+      kind: "adjustment",
+      from: "2026-01-05",
+      to: "2026-01-10",
+    });
+
+    await waitFor(() => {
+      const query = lastMovementsQuery();
+      expect(query?.variantId).toBe("v1");
+      expect(query?.locationId).toBe("l1");
+      expect(query?.kind).toBe("adjustment");
+      expect(query?.from).toBe(dayjs("2026-01-05").startOf("day").toISOString());
+      expect(query?.to).toBe(dayjs("2026-01-10").endOf("day").toISOString());
+    });
+  });
+
+  it("shows the result count and re-fetches with the reset filters when Reset is clicked", async () => {
+    mockEndpoints();
+    const { onSearchChangeSpy } = renderPage({ locationId: "l1", kind: "adjustment" });
+    await screen.findByText("Purchase");
+    expect(await screen.findByText("1 result")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+
+    expect(onSearchChangeSpy).toHaveBeenCalledWith({});
+    await waitFor(() => {
+      const query = lastMovementsQuery();
+      expect(query?.locationId).toBeUndefined();
+      expect(query?.kind).toBeUndefined();
+    });
+  });
+
+  // No test drives a live click through the `RangePicker`'s preset dropdown
+  // here: opening the calendar panel in jsdom triggers rc-picker's
+  // synchronous cell layout/scroll-into-view work, which does not settle
+  // reliably in this environment (observed hangs well past any reasonable
+  // `waitFor` timeout). Preset date-math correctness is covered by
+  // `admin/src/lib/__tests__/dateRangePresets.test.ts` (pure function, no
+  // rendering); this file already covers the from/to -> ISO wiring the
+  // presets feed into, via manual text entry above.
 });

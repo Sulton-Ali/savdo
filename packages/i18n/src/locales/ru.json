@@ -14,7 +14,21 @@
     "search": "Поиск",
     "showInactive": "Показать неактивные",
     "fieldWithLang": "{{field}} ({{lang}})",
-    "back": "Назад"
+    "back": "Назад",
+    "reset": "Сбросить"
+  },
+  "filterBar": {
+    "presets": {
+      "today": "Сегодня",
+      "last7Days": "Последние 7 дней",
+      "last30Days": "Последние 30 дней",
+      "thisMonth": "Этот месяц"
+    },
+    "resultCount_one": "{{count}} результат",
+    "resultCount_few": "{{count}} результата",
+    "resultCount_many": "{{count}} результатов",
+    "resultCount_other": "{{count}} результата",
+    "moreAvailable": "есть ещё"
   },
   "errors": {
     "serviceUnavailable": "Сервис недоступен. Попробуйте снова.",

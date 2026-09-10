@@ -14,7 +14,21 @@
     "search": "Qidiruv",
     "showInactive": "Nofaollarni ko‘rsatish",
     "fieldWithLang": "{{field}} ({{lang}})",
-    "back": "Orqaga"
+    "back": "Orqaga",
+    "reset": "Tozalash"
+  },
+  "filterBar": {
+    "presets": {
+      "today": "Bugun",
+      "last7Days": "Oxirgi 7 kun",
+      "last30Days": "Oxirgi 30 kun",
+      "thisMonth": "Shu oy"
+    },
+    "resultCount_one": "{{count}} ta natija",
+    "resultCount_few": "{{count}} ta natija",
+    "resultCount_many": "{{count}} ta natija",
+    "resultCount_other": "{{count}} ta natija",
+    "moreAvailable": "yana bor"
   },
   "errors": {
     "serviceUnavailable": "Xizmat vaqtincha ishlamayapti. Qayta urinib ko‘ring.",

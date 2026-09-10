@@ -57,7 +57,7 @@ import { i18next } from "../../../i18n";
 import { rootRoute } from "../../root";
 import { authenticatedRoute } from "../authenticatedRoute";
 import { dashboardRoute } from "../dashboardRoute";
-import { stockMovementsRoute } from "../stockMovementsRoute";
+import { stockMovementsRoute, validateStockMovementsSearch } from "../stockMovementsRoute";
 
 function buildRouter(initialEntry: string) {
   const queryClient = new QueryClient();
@@ -106,6 +106,56 @@ describe("stockMovementsRoute beforeLoad", () => {
 
     await waitFor(() => {
       expect(router.state.location.pathname).toBe("/stock/movements");
+    });
+  });
+});
+
+describe("stockMovementsRoute validateSearch", () => {
+  const validateSearch = validateStockMovementsSearch;
+
+  it("keeps every field when all are valid", () => {
+    expect(
+      validateSearch({
+        variantId: "v1",
+        locationId: "l1",
+        kind: "adjustment",
+        from: "2026-01-05",
+        to: "2026-01-10",
+      }),
+    ).toEqual({
+      variantId: "v1",
+      locationId: "l1",
+      kind: "adjustment",
+      from: "2026-01-05",
+      to: "2026-01-10",
+    });
+  });
+
+  it("defaults every field to undefined when the search is empty", () => {
+    expect(validateSearch({})).toEqual({
+      variantId: undefined,
+      locationId: undefined,
+      kind: undefined,
+      from: undefined,
+      to: undefined,
+    });
+  });
+
+  it("drops an unknown kind, non-string ids and malformed dates", () => {
+    expect(
+      validateSearch({
+        variantId: 42,
+        locationId: "",
+        kind: "not_a_real_kind",
+        from: "2026/01/05",
+        to: "2026-01-32",
+      }),
+    ).toEqual({
+      variantId: undefined,
+      locationId: undefined,
+      kind: undefined,
+      from: undefined,
+      to: undefined,
     });
   });
 });
