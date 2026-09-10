@@ -33,6 +33,7 @@ import {
   updateProduct,
 } from "../../catalog/api";
 import { buildCategoryTreeSelectData } from "../../catalog/tree";
+import { FormGrid } from "../../components/FormGrid";
 import { applyApiErrorToForm, notifyApiError } from "../../lib/errors";
 import { formatMoney, parseMoney } from "../../lib/money";
 import {
@@ -324,98 +325,125 @@ export function ProductFormPage({ productId }: { productId?: string }) {
               key: "general",
               label: t("catalog.products.tabs.general"),
               children: (
-                <>
+                <FormGrid>
                   {locales.map((locale) => (
+                    <FormGrid.Item key={`name-${locale}`}>
+                      <Form.Item
+                        name={["translations", locale, "name"]}
+                        label={t("common.fieldWithLang", {
+                          field: t("catalog.products.fields.name"),
+                          lang: t(`lang.${locale}`),
+                        })}
+                        rules={[{ required: locale === me.shop.defaultLocale }]}
+                      >
+                        <Input />
+                      </Form.Item>
+                    </FormGrid.Item>
+                  ))}
+                  {locales.map((locale) => (
+                    <FormGrid.Item key={`description-${locale}`} span="full">
+                      <Form.Item
+                        name={["translations", locale, "description"]}
+                        label={t("common.fieldWithLang", {
+                          field: t("catalog.products.fields.description"),
+                          lang: t(`lang.${locale}`),
+                        })}
+                      >
+                        <Input.TextArea rows={3} />
+                      </Form.Item>
+                    </FormGrid.Item>
+                  ))}
+                  <FormGrid.Item>
+                    <Form.Item name="categoryId" label={t("catalog.products.fields.category")}>
+                      <TreeSelect allowClear treeData={categoryOptions} treeDefaultExpandAll />
+                    </Form.Item>
+                  </FormGrid.Item>
+                  <FormGrid.Item>
                     <Form.Item
-                      key={`name-${locale}`}
-                      name={["translations", locale, "name"]}
-                      label={t("common.fieldWithLang", {
-                        field: t("catalog.products.fields.name"),
-                        lang: t(`lang.${locale}`),
-                      })}
-                      rules={[{ required: locale === me.shop.defaultLocale }]}
+                      name="unitId"
+                      label={t("catalog.products.fields.unit")}
+                      rules={[{ required: true }]}
                     >
+                      <Select
+                        options={(units ?? []).map((unit) => ({
+                          value: unit.id,
+                          label: unit.name,
+                        }))}
+                      />
+                    </Form.Item>
+                  </FormGrid.Item>
+                  <FormGrid.Item>
+                    <Form.Item name="slug" label={t("catalog.products.fields.slug")}>
                       <Input />
                     </Form.Item>
-                  ))}
-                  {locales.map((locale) => (
-                    <Form.Item
-                      key={`description-${locale}`}
-                      name={["translations", locale, "description"]}
-                      label={t("common.fieldWithLang", {
-                        field: t("catalog.products.fields.description"),
-                        lang: t(`lang.${locale}`),
-                      })}
-                    >
-                      <Input.TextArea rows={3} />
+                  </FormGrid.Item>
+                  <FormGrid.Item>
+                    <Form.Item name="sku" label={t("catalog.products.fields.sku")}>
+                      <Input />
                     </Form.Item>
-                  ))}
-                  <Form.Item name="categoryId" label={t("catalog.products.fields.category")}>
-                    <TreeSelect allowClear treeData={categoryOptions} treeDefaultExpandAll />
-                  </Form.Item>
-                  <Form.Item
-                    name="unitId"
-                    label={t("catalog.products.fields.unit")}
-                    rules={[{ required: true }]}
-                  >
-                    <Select
-                      options={(units ?? []).map((unit) => ({ value: unit.id, label: unit.name }))}
-                    />
-                  </Form.Item>
-                  <Form.Item name="slug" label={t("catalog.products.fields.slug")}>
-                    <Input />
-                  </Form.Item>
-                  <Form.Item name="sku" label={t("catalog.products.fields.sku")}>
-                    <Input />
-                  </Form.Item>
-                  <Form.Item
-                    name="isActive"
-                    label={t("catalog.products.fields.isActive")}
-                    valuePropName="checked"
-                  >
-                    <Switch />
-                  </Form.Item>
-                  <Form.Item
-                    name="isFeatured"
-                    label={t("catalog.products.fields.isFeatured")}
-                    valuePropName="checked"
-                  >
-                    <Switch />
-                  </Form.Item>
-                  <Form.Item
-                    name="lowStockThreshold"
-                    label={t("catalog.products.fields.lowStockThreshold")}
-                    extra={t("catalog.products.lowStockThresholdHint")}
-                  >
-                    <InputNumber min={0} precision={0} style={{ width: "100%" }} />
-                  </Form.Item>
-                </>
+                  </FormGrid.Item>
+                  <FormGrid.Item>
+                    <Form.Item
+                      name="isActive"
+                      label={t("catalog.products.fields.isActive")}
+                      valuePropName="checked"
+                    >
+                      <Switch />
+                    </Form.Item>
+                  </FormGrid.Item>
+                  <FormGrid.Item>
+                    <Form.Item
+                      name="isFeatured"
+                      label={t("catalog.products.fields.isFeatured")}
+                      valuePropName="checked"
+                    >
+                      <Switch />
+                    </Form.Item>
+                  </FormGrid.Item>
+                  <FormGrid.Item>
+                    <Form.Item
+                      name="lowStockThreshold"
+                      label={t("catalog.products.fields.lowStockThreshold")}
+                      extra={t("catalog.products.lowStockThresholdHint")}
+                    >
+                      <InputNumber min={0} precision={0} style={{ width: "100%" }} />
+                    </Form.Item>
+                  </FormGrid.Item>
+                </FormGrid>
               ),
             },
             {
               key: "prices",
               label: t("catalog.products.tabs.prices"),
               children: (
-                <>
-                  <Form.Item
-                    name="basePrice"
-                    label={t("catalog.products.fields.basePrice")}
-                    rules={[{ required: true }]}
-                  >
-                    <InputNumber min={0} precision={2} style={{ width: "100%" }} />
-                  </Form.Item>
-                  {showCostField && (
-                    <Form.Item name="costPrice" label={t("catalog.products.fields.costPrice")}>
+                <FormGrid>
+                  <FormGrid.Item>
+                    <Form.Item
+                      name="basePrice"
+                      label={t("catalog.products.fields.basePrice")}
+                      rules={[{ required: true }]}
+                    >
                       <InputNumber min={0} precision={2} style={{ width: "100%" }} />
                     </Form.Item>
+                  </FormGrid.Item>
+                  {showCostField && (
+                    <FormGrid.Item>
+                      <Form.Item name="costPrice" label={t("catalog.products.fields.costPrice")}>
+                        <InputNumber min={0} precision={2} style={{ width: "100%" }} />
+                      </Form.Item>
+                    </FormGrid.Item>
                   )}
-                  <Form.Item name="promoPrice" label={t("catalog.products.fields.promoPrice")}>
-                    <InputNumber min={0} precision={2} style={{ width: "100%" }} />
-                  </Form.Item>
-                  <Form.Item name="promoRange" label={t("catalog.products.fields.promoRange")}>
-                    <DatePicker.RangePicker showTime style={{ width: "100%" }} />
-                  </Form.Item>
-                </>
+                  <FormGrid.Item>
+                    <Form.Item name="promoPrice" label={t("catalog.products.fields.promoPrice")}>
+                      <InputNumber min={0} precision={2} style={{ width: "100%" }} />
+                    </Form.Item>
+                  </FormGrid.Item>
+                  <FormGrid.Item span="full">
+                    <Form.Item name="promoRange" label={t("catalog.products.fields.promoRange")}>
+                      <DatePicker.RangePicker showTime style={{ width: "100%" }} />
+                    </Form.Item>
+                  </FormGrid.Item>
+                </FormGrid>
               ),
             },
             {

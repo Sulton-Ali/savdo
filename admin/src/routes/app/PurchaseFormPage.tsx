@@ -22,6 +22,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { fetchProductsPage, fetchVariants, type Variant } from "../../catalog/api";
+import { FormGrid } from "../../components/FormGrid";
 import { ApiError, applyApiErrorToForm, notifyApiError } from "../../lib/errors";
 import { formatMoney, parseMoney } from "../../lib/money";
 import { fetchLocationsPage } from "../../locations/api";
@@ -516,40 +517,50 @@ export function PurchaseFormPage({ purchaseId }: { purchaseId?: string }) {
         initialValues={initialValues}
         onFinish={handleFinish}
       >
-        <Form.Item
-          name="supplierId"
-          label={t("purchases.fields.supplier")}
-          rules={[{ required: true }]}
-        >
-          <Select
-            disabled={!editable}
-            showSearch
-            optionFilterProp="label"
-            options={(suppliersPage?.items ?? []).map((supplier) => ({
-              value: supplier.id,
-              label: supplier.name,
-            }))}
-          />
-        </Form.Item>
-        <Form.Item
-          name="locationId"
-          label={t("purchases.fields.location")}
-          rules={[{ required: true }]}
-        >
-          <Select
-            disabled={!editable}
-            options={(locationsPage?.items ?? []).map((location) => ({
-              value: location.id,
-              label: location.name,
-            }))}
-          />
-        </Form.Item>
-        <Form.Item name="supplierInvoiceNo" label={t("purchases.fields.supplierInvoiceNo")}>
-          <Input disabled={!editable} />
-        </Form.Item>
-        <Form.Item name="note" label={t("purchases.fields.note")}>
-          <Input.TextArea rows={3} disabled={!editable} />
-        </Form.Item>
+        <FormGrid>
+          <FormGrid.Item>
+            <Form.Item
+              name="supplierId"
+              label={t("purchases.fields.supplier")}
+              rules={[{ required: true }]}
+            >
+              <Select
+                disabled={!editable}
+                showSearch
+                optionFilterProp="label"
+                options={(suppliersPage?.items ?? []).map((supplier) => ({
+                  value: supplier.id,
+                  label: supplier.name,
+                }))}
+              />
+            </Form.Item>
+          </FormGrid.Item>
+          <FormGrid.Item>
+            <Form.Item
+              name="locationId"
+              label={t("purchases.fields.location")}
+              rules={[{ required: true }]}
+            >
+              <Select
+                disabled={!editable}
+                options={(locationsPage?.items ?? []).map((location) => ({
+                  value: location.id,
+                  label: location.name,
+                }))}
+              />
+            </Form.Item>
+          </FormGrid.Item>
+          <FormGrid.Item>
+            <Form.Item name="supplierInvoiceNo" label={t("purchases.fields.supplierInvoiceNo")}>
+              <Input disabled={!editable} />
+            </Form.Item>
+          </FormGrid.Item>
+          <FormGrid.Item span="full">
+            <Form.Item name="note" label={t("purchases.fields.note")}>
+              <Input.TextArea rows={3} disabled={!editable} />
+            </Form.Item>
+          </FormGrid.Item>
+        </FormGrid>
       </Form>
 
       <Card type="inner" title={t("purchases.form.items.title")} style={{ marginTop: 16 }}>
