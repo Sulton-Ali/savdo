@@ -53,7 +53,18 @@
     "salesDrafts": "Черновики продаж",
     "reports": "Отчёты",
     "bot": "Бот",
-    "telegram": "Telegram"
+    "telegram": "Telegram",
+    "openMenu": "Меню",
+    "accountMenu": "Меню аккаунта",
+    "groups": {
+      "sales": "Продажи",
+      "catalog": "Каталог",
+      "stock": "Склад",
+      "people": "Контрагенты",
+      "reports": "Отчёты",
+      "bot": "Бот",
+      "settings": "Настройки"
+    }
   },
   "auth": {
     "login": {

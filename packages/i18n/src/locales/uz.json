@@ -53,7 +53,18 @@
     "salesDrafts": "Sotuv qoralamalari",
     "reports": "Hisobotlar",
     "bot": "Bot",
-    "telegram": "Telegram"
+    "telegram": "Telegram",
+    "openMenu": "Menyu",
+    "accountMenu": "Akkaunt menyusi",
+    "groups": {
+      "sales": "Sotuvlar",
+      "catalog": "Katalog",
+      "stock": "Ombor",
+      "people": "Hamkorlar",
+      "reports": "Hisobotlar",
+      "bot": "Bot",
+      "settings": "Sozlamalar"
+    }
   },
   "auth": {
     "login": {

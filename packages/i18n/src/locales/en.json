@@ -53,7 +53,18 @@
     "salesDrafts": "Sale drafts",
     "reports": "Reports",
     "bot": "Bot",
-    "telegram": "Telegram"
+    "telegram": "Telegram",
+    "openMenu": "Menu",
+    "accountMenu": "Account menu",
+    "groups": {
+      "sales": "Sales",
+      "catalog": "Catalog",
+      "stock": "Stock",
+      "people": "People",
+      "reports": "Reports",
+      "bot": "Bot",
+      "settings": "Settings"
+    }
   },
   "auth": {
     "login": {
