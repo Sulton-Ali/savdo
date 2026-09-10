@@ -17,6 +17,7 @@ import { useTranslation } from "react-i18next";
 
 import { useMe } from "../../auth/useMe";
 import { fetchProductsPage, fetchVariants, type Product, type Variant } from "../../catalog/api";
+import { FormGrid } from "../../components/FormGrid";
 import { type Customer, fetchCustomersPage } from "../../customers/api";
 import { ApiError, applyApiErrorToForm, notifyApiError } from "../../lib/errors";
 import { formatMoney, formatMoneyDisplay } from "../../lib/money";
@@ -448,86 +449,103 @@ export function QuickSalePage() {
         onValuesChange={(_changed, allValues) => setFormValues(allValues)}
         onFinish={handleFinish}
       >
-        <Form.Item
-          name="locationId"
-          label={t("sales.fields.location")}
-          rules={[{ required: true }]}
-        >
-          <Select
-            aria-label={t("sales.fields.location")}
-            onChange={(value: string) => persistLocationId(value)}
-            options={(locationsPage?.items ?? []).map((location) => ({
-              value: location.id,
-              label: location.name,
-            }))}
-          />
-        </Form.Item>
-        <Form.Item name="customerId" label={t("sales.fields.customer")}>
-          <Select
-            aria-label={t("sales.fields.customer")}
-            showSearch
-            allowClear
-            filterOption={false}
-            placeholder={t("sales.customerPlaceholder")}
-            onSearch={setCustomerSearchInput}
-            options={(customerResults?.items ?? []).map((customer: Customer) => ({
-              value: customer.id,
-              label: customer.phone
-                ? `${customer.fullName} — ${customer.phone}`
-                : customer.fullName,
-            }))}
-          />
-        </Form.Item>
-        <Form.Item
-          name="paymentMethod"
-          label={t("sales.fields.paymentMethod")}
-          rules={[{ required: true }]}
-        >
-          <Select
-            aria-label={t("sales.fields.paymentMethod")}
-            options={PAYMENT_METHODS.map((method) => ({
-              value: method,
-              label: t(`sales.paymentMethod.${method}`),
-            }))}
-          />
-        </Form.Item>
-        <Form.Item name="discountType" label={t("sales.fields.discountType")}>
-          <Select
-            aria-label={t("sales.fields.discountType")}
-            allowClear
-            onChange={(value: DiscountType | undefined) => {
-              // Clearing the discount type also clears the reason — a
-              // reason with no discount is meaningless and would otherwise
-              // linger in the form ready to be resurrected by a later
-              // discount pick (phase-4/t6b review MAJOR 1). `setFieldValue`
-              // doesn't fire `onValuesChange` (unlike a real field change),
-              // so the local snapshot is updated by hand too.
-              if (!value) {
-                form.setFieldValue("discountReason", undefined);
-                setFormValues((prev) => ({ ...prev, discountReason: undefined }));
-              }
-            }}
-            options={DISCOUNT_TYPES.map((type) => ({
-              value: type,
-              label: t(`sales.discountType.${type}`),
-            }))}
-          />
-        </Form.Item>
-        <Form.Item name="discountValue" label={t("sales.fields.discountValue")}>
-          <InputNumber
-            aria-label={t("sales.fields.discountValue")}
-            min={0}
-            precision={2}
-            disabled={!discountType}
-            style={{ width: "100%" }}
-          />
-        </Form.Item>
-        <Form.Item name="discountReason" label={t("sales.fields.discountReason")}>
-          <Input disabled={!discountType} />
-        </Form.Item>
-        <Form.Item name="note" label={t("sales.fields.note")}>
-          <Input.TextArea rows={2} />
-        </Form.Item>
+        <FormGrid>
+          <FormGrid.Item>
+            <Form.Item
+              name="locationId"
+              label={t("sales.fields.location")}
+              rules={[{ required: true }]}
+            >
+              <Select
+                aria-label={t("sales.fields.location")}
+                onChange={(value: string) => persistLocationId(value)}
+                options={(locationsPage?.items ?? []).map((location) => ({
+                  value: location.id,
+                  label: location.name,
+                }))}
+              />
+            </Form.Item>
+          </FormGrid.Item>
+          <FormGrid.Item>
+            <Form.Item name="customerId" label={t("sales.fields.customer")}>
+              <Select
+                aria-label={t("sales.fields.customer")}
+                showSearch
+                allowClear
+                filterOption={false}
+                placeholder={t("sales.customerPlaceholder")}
+                onSearch={setCustomerSearchInput}
+                options={(customerResults?.items ?? []).map((customer: Customer) => ({
+                  value: customer.id,
+                  label: customer.phone
+                    ? `${customer.fullName} — ${customer.phone}`
+                    : customer.fullName,
+                }))}
+              />
+            </Form.Item>
+          </FormGrid.Item>
+          <FormGrid.Item>
+            <Form.Item
+              name="paymentMethod"
+              label={t("sales.fields.paymentMethod")}
+              rules={[{ required: true }]}
+            >
+              <Select
+                aria-label={t("sales.fields.paymentMethod")}
+                options={PAYMENT_METHODS.map((method) => ({
+                  value: method,
+                  label: t(`sales.paymentMethod.${method}`),
+                }))}
+              />
+            </Form.Item>
+          </FormGrid.Item>
+          <FormGrid.Item>
+            <Form.Item name="discountType" label={t("sales.fields.discountType")}>
+              <Select
+                aria-label={t("sales.fields.discountType")}
+                allowClear
+                onChange={(value: DiscountType | undefined) => {
+                  // Clearing the discount type also clears the reason — a
+                  // reason with no discount is meaningless and would
+                  // otherwise linger in the form ready to be resurrected by
+                  // a later discount pick (phase-4/t6b review MAJOR 1).
+                  // `setFieldValue` doesn't fire `onValuesChange` (unlike a
+                  // real field change), so the local snapshot is updated by
+                  // hand too.
+                  if (!value) {
+                    form.setFieldValue("discountReason", undefined);
+                    setFormValues((prev) => ({ ...prev, discountReason: undefined }));
+                  }
+                }}
+                options={DISCOUNT_TYPES.map((type) => ({
+                  value: type,
+                  label: t(`sales.discountType.${type}`),
+                }))}
+              />
+            </Form.Item>
+          </FormGrid.Item>
+          <FormGrid.Item>
+            <Form.Item name="discountValue" label={t("sales.fields.discountValue")}>
+              <InputNumber
+                aria-label={t("sales.fields.discountValue")}
+                min={0}
+                precision={2}
+                disabled={!discountType}
+                style={{ width: "100%" }}
+              />
+            </Form.Item>
+          </FormGrid.Item>
+          <FormGrid.Item>
+            <Form.Item name="discountReason" label={t("sales.fields.discountReason")}>
+              <Input disabled={!discountType} />
+            </Form.Item>
+          </FormGrid.Item>
+          <FormGrid.Item span="full">
+            <Form.Item name="note" label={t("sales.fields.note")}>
+              <Input.TextArea rows={2} />
+            </Form.Item>
+          </FormGrid.Item>
+        </FormGrid>
       </Form>
 
       <Card type="inner" title={t("sales.items.title")} style={{ marginTop: 16 }}>
