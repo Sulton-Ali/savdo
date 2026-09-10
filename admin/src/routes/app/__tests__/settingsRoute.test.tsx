@@ -53,6 +53,30 @@ import { settingsRoute } from "../settingsRoute";
 
 const mockedApi = vi.mocked(api, { deep: true });
 
+/**
+ * `AppLayout`'s sider/drawer shell resolves desktop vs. mobile from Ant
+ * Design's `Grid.useBreakpoint`, which reads `window.matchMedia(...)`
+ * (D-122). The global stub in `test/setup.ts` always reports
+ * `matches: false`, which reads as "below every breakpoint" — mock it here
+ * so the sider (and this test's "Old/New Shop Name" text) renders as it
+ * would on desktop.
+ */
+function mockDesktopMatchMedia() {
+  vi.spyOn(window, "matchMedia").mockImplementation(
+    (query: string) =>
+      ({
+        matches: query.includes("min-width"),
+        media: query,
+        onchange: null,
+        addListener: () => {},
+        removeListener: () => {},
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        dispatchEvent: () => false,
+      }) as MediaQueryList,
+  );
+}
+
 function buildRouter() {
   const queryClient = new QueryClient();
   const routeTree = rootRoute.addChildren([authenticatedRoute.addChildren([settingsRoute])]);
@@ -73,10 +97,12 @@ describe("settings save reflects in the sider without a navigation", () => {
     mockedApi.GET.mockReset();
     mockedApi.PATCH.mockReset();
     fetchMeMock.mockReset();
+    mockDesktopMatchMedia();
   });
 
   afterEach(() => {
     cleanup();
+    vi.restoreAllMocks();
   });
 
   it("updates the sider's shop name after PATCH /shop succeeds", async () => {
