@@ -1,7 +1,7 @@
 import type { components } from "@savdo/api-client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 type Me = components["schemas"]["Me"];
@@ -108,6 +108,29 @@ describe("stockMovementsRoute beforeLoad", () => {
       expect(router.state.location.pathname).toBe("/stock/movements");
     });
   });
+
+  it("replaces the history entry (not pushes) on a filter change, so Back leaves the page instead of undoing one filter", async () => {
+    fetchMeMock.mockResolvedValueOnce(buildMe(["stock.write"]));
+    const { router, queryClient } = buildRouter("/stock/movements?locationId=l1");
+    render(
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe("/stock/movements");
+    });
+
+    const replaceSpy = vi.spyOn(router.history, "replace");
+    const pushSpy = vi.spyOn(router.history, "push");
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+
+    await waitFor(() => {
+      expect(replaceSpy).toHaveBeenCalled();
+    });
+    expect(pushSpy).not.toHaveBeenCalled();
+  });
 });
 
 describe("stockMovementsRoute validateSearch", () => {
@@ -116,6 +139,7 @@ describe("stockMovementsRoute validateSearch", () => {
   it("keeps every field when all are valid", () => {
     expect(
       validateSearch({
+        productId: "p1",
         variantId: "v1",
         locationId: "l1",
         kind: "adjustment",
@@ -123,6 +147,7 @@ describe("stockMovementsRoute validateSearch", () => {
         to: "2026-01-10",
       }),
     ).toEqual({
+      productId: "p1",
       variantId: "v1",
       locationId: "l1",
       kind: "adjustment",
@@ -133,6 +158,7 @@ describe("stockMovementsRoute validateSearch", () => {
 
   it("defaults every field to undefined when the search is empty", () => {
     expect(validateSearch({})).toEqual({
+      productId: undefined,
       variantId: undefined,
       locationId: undefined,
       kind: undefined,
@@ -141,9 +167,10 @@ describe("stockMovementsRoute validateSearch", () => {
     });
   });
 
-  it("drops an unknown kind, non-string ids and malformed dates", () => {
+  it("drops an unknown kind, non-string ids (including productId) and malformed dates", () => {
     expect(
       validateSearch({
+        productId: 7,
         variantId: 42,
         locationId: "",
         kind: "not_a_real_kind",
@@ -151,6 +178,7 @@ describe("stockMovementsRoute validateSearch", () => {
         to: "2026-01-32",
       }),
     ).toEqual({
+      productId: undefined,
       variantId: undefined,
       locationId: undefined,
       kind: undefined,

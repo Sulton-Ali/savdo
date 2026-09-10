@@ -15,14 +15,13 @@ dayjs.extend(customParseFormat);
 const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 /** `/stock/movements` filter state, kept in the route's search params so
- * reload and browser back restore it (D-124). Only the final `variantId` is
- * a search param, not the product it belongs to — there is no
- * variant-to-product lookup endpoint, so `StockVariantPicker` cannot
- * re-resolve its product select from a bare `variantId` on reload; the
- * filter itself still applies correctly, but the picker's product field
- * starts empty until a product is searched again (a known gap, out of this
- * task's scope — flagged in the task report, not fixed here). */
+ * reload and browser back restore it (D-124). `productId` is carried
+ * alongside `variantId` — there is no variant-to-product lookup endpoint,
+ * so without it `StockVariantPicker` could not re-resolve its product
+ * select on reload; both are written together and cleared together (see
+ * `StockMovementsPage`'s `handleVariantChange`). */
 export interface StockMovementsSearch {
+  productId?: string;
   variantId?: string;
   locationId?: string;
   kind?: StockMovementKind;
@@ -58,6 +57,7 @@ export function validateStockMovementsSearch(
   search: Record<string, unknown>,
 ): StockMovementsSearch {
   return {
+    productId: stringOrUndefined(search.productId),
     variantId: stringOrUndefined(search.variantId),
     locationId: stringOrUndefined(search.locationId),
     kind: kindOrUndefined(search.kind),
@@ -78,6 +78,14 @@ function StockMovementsRouteComponent() {
   const search = stockMovementsRoute.useSearch();
   const navigate = stockMovementsRoute.useNavigate();
   return (
-    <StockMovementsPage search={search} onSearchChange={(next) => navigate({ search: next })} />
+    <StockMovementsPage
+      search={search}
+      // `replace: true` — every call here is a filter tweak or Reset, not a
+      // page-to-page move; pushing a history entry per tweak would make
+      // browser Back undo filters one at a time instead of leaving the page.
+      // The URL still carries the full filter state for reload/share/
+      // forward-back between pages.
+      onSearchChange={(next) => navigate({ search: next, replace: true })}
+    />
   );
 }

@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Button, Card, DatePicker, Select, Table, Tag } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import dayjs, { type Dayjs } from "dayjs";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
 import { FilterBar } from "../../components/FilterBar";
@@ -53,8 +53,9 @@ export interface StockMovementsPageProps {
    * (`stockMovementsRoute`'s `validateSearch`). */
   search: StockMovementsSearch;
   /** Replaces the filter state — the caller (`stockMovementsRoute`) turns
-   * this into a `navigate({ search })` call so reload and back restore it
-   * (D-124). */
+   * this into a `navigate({ search, replace: true })` call so reload and
+   * share restore it, while Back leaves the page instead of undoing one
+   * filter at a time (D-124). */
   onSearchChange: (next: StockMovementsSearch) => void;
 }
 
@@ -66,17 +67,17 @@ export interface StockMovementsPageProps {
  * `StockMovement` carries no embedded name (checked in `schema.d.ts`), so
  * it renders as-is.
  *
- * Filters live in the route's search params (`search`/`onSearchChange`,
- * D-124) rather than local `useState`, except the variant picker's product
- * selection, which is UI-only local state (see `stockMovementsRoute.tsx`'s
- * `StockMovementsSearch` doc comment for why only `variantId` is a search
- * param).
+ * Filters — including the variant picker's product/variant selection —
+ * live entirely in the route's search params (`search`/`onSearchChange`,
+ * D-124); there is no separate local UI state to keep in sync with the URL.
  */
 export function StockMovementsPage({ search, onSearchChange }: StockMovementsPageProps) {
   const { t } = useTranslation();
 
-  const [productId, setProductId] = useState<string | null>(null);
-  const variant: StockVariantValue = { productId, variantId: search.variantId ?? null };
+  const variant: StockVariantValue = {
+    productId: search.productId ?? null,
+    variantId: search.variantId ?? null,
+  };
 
   const { data: locations } = useQuery({
     queryKey: ["locations", "all"],
@@ -110,8 +111,11 @@ export function StockMovementsPage({ search, onSearchChange }: StockMovementsPag
   const movements = data?.pages.flatMap((page) => page.items) ?? [];
 
   function handleVariantChange(next: StockVariantValue) {
-    setProductId(next.productId);
-    onSearchChange({ ...search, variantId: next.variantId ?? undefined });
+    onSearchChange({
+      ...search,
+      productId: next.productId ?? undefined,
+      variantId: next.variantId ?? undefined,
+    });
   }
 
   function handleDateRangeChange(value: [Dayjs | null, Dayjs | null] | null) {
@@ -123,7 +127,6 @@ export function StockMovementsPage({ search, onSearchChange }: StockMovementsPag
   }
 
   function handleReset() {
-    setProductId(null);
     onSearchChange({});
   }
 
@@ -183,50 +186,58 @@ export function StockMovementsPage({ search, onSearchChange }: StockMovementsPag
     <Card title={t("stock.movements.title")}>
       <FilterBar onReset={handleReset} resultCount={movements.length} hasMore={hasNextPage}>
         <FilterBar.Field label={t("stock.fields.variant")} span={{ xl: 12 }}>
-          <StockVariantPicker value={variant} onChange={handleVariantChange} />
+          {(labelId) => (
+            <StockVariantPicker value={variant} onChange={handleVariantChange} labelId={labelId} />
+          )}
         </FilterBar.Field>
         <FilterBar.Field label={t("stock.fields.location")}>
-          <Select
-            allowClear
-            aria-label={t("stock.movements.locationPlaceholder")}
-            placeholder={t("stock.movements.locationPlaceholder")}
-            style={{ width: "100%" }}
-            value={search.locationId}
-            onChange={(value: string | undefined) =>
-              onSearchChange({ ...search, locationId: value })
-            }
-            onClear={() => onSearchChange({ ...search, locationId: undefined })}
-            options={(locations ?? []).map((location) => ({
-              value: location.id,
-              label: location.name,
-            }))}
-          />
+          {(labelId) => (
+            <Select
+              allowClear
+              aria-labelledby={labelId}
+              placeholder={t("stock.movements.locationPlaceholder")}
+              style={{ width: "100%" }}
+              value={search.locationId}
+              onChange={(value: string | undefined) =>
+                onSearchChange({ ...search, locationId: value })
+              }
+              onClear={() => onSearchChange({ ...search, locationId: undefined })}
+              options={(locations ?? []).map((location) => ({
+                value: location.id,
+                label: location.name,
+              }))}
+            />
+          )}
         </FilterBar.Field>
         <FilterBar.Field label={t("stock.movements.columns.kind")}>
-          <Select
-            allowClear
-            aria-label={t("stock.movements.kindPlaceholder")}
-            placeholder={t("stock.movements.kindPlaceholder")}
-            style={{ width: "100%" }}
-            value={search.kind}
-            onChange={(value: StockMovementKind | undefined) =>
-              onSearchChange({ ...search, kind: value })
-            }
-            onClear={() => onSearchChange({ ...search, kind: undefined })}
-            options={MOVEMENT_KINDS.map((value) => ({
-              value,
-              label: t(`stock.movementKinds.${value}`),
-            }))}
-          />
+          {(labelId) => (
+            <Select
+              allowClear
+              aria-labelledby={labelId}
+              placeholder={t("stock.movements.kindPlaceholder")}
+              style={{ width: "100%" }}
+              value={search.kind}
+              onChange={(value: StockMovementKind | undefined) =>
+                onSearchChange({ ...search, kind: value })
+              }
+              onClear={() => onSearchChange({ ...search, kind: undefined })}
+              options={MOVEMENT_KINDS.map((value) => ({
+                value,
+                label: t(`stock.movementKinds.${value}`),
+              }))}
+            />
+          )}
         </FilterBar.Field>
         <FilterBar.Field label={t("stock.movements.dateRangeLabel")}>
-          <DatePicker.RangePicker
-            aria-label={t("stock.movements.dateRangeLabel")}
-            style={{ width: "100%" }}
-            value={dateRangeValue}
-            presets={datePresets}
-            onChange={handleDateRangeChange}
-          />
+          {(labelId) => (
+            <DatePicker.RangePicker
+              aria-labelledby={labelId}
+              style={{ width: "100%" }}
+              value={dateRangeValue}
+              presets={datePresets}
+              onChange={handleDateRangeChange}
+            />
+          )}
         </FilterBar.Field>
       </FilterBar>
 

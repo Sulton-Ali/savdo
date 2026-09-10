@@ -196,14 +196,14 @@ describe("StockMovementsPage", () => {
     renderPage();
     await screen.findByText("Purchase");
 
-    fireEvent.mouseDown(screen.getByLabelText("All locations"));
+    fireEvent.mouseDown(screen.getByLabelText("Location"));
     fireEvent.click(await screen.findByText("Main Store"));
 
     await waitFor(() => {
       expect(lastMovementsQuery()?.locationId).toBe("l1");
     });
 
-    fireEvent.mouseDown(screen.getByLabelText("All kinds"));
+    fireEvent.mouseDown(screen.getByLabelText("Kind"));
     fireEvent.click(await screen.findByText("Adjustment"));
 
     await waitFor(() => {
@@ -216,14 +216,43 @@ describe("StockMovementsPage", () => {
     renderPage();
     await screen.findByText("Purchase");
 
-    fireEvent.mouseDown(screen.getByLabelText("Search product"));
+    fireEvent.mouseDown(screen.getByLabelText("Variant Search product"));
     await selectOption("T-Shirt");
-    fireEvent.mouseDown(await screen.findByLabelText("Select variant"));
+    fireEvent.mouseDown(await screen.findByLabelText("Variant Select variant"));
     await selectOption("size: M — SKU SKU1");
 
     await waitFor(() => {
       expect(lastMovementsQuery()?.variantId).toBe("v1");
     });
+  });
+
+  it("clears both productId and variantId from the search when the product select is cleared", async () => {
+    mockEndpoints();
+    const { onSearchChangeSpy } = renderPage({ productId: "p1", variantId: "v1" });
+    await screen.findByText("Purchase");
+    await screen.findByText("T-Shirt");
+
+    const productControl = screen.getByLabelText("Variant Search product");
+    fireEvent.mouseOver(productControl);
+    fireEvent.click(
+      productControl.closest(".ant-select")?.querySelector(".ant-select-clear") as HTMLElement,
+    );
+
+    expect(onSearchChangeSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ productId: undefined, variantId: undefined }),
+    );
+  });
+
+  it("ties each filter's visible label to its control's accessible name", async () => {
+    mockEndpoints();
+    renderPage();
+    await screen.findByText("Purchase");
+
+    expect(screen.getByLabelText("Location")).toBeTruthy();
+    expect(screen.getByLabelText("Kind")).toBeTruthy();
+    expect(screen.getAllByLabelText("Date range").length).toBeGreaterThan(0);
+    expect(screen.getByLabelText("Variant Search product")).toBeTruthy();
+    expect(screen.getByLabelText("Variant Select variant")).toBeTruthy();
   });
 
   it("requests /stock/movements with from/to as start/end-of-day ISO strings once a date range is picked", async () => {
@@ -250,6 +279,7 @@ describe("StockMovementsPage", () => {
   it("seeds filters from the initial search (URL) and requests the mapped API params", async () => {
     mockEndpoints();
     renderPage({
+      productId: "p1",
       variantId: "v1",
       locationId: "l1",
       kind: "adjustment",
@@ -265,6 +295,15 @@ describe("StockMovementsPage", () => {
       expect(query?.from).toBe(dayjs("2026-01-05").startOf("day").toISOString());
       expect(query?.to).toBe(dayjs("2026-01-10").endOf("day").toISOString());
     });
+
+    // The seeded productId (not just variantId) drives the picker's product
+    // select — without it the product select would stay empty and the
+    // variant select disabled after a reload (the bug this test guards).
+    expect(await screen.findByText("T-Shirt")).toBeTruthy();
+    const variantControl = screen.getByLabelText("Variant Select variant");
+    expect(variantControl.closest(".ant-select")?.classList.contains("ant-select-disabled")).toBe(
+      false,
+    );
   });
 
   it("shows the result count and re-fetches with the reset filters when Reset is clicked", async () => {

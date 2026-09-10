@@ -36,6 +36,20 @@ describe("FilterBar", () => {
     expect(screen.getByLabelText("Location")).toBeTruthy();
   });
 
+  it("ties a render-prop field's control to the visible label via aria-labelledby", () => {
+    render(
+      <ConfigProvider theme={{ token: { motion: false } }}>
+        <FilterBar onReset={vi.fn()} resultCount={0}>
+          <FilterBar.Field label="Kind">
+            {(labelId) => <input aria-labelledby={labelId} />}
+          </FilterBar.Field>
+        </FilterBar>
+      </ConfigProvider>,
+    );
+
+    expect(screen.getByLabelText("Kind")).toBeTruthy();
+  });
+
   it("calls onReset once when the reset button is clicked", () => {
     const onReset = vi.fn();
     renderBar({ onReset });

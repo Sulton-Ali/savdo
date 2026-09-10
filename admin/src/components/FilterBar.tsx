@@ -1,5 +1,6 @@
 import { Button, Col, Row, Typography } from "antd";
 import type { ReactNode } from "react";
+import { useId } from "react";
 import { useTranslation } from "react-i18next";
 
 const { Text } = Typography;
@@ -19,20 +20,29 @@ const DEFAULT_SPAN: Required<FilterBarFieldSpan> = { xs: 24, md: 12, xl: 6 };
 export interface FilterBarFieldProps {
   label: ReactNode;
   span?: FilterBarFieldSpan;
-  children: ReactNode;
+  /** The control(s) for this field. Either a plain node — for a control
+   * that already manages its own accessible name — or a render function
+   * that receives this field's generated `labelId`; pass it as
+   * `aria-labelledby={labelId}` on the control (or combine it with the
+   * control's own label id, e.g. `${labelId} ${ownId}`, when the field
+   * wraps more than one control — see `StockVariantPicker`'s `labelId`
+   * prop) to tie the visible label to the control for assistive tech. */
+  children: ReactNode | ((labelId: string) => ReactNode);
 }
 
 /** One labeled filter control inside a `FilterBar` — the label renders
  * above `children` (D-124), in a `Col` sized `xs 24 / md 12 / xl 6` by
- * default. */
+ * default. The label carries an id (`useId`) so a render-prop `children`
+ * can tie the control's accessible name to it via `aria-labelledby`. */
 function FilterBarField({ label, span, children }: FilterBarFieldProps) {
   const resolved = { ...DEFAULT_SPAN, ...span };
+  const labelId = useId();
   return (
     <Col xs={resolved.xs} md={resolved.md} xl={resolved.xl}>
-      <Text type="secondary" style={{ display: "block", marginBottom: 4 }}>
+      <Text id={labelId} type="secondary" style={{ display: "block", marginBottom: 4 }}>
         {label}
       </Text>
-      {children}
+      {typeof children === "function" ? children(labelId) : children}
     </Col>
   );
 }
@@ -71,7 +81,15 @@ export interface FilterBarProps {
  * ```tsx
  * <FilterBar onReset={handleReset} resultCount={items.length} hasMore={hasNextPage}>
  *   <FilterBar.Field label={t("...")}>
- *     <Select allowClear value={...} onChange={...} style={{ width: "100%" }} />
+ *     {(labelId) => (
+ *       <Select
+ *         allowClear
+ *         aria-labelledby={labelId}
+ *         value={...}
+ *         onChange={...}
+ *         style={{ width: "100%" }}
+ *       />
+ *     )}
  *   </FilterBar.Field>
  *   <FilterBar.Field label={t("...")} span={{ xl: 12 }}>
  *     <SomeWiderControl />
