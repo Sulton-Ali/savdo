@@ -27,7 +27,7 @@
     "resultCount_one": "{{count}} результат",
     "resultCount_few": "{{count}} результата",
     "resultCount_many": "{{count}} результатов",
-    "resultCount_other": "{{count}} результата",
+    "resultCount_other": "{{count}} результатов",
     "moreAvailable": "есть ещё"
   },
   "errors": {
