@@ -1,15 +1,18 @@
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Button, Card, Select, Space, Table, Tag } from "antd";
+import { Button, Card, Select, Table, Tag } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
+
+import { FilterBar } from "../../components/FilterBar";
 import { useCursorList } from "../../lib/useCursorList";
 import { fetchLocationsPage } from "../../locations/api";
 import { fetchPurchasesPage, type Purchase, type PurchaseStatus } from "../../purchases/api";
 import { fetchSuppliersPage } from "../../suppliers/api";
+import type { PurchasesSearch } from "./purchasesRoute";
 
-const PURCHASE_STATUSES: PurchaseStatus[] = ["draft", "received", "cancelled"];
+export const PURCHASE_STATUSES: PurchaseStatus[] = ["draft", "received", "cancelled"];
 
 const STATUS_COLORS: Record<PurchaseStatus, string> = {
   draft: "default",
@@ -17,12 +20,20 @@ const STATUS_COLORS: Record<PurchaseStatus, string> = {
   cancelled: "red",
 };
 
-export function PurchasesListPage() {
+export interface PurchasesListPageProps {
+  /** Validated filter state from the route's search params
+   * (`purchasesRoute`'s `validateSearch`). */
+  search: PurchasesSearch;
+  /** Replaces the filter state — the caller (`purchasesRoute`) turns this
+   * into a `navigate({ search, replace: true })` call so reload and share
+   * restore it, while Back leaves the page instead of undoing one filter
+   * at a time (D-124). */
+  onSearchChange: (next: PurchasesSearch) => void;
+}
+
+export function PurchasesListPage({ search, onSearchChange }: PurchasesListPageProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
-
-  const [status, setStatus] = useState<PurchaseStatus | undefined>(undefined);
-  const [supplierId, setSupplierId] = useState<string | undefined>(undefined);
 
   // Not cursor-paginated on this screen — a small shop's supplier/location
   // lists are short, same approach as `ProductsListPage`'s category filter.
@@ -43,13 +54,17 @@ export function PurchasesListPage() {
     [locations],
   );
 
-  const filters = { status, supplierId };
+  const filters = { status: search.status, supplierId: search.supplierId };
 
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isPending } = useCursorList(
     ["purchases", filters],
     (cursor) => fetchPurchasesPage(filters, cursor),
   );
   const purchases = data?.pages.flatMap((page) => page.items) ?? [];
+
+  function handleReset() {
+    onSearchChange({});
+  }
 
   const columns: ColumnsType<Purchase> = [
     { title: t("purchases.columns.number"), dataIndex: "number" },
@@ -87,32 +102,48 @@ export function PurchasesListPage() {
         </Button>
       }
     >
-      <Space style={{ marginBottom: 16 }} wrap>
-        <Select<PurchaseStatus | undefined>
-          allowClear
-          placeholder={t("purchases.allStatuses")}
-          value={status}
-          onChange={setStatus}
-          style={{ width: 180 }}
-          options={PURCHASE_STATUSES.map((value) => ({
-            value,
-            label: t(`purchases.status.${value}`),
-          }))}
-        />
-        <Select<string | undefined>
-          allowClear
-          showSearch
-          placeholder={t("purchases.allSuppliers")}
-          value={supplierId}
-          onChange={setSupplierId}
-          style={{ width: 220 }}
-          optionFilterProp="label"
-          options={(suppliers?.items ?? []).map((supplier) => ({
-            value: supplier.id,
-            label: supplier.name,
-          }))}
-        />
-      </Space>
+      <FilterBar onReset={handleReset} resultCount={purchases.length} hasMore={hasNextPage}>
+        <FilterBar.Field label={t("purchases.columns.status")}>
+          {(labelId) => (
+            <Select
+              allowClear
+              aria-labelledby={labelId}
+              placeholder={t("purchases.allStatuses")}
+              style={{ width: "100%" }}
+              value={search.status}
+              onChange={(value: PurchaseStatus | undefined) =>
+                onSearchChange({ ...search, status: value })
+              }
+              onClear={() => onSearchChange({ ...search, status: undefined })}
+              options={PURCHASE_STATUSES.map((value) => ({
+                value,
+                label: t(`purchases.status.${value}`),
+              }))}
+            />
+          )}
+        </FilterBar.Field>
+        <FilterBar.Field label={t("purchases.columns.supplier")}>
+          {(labelId) => (
+            <Select
+              allowClear
+              showSearch
+              aria-labelledby={labelId}
+              placeholder={t("purchases.allSuppliers")}
+              style={{ width: "100%" }}
+              value={search.supplierId}
+              onChange={(value: string | undefined) =>
+                onSearchChange({ ...search, supplierId: value })
+              }
+              onClear={() => onSearchChange({ ...search, supplierId: undefined })}
+              optionFilterProp="label"
+              options={(suppliers?.items ?? []).map((supplier) => ({
+                value: supplier.id,
+                label: supplier.name,
+              }))}
+            />
+          )}
+        </FilterBar.Field>
+      </FilterBar>
 
       <Table<Purchase>
         rowKey="id"

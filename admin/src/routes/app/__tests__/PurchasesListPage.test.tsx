@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { App as AntApp, ConfigProvider } from "antd";
+import { useState } from "react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@tanstack/react-router", async (importOriginal) => {
@@ -15,6 +16,7 @@ vi.mock("../../../lib/api", () => ({
 import { i18next } from "../../../i18n";
 import { api } from "../../../lib/api";
 import { PurchasesListPage } from "../PurchasesListPage";
+import type { PurchasesSearch } from "../purchasesRoute";
 
 const mockedApi = vi.mocked(api, { deep: true });
 
@@ -71,17 +73,45 @@ function mockEndpoints() {
   }) as never);
 }
 
-function renderPage() {
+/** Mirrors how `purchasesRoute`'s wrapper drives `PurchasesListPage`
+ * (`search`/`onSearchChange`), except the search state lives in this test
+ * harness instead of the router — `onSearchChangeSpy` observes every call
+ * the page makes while `useState` keeps the page controlled, same as a real
+ * `navigate({ search })` round-trip would (mirrors
+ * `StockMovementsPage.test.tsx`'s harness). */
+function renderPage(initialSearch: PurchasesSearch = {}) {
+  const onSearchChangeSpy = vi.fn<(next: PurchasesSearch) => void>();
+
+  function Harness() {
+    const [search, setSearch] = useState<PurchasesSearch>(initialSearch);
+    return (
+      <PurchasesListPage
+        search={search}
+        onSearchChange={(next) => {
+          onSearchChangeSpy(next);
+          setSearch(next);
+        }}
+      />
+    );
+  }
+
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  const utils = render(
     <ConfigProvider theme={{ token: { motion: false } }}>
       <QueryClientProvider client={queryClient}>
         <AntApp>
-          <PurchasesListPage />
+          <Harness />
         </AntApp>
       </QueryClientProvider>
     </ConfigProvider>,
   );
+  return { ...utils, onSearchChangeSpy };
+}
+
+function lastPurchasesQuery() {
+  const call = [...mockedApi.GET.mock.calls].reverse().find((entry) => entry[0] === "/purchases");
+  return (call?.[1] as never as { params: { query: Record<string, unknown> } } | undefined)?.params
+    .query;
 }
 
 describe("PurchasesListPage", () => {
@@ -103,15 +133,15 @@ describe("PurchasesListPage", () => {
     renderPage();
 
     expect(await screen.findByText("P-000012")).toBeTruthy();
-    expect(await screen.findByText("Acme Textiles")).toBeTruthy();
-    expect(await screen.findByText("Main store")).toBeTruthy();
+    expect(screen.getByText("Acme Textiles")).toBeTruthy();
+    expect(screen.getByText("Main store")).toBeTruthy();
     expect(screen.getByText("Draft")).toBeTruthy();
   });
 
-  it("requests /purchases with the selected status filter", async () => {
+  it("requests /purchases with the selected status filter and pushes it into the search (replace)", async () => {
     mockEndpoints();
 
-    renderPage();
+    const { onSearchChangeSpy } = renderPage();
     await screen.findByText("P-000012");
 
     fireEvent.mouseDown(screen.getByText("All statuses"));
@@ -124,14 +154,49 @@ describe("PurchasesListPage", () => {
     });
     fireEvent.click(receivedOption);
 
+    expect(onSearchChangeSpy).toHaveBeenCalledWith(expect.objectContaining({ status: "received" }));
     await waitFor(() => {
-      const matched = mockedApi.GET.mock.calls.some(
-        (call) =>
-          call[0] === "/purchases" &&
-          (call[1] as never as { params: { query: { status?: string } } })?.params?.query
-            ?.status === "received",
-      );
-      expect(matched).toBe(true);
+      expect(lastPurchasesQuery()?.status).toBe("received");
+    });
+  });
+
+  it("shows the result count line", async () => {
+    mockEndpoints();
+
+    renderPage();
+
+    expect(await screen.findByText("1 result")).toBeTruthy();
+  });
+
+  it("pre-fills the status and supplier filters from the initial search (URL) and requests /purchases with them", async () => {
+    mockEndpoints();
+
+    renderPage({ status: "received", supplierId: "sup1" });
+
+    await screen.findByText("P-000012");
+    expect(screen.getAllByText("Acme Textiles").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Received").length).toBeGreaterThan(0);
+
+    await waitFor(() => {
+      const query = lastPurchasesQuery();
+      expect(query?.status).toBe("received");
+      expect(query?.supplierId).toBe("sup1");
+    });
+  });
+
+  it("Reset clears both filters", async () => {
+    mockEndpoints();
+
+    const { onSearchChangeSpy } = renderPage({ status: "received", supplierId: "sup1" });
+    await screen.findByText("P-000012");
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+
+    expect(onSearchChangeSpy).toHaveBeenCalledWith({});
+    await waitFor(() => {
+      const query = lastPurchasesQuery();
+      expect(query?.status).toBeUndefined();
+      expect(query?.supplierId).toBeUndefined();
     });
   });
 });

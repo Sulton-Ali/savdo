@@ -1,7 +1,7 @@
 import type { components } from "@savdo/api-client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 type Me = components["schemas"]["Me"];
@@ -57,7 +57,7 @@ import { i18next } from "../../../i18n";
 import { rootRoute } from "../../root";
 import { authenticatedRoute } from "../authenticatedRoute";
 import { dashboardRoute } from "../dashboardRoute";
-import { purchasesRoute } from "../purchasesRoute";
+import { purchasesRoute, validatePurchasesSearch } from "../purchasesRoute";
 
 function buildRouter(initialEntry: string) {
   const queryClient = new QueryClient();
@@ -106,6 +106,51 @@ describe("purchasesRoute beforeLoad", () => {
 
     await waitFor(() => {
       expect(router.state.location.pathname).toBe("/purchases");
+    });
+  });
+
+  it("replaces the history entry (not pushes) on Reset, so Back leaves the page instead of undoing one filter", async () => {
+    fetchMeMock.mockResolvedValueOnce(buildMe(["stock.write"]));
+    const { router, queryClient } = buildRouter("/purchases?supplierId=sup1");
+    render(
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe("/purchases");
+    });
+
+    const replaceSpy = vi.spyOn(router.history, "replace");
+    const pushSpy = vi.spyOn(router.history, "push");
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+
+    await waitFor(() => {
+      expect(replaceSpy).toHaveBeenCalled();
+    });
+    expect(pushSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("purchasesRoute validateSearch", () => {
+  const validateSearch = validatePurchasesSearch;
+
+  it("keeps every field when all are valid", () => {
+    expect(validateSearch({ status: "received", supplierId: "sup1" })).toEqual({
+      status: "received",
+      supplierId: "sup1",
+    });
+  });
+
+  it("defaults every field to undefined when the search is empty", () => {
+    expect(validateSearch({})).toEqual({ status: undefined, supplierId: undefined });
+  });
+
+  it("drops an unknown status and a non-string supplierId", () => {
+    expect(validateSearch({ status: "not_a_real_status", supplierId: 7 })).toEqual({
+      status: undefined,
+      supplierId: undefined,
     });
   });
 });
