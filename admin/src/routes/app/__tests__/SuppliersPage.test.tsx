@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { App as AntApp, ConfigProvider } from "antd";
 import { useState } from "react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -31,9 +31,14 @@ function emptySuppliersList() {
  * `StockMovementsPage.test.tsx`'s harness). */
 function renderPage(initialSearch: SuppliersSearch = {}) {
   const onSearchChangeSpy = vi.fn<(next: SuppliersSearch) => void>();
+  // Lets a test simulate a change that does not go through the page's own
+  // `onSearchChange` (browser Back/Forward, another navigation) — a real
+  // `setSearch` call from the harness, not the spied round-trip.
+  let setExternalSearchImpl: (next: SuppliersSearch) => void = () => {};
 
   function Harness() {
     const [search, setSearch] = useState<SuppliersSearch>(initialSearch);
+    setExternalSearchImpl = setSearch;
     return (
       <SuppliersPage
         search={search}
@@ -57,7 +62,11 @@ function renderPage(initialSearch: SuppliersSearch = {}) {
       </QueryClientProvider>
     </ConfigProvider>,
   );
-  return { ...utils, onSearchChangeSpy };
+  return {
+    ...utils,
+    onSearchChangeSpy,
+    setExternalSearch: (next: SuppliersSearch) => act(() => setExternalSearchImpl(next)),
+  };
 }
 
 describe("SuppliersPage", () => {
@@ -162,6 +171,69 @@ describe("SuppliersPage", () => {
       );
       expect(matched).toBe(true);
     });
+  });
+
+  it("shows a below-minimum URL q in the input but never queries with it", async () => {
+    renderPage({ q: "a" });
+
+    expect((screen.getByPlaceholderText("Search suppliers") as HTMLInputElement).value).toBe("a");
+    await waitFor(() => expect(mockedApi.GET).toHaveBeenCalled());
+    expect(
+      mockedApi.GET.mock.calls.some(
+        (call) =>
+          call[0] === "/suppliers" &&
+          (call[1] as never as { params: { query: { q?: string } } })?.params?.query?.q !==
+            undefined,
+      ),
+    ).toBe(false);
+  });
+
+  it("syncs the input from an external search change when nothing is being typed", async () => {
+    const { setExternalSearch } = renderPage();
+    await waitFor(() => expect(mockedApi.GET).toHaveBeenCalled());
+
+    setExternalSearch({ q: "external" });
+
+    expect((screen.getByPlaceholderText("Search suppliers") as HTMLInputElement).value).toBe(
+      "external",
+    );
+    await waitFor(() => {
+      const matched = mockedApi.GET.mock.calls.some(
+        (call) =>
+          call[0] === "/suppliers" &&
+          (call[1] as never as { params: { query: { q?: string } } })?.params?.query?.q ===
+            "external",
+      );
+      expect(matched).toBe(true);
+    });
+  });
+
+  it("does not let an external search change clobber in-flight typing", async () => {
+    vi.useFakeTimers();
+    try {
+      const { onSearchChangeSpy, setExternalSearch } = renderPage();
+      await act(() => vi.advanceTimersByTimeAsync(0));
+
+      fireEvent.change(screen.getByPlaceholderText("Search suppliers"), {
+        target: { value: "ac" },
+      });
+
+      // Debounce has not elapsed yet — an external change (Back/Forward,
+      // another navigation) lands while the user is still typing.
+      setExternalSearch({ q: "old" });
+      expect((screen.getByPlaceholderText("Search suppliers") as HTMLInputElement).value).toBe(
+        "ac",
+      );
+
+      await act(() => vi.advanceTimersByTimeAsync(400));
+
+      expect((screen.getByPlaceholderText("Search suppliers") as HTMLInputElement).value).toBe(
+        "ac",
+      );
+      expect(onSearchChangeSpy).toHaveBeenCalledWith({ q: "ac" });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("Reset clears both the search input and the route's q", async () => {

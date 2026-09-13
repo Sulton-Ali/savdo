@@ -64,11 +64,21 @@ export function SuppliersPage({ search, onSearchChange }: SuppliersPageProps) {
   const lastPushedQ = useRef(search.q);
 
   useEffect(() => {
-    if (search.q !== lastPushedQ.current) {
-      lastPushedQ.current = search.q;
-      setRawQuery(search.q ?? "");
+    if (search.q === lastPushedQ.current) {
+      return;
     }
-  }, [search.q]);
+    // A debounce is still pending (the user is mid-typing): let it finish
+    // and push its own value instead of clobbering their keystrokes with
+    // this external change (Back/Forward, another navigation). Once the
+    // debounce settles, the push effect below runs and either matches this
+    // external `q` (nothing left to sync) or overwrites it with what the
+    // user typed — "last user action wins".
+    if (rawQuery !== debouncedQuery) {
+      return;
+    }
+    lastPushedQ.current = search.q;
+    setRawQuery(search.q ?? "");
+  }, [search.q, rawQuery, debouncedQuery]);
 
   useEffect(() => {
     const trimmed = debouncedQuery.trim();
@@ -83,7 +93,13 @@ export function SuppliersPage({ search, onSearchChange }: SuppliersPageProps) {
     onSearchChange({ ...search, q: next });
   }, [debouncedQuery, search, onSearchChange]);
 
-  const filters = { q: search.q };
+  // Mirrors the debounce gate above: a URL `q` shorter than
+  // `MIN_QUERY_LENGTH` (bookmark, edited address bar, old history entry)
+  // still renders in the input via the sync effect, but must not reach the
+  // API — the typed path never sends a 1-char query either.
+  const filters = {
+    q: search.q && search.q.length >= MIN_QUERY_LENGTH ? search.q : undefined,
+  };
 
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isPending } = useCursorList(
     ["suppliers", filters],
