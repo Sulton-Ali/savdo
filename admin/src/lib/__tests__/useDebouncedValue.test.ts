@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { useDebouncedValue } from "../useDebouncedValue";
 
@@ -40,6 +40,34 @@ describe("useDebouncedValue", () => {
     await waitFor(() => {
       expect(result.current).toBe("abc");
     });
+  });
+
+  it("unmounting mid-debounce clears the pending timer without error or a late update", () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.useFakeTimers();
+    try {
+      const { result, rerender, unmount } = renderHook(
+        ({ value }) => useDebouncedValue(value, 30),
+        {
+          initialProps: { value: "a" },
+        },
+      );
+
+      rerender({ value: "ab" });
+      unmount();
+
+      // If the cleanup did not clear the timer, this would call
+      // `setState` on an unmounted hook and React would log an error.
+      act(() => {
+        vi.advanceTimersByTime(30);
+      });
+
+      expect(result.current).toBe("a");
+      expect(errorSpy).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+      errorSpy.mockRestore();
+    }
   });
 
   it("defaults to a 300ms delay", async () => {
