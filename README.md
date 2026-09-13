@@ -27,4 +27,4 @@ to implementer, reviewer, scribe and db agents. See `AGENTS.md` and
 
 ## Status
 
-Phase 0 — bootstrap. Scaffolds merged for the Go API (healthz), contract + generated clients, admin (Ant Design), landing (TanStack Start SSR), mobile (Expo) and shared packages; CI in progress; the phase closes with `/phase-done`.
+Phases 0–7.6 complete as of 2026-09-13. The MVP ships core API + admin + mobile + landing + Telegram bot with AI. Next: Phase 8 — Production and the first shop's onboarding.
