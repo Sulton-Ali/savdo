@@ -1,6 +1,6 @@
 import type { components } from "@savdo/api-client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { App as AntApp, ConfigProvider } from "antd";
 import { useState } from "react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -83,9 +83,14 @@ function product(overrides: Partial<Product>): Product {
  * `CustomersPage.test.tsx`'s harness). */
 function renderPage(permissions: string[] = ["catalog.write"], initialSearch: ProductsSearch = {}) {
   const onSearchChangeSpy = vi.fn<(next: ProductsSearch) => void>();
+  // Lets a test simulate a change that does not go through the page's own
+  // `onSearchChange` (browser Back/Forward, another navigation) — a real
+  // `setSearch` call from the harness, not the spied round-trip.
+  let setExternalSearchImpl: (next: ProductsSearch) => void = () => {};
 
   function Harness() {
     const [search, setSearch] = useState<ProductsSearch>(initialSearch);
+    setExternalSearchImpl = setSearch;
     return (
       <ProductsListPage
         search={search}
@@ -109,7 +114,11 @@ function renderPage(permissions: string[] = ["catalog.write"], initialSearch: Pr
       </QueryClientProvider>
     </ConfigProvider>,
   );
-  return { ...utils, onSearchChangeSpy };
+  return {
+    ...utils,
+    onSearchChangeSpy,
+    setExternalSearch: (next: ProductsSearch) => act(() => setExternalSearchImpl(next)),
+  };
 }
 
 function mockEndpoints(products: Product[]) {
@@ -205,6 +214,56 @@ describe("ProductsListPage", () => {
       },
       { timeout: 2000 },
     );
+  });
+
+  it("shows a below-minimum URL q in the input but never queries with it", async () => {
+    mockEndpoints([product({})]);
+
+    renderPage(["catalog.write"], { q: "a" });
+
+    expect((screen.getByPlaceholderText("Search products") as HTMLInputElement).value).toBe("a");
+    await screen.findByText("Shirt");
+    expect(lastProductsQuery()?.q).toBeUndefined();
+  });
+
+  it("syncs the input from an external search change when nothing is being typed", async () => {
+    mockEndpoints([product({})]);
+    const { setExternalSearch } = renderPage(["catalog.write"]);
+    await screen.findByText("Shirt");
+
+    setExternalSearch({ q: "external" });
+
+    expect((screen.getByPlaceholderText("Search products") as HTMLInputElement).value).toBe(
+      "external",
+    );
+    await waitFor(() => {
+      expect(lastProductsQuery()?.q).toBe("external");
+    });
+  });
+
+  it("does not let an external search change clobber in-flight typing", async () => {
+    mockEndpoints([product({})]);
+    vi.useFakeTimers();
+    try {
+      const { onSearchChangeSpy, setExternalSearch } = renderPage(["catalog.write"]);
+      await act(() => vi.advanceTimersByTimeAsync(0));
+
+      fireEvent.change(screen.getByPlaceholderText("Search products"), {
+        target: { value: "sh" },
+      });
+
+      // Debounce has not elapsed yet — an external change (Back/Forward,
+      // another navigation) lands while the user is still typing.
+      setExternalSearch({ q: "old" });
+      expect((screen.getByPlaceholderText("Search products") as HTMLInputElement).value).toBe("sh");
+
+      await act(() => vi.advanceTimersByTimeAsync(400));
+
+      expect((screen.getByPlaceholderText("Search products") as HTMLInputElement).value).toBe("sh");
+      expect(onSearchChangeSpy).toHaveBeenCalledWith(expect.objectContaining({ q: "sh" }));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   // T6a review MAJOR 2: a cashier has no `catalog.write` and must never
