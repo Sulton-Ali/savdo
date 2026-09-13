@@ -1,7 +1,7 @@
 import type { components } from "@savdo/api-client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 type Me = components["schemas"]["Me"];
@@ -10,10 +10,10 @@ function buildMe(permissions: string[]): Me {
   return {
     user: {
       id: "u1",
-      username: "manager",
-      fullName: "Test Manager",
+      username: "cashier",
+      fullName: "Test Cashier",
       phone: null,
-      role: permissions.length > 0 ? "manager" : "cashier",
+      role: "cashier",
       locale: "en",
       isActive: true,
       lastLoginAt: null,
@@ -57,7 +57,7 @@ import { i18next } from "../../../i18n";
 import { rootRoute } from "../../root";
 import { authenticatedRoute } from "../authenticatedRoute";
 import { dashboardRoute } from "../dashboardRoute";
-import { suppliersRoute } from "../suppliersRoute";
+import { suppliersRoute, validateSuppliersSearch } from "../suppliersRoute";
 
 function buildRouter(initialEntry: string) {
   const queryClient = new QueryClient();
@@ -81,7 +81,7 @@ describe("suppliersRoute beforeLoad", () => {
     cleanup();
   });
 
-  it("redirects to / when the user lacks suppliers.manage", async () => {
+  it("redirects a cashier (no suppliers.manage) away from /suppliers", async () => {
     fetchMeMock.mockResolvedValueOnce(buildMe([]));
     const { router, queryClient } = buildRouter("/suppliers");
     render(
@@ -95,7 +95,7 @@ describe("suppliersRoute beforeLoad", () => {
     });
   });
 
-  it("loads /suppliers when the user has suppliers.manage", async () => {
+  it("loads /suppliers for a manager with suppliers.manage", async () => {
     fetchMeMock.mockResolvedValueOnce(buildMe(["suppliers.manage"]));
     const { router, queryClient } = buildRouter("/suppliers");
     render(
@@ -107,5 +107,53 @@ describe("suppliersRoute beforeLoad", () => {
     await waitFor(() => {
       expect(router.state.location.pathname).toBe("/suppliers");
     });
+  });
+
+  it("replaces the history entry (not pushes) on Reset, so Back leaves the page instead of undoing one filter", async () => {
+    fetchMeMock.mockResolvedValueOnce(buildMe(["suppliers.manage"]));
+    const { router, queryClient } = buildRouter("/suppliers?q=acme");
+    render(
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe("/suppliers");
+    });
+
+    const replaceSpy = vi.spyOn(router.history, "replace");
+    const pushSpy = vi.spyOn(router.history, "push");
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+
+    await waitFor(() => {
+      expect(replaceSpy).toHaveBeenCalled();
+    });
+    expect(pushSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("suppliersRoute validateSearch", () => {
+  const validateSearch = validateSuppliersSearch;
+
+  it("keeps a valid, non-empty trimmed q", () => {
+    expect(validateSearch({ q: "  acme  " })).toEqual({ q: "acme" });
+  });
+
+  it("defaults q to undefined when the search is empty", () => {
+    expect(validateSearch({})).toEqual({ q: undefined });
+  });
+
+  it("drops an empty or whitespace-only q, and a non-string q", () => {
+    expect(validateSearch({ q: "" })).toEqual({ q: undefined });
+    expect(validateSearch({ q: "   " })).toEqual({ q: undefined });
+    expect(validateSearch({ q: 42 })).toEqual({ q: undefined });
+  });
+
+  it("truncates an over-long q to 200 characters rather than dropping it (a long paste is still a usable search prefix)", () => {
+    const long = "a".repeat(250);
+    const result = validateSearch({ q: long });
+    expect(result.q).toHaveLength(200);
+    expect(result.q).toBe("a".repeat(200));
   });
 });
