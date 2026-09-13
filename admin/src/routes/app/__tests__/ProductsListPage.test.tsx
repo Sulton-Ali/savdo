@@ -2,6 +2,7 @@ import type { components } from "@savdo/api-client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { App as AntApp, ConfigProvider } from "antd";
+import { useState } from "react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@tanstack/react-router", async (importOriginal) => {
@@ -17,6 +18,7 @@ import { AuthProvider } from "../../../auth/AuthContext";
 import { i18next } from "../../../i18n";
 import { api } from "../../../lib/api";
 import { ProductsListPage } from "../ProductsListPage";
+import type { ProductsSearch } from "../productsRoute";
 
 type Me = components["schemas"]["Me"];
 type Product = components["schemas"]["Product"];
@@ -73,19 +75,41 @@ function product(overrides: Partial<Product>): Product {
   };
 }
 
-function renderPage(permissions: string[] = ["catalog.write"]) {
+/** Mirrors how `productsRoute`'s wrapper drives `ProductsListPage`
+ * (`search`/`onSearchChange`), except the search state lives in this test
+ * harness instead of the router — `onSearchChangeSpy` observes every call
+ * the page makes while `useState` keeps the page controlled, same as a real
+ * `navigate({ search })` round-trip would (mirrors
+ * `CustomersPage.test.tsx`'s harness). */
+function renderPage(permissions: string[] = ["catalog.write"], initialSearch: ProductsSearch = {}) {
+  const onSearchChangeSpy = vi.fn<(next: ProductsSearch) => void>();
+
+  function Harness() {
+    const [search, setSearch] = useState<ProductsSearch>(initialSearch);
+    return (
+      <ProductsListPage
+        search={search}
+        onSearchChange={(next) => {
+          onSearchChangeSpy(next);
+          setSearch(next);
+        }}
+      />
+    );
+  }
+
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  const utils = render(
     <ConfigProvider theme={{ token: { motion: false } }}>
       <QueryClientProvider client={queryClient}>
         <AntApp>
           <AuthProvider me={buildMe(permissions)}>
-            <ProductsListPage />
+            <Harness />
           </AuthProvider>
         </AntApp>
       </QueryClientProvider>
     </ConfigProvider>,
   );
+  return { ...utils, onSearchChangeSpy };
 }
 
 function mockEndpoints(products: Product[]) {
@@ -103,6 +127,12 @@ function mockEndpoints(products: Product[]) {
       response: new Response(null, { status: 200 }),
     });
   }) as never);
+}
+
+function lastProductsQuery() {
+  const call = [...mockedApi.GET.mock.calls].reverse().find((entry) => entry[0] === "/products");
+  return (call?.[1] as never as { params: { query: Record<string, unknown> } } | undefined)?.params
+    .query;
 }
 
 describe("ProductsListPage", () => {
@@ -149,23 +179,29 @@ describe("ProductsListPage", () => {
     // carry `q: "s"`.
     fireEvent.change(searchInput, { target: { value: "s" } });
     await new Promise((resolve) => setTimeout(resolve, 400));
-    expect(
-      mockedApi.GET.mock.calls.some(
-        (call) =>
-          call[0] === "/products" &&
-          (call[1] as never as { params: { query: { q?: string } } })?.params?.query?.q === "s",
-      ),
-    ).toBe(false);
+    expect(lastProductsQuery()?.q).not.toBe("s");
 
     fireEvent.change(searchInput, { target: { value: "sh" } });
     await waitFor(
       () => {
-        const matched = mockedApi.GET.mock.calls.some(
-          (call) =>
-            call[0] === "/products" &&
-            (call[1] as never as { params: { query: { q?: string } } })?.params?.query?.q === "sh",
-        );
-        expect(matched).toBe(true);
+        expect(lastProductsQuery()?.q).toBe("sh");
+      },
+      { timeout: 2000 },
+    );
+  });
+
+  it("pushes the debounced query into the route's search params (replace, not push)", async () => {
+    mockEndpoints([product({})]);
+    const { onSearchChangeSpy } = renderPage();
+    await screen.findByText("Shirt");
+
+    fireEvent.change(screen.getByPlaceholderText("Search products"), {
+      target: { value: "sh" },
+    });
+
+    await waitFor(
+      () => {
+        expect(onSearchChangeSpy).toHaveBeenCalledWith(expect.objectContaining({ q: "sh" }));
       },
       { timeout: 2000 },
     );
@@ -203,5 +239,83 @@ describe("ProductsListPage", () => {
     renderPage([]);
     await screen.findByText("Shirt");
     expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+  });
+
+  it("pre-fills the search input and category, and queries with them, on reload with ?q=&categoryId=", async () => {
+    mockEndpoints([product({})]);
+
+    renderPage(["catalog.write"], { q: "shirt", categoryId: "c1" });
+
+    expect((screen.getByPlaceholderText("Search products") as HTMLInputElement).value).toBe(
+      "shirt",
+    );
+    await waitFor(() => {
+      const query = lastProductsQuery();
+      expect(query?.q).toBe("shirt");
+      expect(query?.categoryId).toBe("c1");
+    });
+  });
+
+  it("shows the result count line", async () => {
+    mockEndpoints([product({})]);
+
+    renderPage();
+
+    expect(await screen.findByText("1 result")).toBeTruthy();
+  });
+
+  it("shows the includeInactive switch for catalog.write, pre-checks it from ?includeInactive=true and forwards it to the API", async () => {
+    mockEndpoints([product({})]);
+
+    renderPage(["catalog.write"], { includeInactive: true });
+    await screen.findByText("Shirt");
+
+    expect(screen.getByRole("switch", { name: "Show inactive" }).getAttribute("aria-checked")).toBe(
+      "true",
+    );
+    await waitFor(() => {
+      expect(lastProductsQuery()?.includeInactive).toBe(true);
+    });
+  });
+
+  it("toggling includeInactive pushes it into the search params (replace)", async () => {
+    mockEndpoints([product({})]);
+    const { onSearchChangeSpy } = renderPage(["catalog.write"]);
+    await screen.findByText("Shirt");
+
+    fireEvent.click(screen.getByRole("switch", { name: "Show inactive" }));
+
+    expect(onSearchChangeSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ includeInactive: true }),
+    );
+  });
+
+  it("hides the includeInactive switch for a cashier and never forwards it to the API even if present in the URL", async () => {
+    mockEndpoints([product({})]);
+
+    renderPage([], { includeInactive: true });
+    await screen.findByText("Shirt");
+
+    expect(screen.queryByRole("switch", { name: "Show inactive" })).toBeNull();
+    await waitFor(() => {
+      expect(lastProductsQuery()?.includeInactive).toBeUndefined();
+    });
+  });
+
+  it("Reset clears the search input, category and includeInactive", async () => {
+    mockEndpoints([product({})]);
+    const { onSearchChangeSpy } = renderPage(["catalog.write"], {
+      q: "shirt",
+      categoryId: "c1",
+      includeInactive: true,
+    });
+    expect((screen.getByPlaceholderText("Search products") as HTMLInputElement).value).toBe(
+      "shirt",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+
+    expect(onSearchChangeSpy).toHaveBeenCalledWith({});
+    expect((screen.getByPlaceholderText("Search products") as HTMLInputElement).value).toBe("");
   });
 });

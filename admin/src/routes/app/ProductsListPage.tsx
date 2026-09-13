@@ -1,39 +1,68 @@
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Button, Card, Input, Space, Switch, Table, Tag, TreeSelect } from "antd";
+import { Button, Card, Input, Switch, Table, Tag, TreeSelect } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { useAuth } from "../../auth/AuthContext";
 import { fetchCategories, fetchProductsPage, type Product } from "../../catalog/api";
 import { buildCategoryTreeSelectData } from "../../catalog/tree";
+import { FilterBar } from "../../components/FilterBar";
 import { useCursorList } from "../../lib/useCursorList";
+import { useDebouncedValue } from "../../lib/useDebouncedValue";
+import type { ProductsSearch } from "./productsRoute";
 
 /** Search fires only once the query is empty (clears the filter) or at
  * least 2 characters long (`docs/05-API.md` § Catalogue / T6a spec). */
 const MIN_QUERY_LENGTH = 2;
 const SEARCH_DEBOUNCE_MS = 300;
 
-export function ProductsListPage() {
+export interface ProductsListPageProps {
+  /** Validated filter state from the route's search params
+   * (`productsRoute`'s `validateSearch`). */
+  search: ProductsSearch;
+  /** Replaces the filter state — the caller (`productsRoute`) turns this
+   * into a `navigate({ search, replace: true })` call so reload and share
+   * restore it, while Back leaves the page instead of undoing the search
+   * one keystroke at a time (D-124). */
+  onSearchChange: (next: ProductsSearch) => void;
+}
+
+export function ProductsListPage({ search, onSearchChange }: ProductsListPageProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { can } = useAuth();
   const canWrite = can("catalog.write");
 
-  const [rawQuery, setRawQuery] = useState("");
-  const [debouncedQuery, setDebouncedQuery] = useState("");
-  const [categoryId, setCategoryId] = useState<string | undefined>(undefined);
-  const [includeInactive, setIncludeInactive] = useState(false);
+  // The input stays local state for typing responsiveness; only the
+  // debounced value is pushed into the route's search params. `lastPushedQ`
+  // tells the sync-from-url effect below an external change (Reset, browser
+  // Back, reload) apart from the round-trip of our own push, so it does not
+  // clobber what the user is still typing (mirrors `CustomersPage`).
+  const [rawQuery, setRawQuery] = useState(search.q ?? "");
+  const debouncedQuery = useDebouncedValue(rawQuery, SEARCH_DEBOUNCE_MS);
+  const lastPushedQ = useRef(search.q);
 
   useEffect(() => {
-    const trimmed = rawQuery.trim();
+    if (search.q !== lastPushedQ.current) {
+      lastPushedQ.current = search.q;
+      setRawQuery(search.q ?? "");
+    }
+  }, [search.q]);
+
+  useEffect(() => {
+    const trimmed = debouncedQuery.trim();
     if (trimmed.length > 0 && trimmed.length < MIN_QUERY_LENGTH) {
       return;
     }
-    const timer = setTimeout(() => setDebouncedQuery(trimmed), SEARCH_DEBOUNCE_MS);
-    return () => clearTimeout(timer);
-  }, [rawQuery]);
+    const next = trimmed.length > 0 ? trimmed : undefined;
+    if (next === search.q) {
+      return;
+    }
+    lastPushedQ.current = next;
+    onSearchChange({ ...search, q: next });
+  }, [debouncedQuery, search, onSearchChange]);
 
   // Only catalog.write sees inactive categories in the filter dropdown — a
   // cashier (no catalog.write) must never request them (T6a review MAJOR 2).
@@ -51,9 +80,13 @@ export function ProductsListPage() {
   );
 
   const filters = {
-    q: debouncedQuery || undefined,
-    categoryId,
-    includeInactive: canWrite ? includeInactive : undefined,
+    q: search.q,
+    categoryId: search.categoryId,
+    // A user without catalog.write must never forward includeInactive to
+    // the API, even if it is sitting in the URL (e.g. a shared link from a
+    // manager) — this page hides the Switch for them, but the URL itself is
+    // not a trusted source of permission.
+    includeInactive: canWrite ? search.includeInactive : undefined,
   };
 
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isPending } = useCursorList(
@@ -64,6 +97,12 @@ export function ProductsListPage() {
   // `costPrice` is present only for owner/manager responses (ADR-010) — the
   // column follows the actual response shape, never a role assumption.
   const showCostColumn = products.some((product) => product.costPrice !== undefined);
+
+  function handleReset() {
+    setRawQuery("");
+    lastPushedQ.current = undefined;
+    onSearchChange({});
+  }
 
   const columns: ColumnsType<Product> = [
     {
@@ -148,30 +187,48 @@ export function ProductsListPage() {
         )
       }
     >
-      <Space style={{ marginBottom: 16 }} wrap>
-        <Input.Search
-          allowClear
-          placeholder={t("catalog.products.searchPlaceholder")}
-          value={rawQuery}
-          onChange={(event) => setRawQuery(event.target.value)}
-          style={{ width: 240 }}
-        />
-        <TreeSelect
-          allowClear
-          treeData={categoryOptions}
-          value={categoryId}
-          onChange={(value: string | undefined) => setCategoryId(value)}
-          placeholder={t("catalog.products.allCategories")}
-          style={{ width: 220 }}
-          treeDefaultExpandAll
-        />
+      <FilterBar onReset={handleReset} resultCount={products.length} hasMore={hasNextPage}>
+        <FilterBar.Field label={t("common.search")}>
+          {(labelId) => (
+            <Input
+              allowClear
+              aria-labelledby={labelId}
+              placeholder={t("catalog.products.searchPlaceholder")}
+              value={rawQuery}
+              onChange={(event) => setRawQuery(event.target.value)}
+            />
+          )}
+        </FilterBar.Field>
+        <FilterBar.Field label={t("catalog.products.columns.category")}>
+          {(labelId) => (
+            <TreeSelect
+              allowClear
+              aria-labelledby={labelId}
+              treeData={categoryOptions}
+              value={search.categoryId}
+              onChange={(value: string | undefined) =>
+                onSearchChange({ ...search, categoryId: value })
+              }
+              placeholder={t("catalog.products.allCategories")}
+              style={{ width: "100%" }}
+              treeDefaultExpandAll
+            />
+          )}
+        </FilterBar.Field>
         {canWrite && (
-          <Space>
-            <Switch checked={includeInactive} onChange={setIncludeInactive} />
-            {t("common.showInactive")}
-          </Space>
+          <FilterBar.Field label={t("common.showInactive")} span={{ xs: 12, md: 6, xl: 4 }}>
+            {(labelId) => (
+              <Switch
+                aria-labelledby={labelId}
+                checked={search.includeInactive ?? false}
+                onChange={(checked) =>
+                  onSearchChange({ ...search, includeInactive: checked ? true : undefined })
+                }
+              />
+            )}
+          </FilterBar.Field>
         )}
-      </Space>
+      </FilterBar>
 
       <Table<Product>
         rowKey="id"
