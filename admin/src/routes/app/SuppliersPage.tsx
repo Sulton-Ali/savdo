@@ -1,11 +1,13 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { App, Button, Card, Drawer, Form, Input, Modal, Popconfirm, Space, Table } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { FilterBar } from "../../components/FilterBar";
 import { applyApiErrorToForm, notifyApiError } from "../../lib/errors";
 import { useCursorList } from "../../lib/useCursorList";
+import { useDebouncedValue } from "../../lib/useDebouncedValue";
 import {
   createSupplier,
   deleteSupplier,
@@ -15,6 +17,7 @@ import {
   type SupplierPatch,
   updateSupplier,
 } from "../../suppliers/api";
+import type { SuppliersSearch } from "./suppliersRoute";
 
 /** Matches `ProductsListPage`'s search minimum (`docs/05-API.md` §
  * Conventions: free-text search is ILIKE/trigram). */
@@ -29,7 +32,18 @@ interface SupplierFormValues {
   note?: string;
 }
 
-export function SuppliersPage() {
+export interface SuppliersPageProps {
+  /** Validated filter state from the route's search params
+   * (`suppliersRoute`'s `validateSearch`). */
+  search: SuppliersSearch;
+  /** Replaces the filter state — the caller (`suppliersRoute`) turns this
+   * into a `navigate({ search, replace: true })` call so reload and share
+   * restore it, while Back leaves the page instead of undoing the search
+   * one keystroke at a time (D-124). */
+  onSearchChange: (next: SuppliersSearch) => void;
+}
+
+export function SuppliersPage({ search, onSearchChange }: SuppliersPageProps) {
   const { t } = useTranslation();
   const { notification } = App.useApp();
   const queryClient = useQueryClient();
@@ -40,19 +54,52 @@ export function SuppliersPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
 
-  const [rawQuery, setRawQuery] = useState("");
-  const [debouncedQuery, setDebouncedQuery] = useState("");
+  // The input stays local state for typing responsiveness; only the
+  // debounced value is pushed into the route's search params. `lastPushedQ`
+  // tells the sync-from-url effect below apart an external change (Reset,
+  // browser Back, reload) from the round-trip of our own push, so it does
+  // not clobber what the user is still typing.
+  const [rawQuery, setRawQuery] = useState(search.q ?? "");
+  const debouncedQuery = useDebouncedValue(rawQuery, SEARCH_DEBOUNCE_MS);
+  const lastPushedQ = useRef(search.q);
 
   useEffect(() => {
-    const trimmed = rawQuery.trim();
+    if (search.q === lastPushedQ.current) {
+      return;
+    }
+    // A debounce is still pending (the user is mid-typing): let it finish
+    // and push its own value instead of clobbering their keystrokes with
+    // this external change (Back/Forward, another navigation). Once the
+    // debounce settles, the push effect below runs and either matches this
+    // external `q` (nothing left to sync) or overwrites it with what the
+    // user typed — "last user action wins".
+    if (rawQuery !== debouncedQuery) {
+      return;
+    }
+    lastPushedQ.current = search.q;
+    setRawQuery(search.q ?? "");
+  }, [search.q, rawQuery, debouncedQuery]);
+
+  useEffect(() => {
+    const trimmed = debouncedQuery.trim();
     if (trimmed.length > 0 && trimmed.length < MIN_QUERY_LENGTH) {
       return;
     }
-    const timer = setTimeout(() => setDebouncedQuery(trimmed), SEARCH_DEBOUNCE_MS);
-    return () => clearTimeout(timer);
-  }, [rawQuery]);
+    const next = trimmed.length > 0 ? trimmed : undefined;
+    if (next === search.q) {
+      return;
+    }
+    lastPushedQ.current = next;
+    onSearchChange({ ...search, q: next });
+  }, [debouncedQuery, search, onSearchChange]);
 
-  const filters = { q: debouncedQuery || undefined };
+  // Mirrors the debounce gate above: a URL `q` shorter than
+  // `MIN_QUERY_LENGTH` (bookmark, edited address bar, old history entry)
+  // still renders in the input via the sync effect, but must not reach the
+  // API — the typed path never sends a 1-char query either.
+  const filters = {
+    q: search.q && search.q.length >= MIN_QUERY_LENGTH ? search.q : undefined,
+  };
 
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isPending } = useCursorList(
     ["suppliers", filters],
@@ -165,15 +212,27 @@ export function SuppliersPage() {
         </Button>
       }
     >
-      <Space style={{ marginBottom: 16 }} wrap>
-        <Input.Search
-          allowClear
-          placeholder={t("suppliers.searchPlaceholder")}
-          value={rawQuery}
-          onChange={(event) => setRawQuery(event.target.value)}
-          style={{ width: 240 }}
-        />
-      </Space>
+      <FilterBar
+        onReset={() => {
+          setRawQuery("");
+          lastPushedQ.current = undefined;
+          onSearchChange({ ...search, q: undefined });
+        }}
+        resultCount={suppliers.length}
+        hasMore={hasNextPage}
+      >
+        <FilterBar.Field label={t("common.search")}>
+          {(labelId) => (
+            <Input
+              allowClear
+              aria-labelledby={labelId}
+              placeholder={t("suppliers.searchPlaceholder")}
+              value={rawQuery}
+              onChange={(event) => setRawQuery(event.target.value)}
+            />
+          )}
+        </FilterBar.Field>
+      </FilterBar>
 
       <Table<Supplier>
         rowKey="id"

@@ -56,13 +56,13 @@ vi.mock("../../../lib/api", () => ({
 import { i18next } from "../../../i18n";
 import { rootRoute } from "../../root";
 import { authenticatedRoute } from "../authenticatedRoute";
+import { customersRoute, validateCustomersSearch } from "../customersRoute";
 import { dashboardRoute } from "../dashboardRoute";
-import { suppliersRoute, validateSuppliersSearch } from "../suppliersRoute";
 
 function buildRouter(initialEntry: string) {
   const queryClient = new QueryClient();
   const routeTree = rootRoute.addChildren([
-    authenticatedRoute.addChildren([dashboardRoute, suppliersRoute]),
+    authenticatedRoute.addChildren([dashboardRoute, customersRoute]),
   ]);
   const router = createRouter({
     routeTree,
@@ -72,7 +72,7 @@ function buildRouter(initialEntry: string) {
   return { router, queryClient };
 }
 
-describe("suppliersRoute beforeLoad", () => {
+describe("customersRoute beforeLoad", () => {
   beforeAll(async () => {
     await i18next.changeLanguage("en");
   });
@@ -81,9 +81,9 @@ describe("suppliersRoute beforeLoad", () => {
     cleanup();
   });
 
-  it("redirects a cashier (no suppliers.manage) away from /suppliers", async () => {
+  it("loads /customers for a cashier — no permission guard, unlike /suppliers or /stock/movements", async () => {
     fetchMeMock.mockResolvedValueOnce(buildMe([]));
-    const { router, queryClient } = buildRouter("/suppliers");
+    const { router, queryClient } = buildRouter("/customers");
     render(
       <QueryClientProvider client={queryClient}>
         <RouterProvider router={router} />
@@ -91,34 +91,20 @@ describe("suppliersRoute beforeLoad", () => {
     );
 
     await waitFor(() => {
-      expect(router.state.location.pathname).toBe("/");
-    });
-  });
-
-  it("loads /suppliers for a manager with suppliers.manage", async () => {
-    fetchMeMock.mockResolvedValueOnce(buildMe(["suppliers.manage"]));
-    const { router, queryClient } = buildRouter("/suppliers");
-    render(
-      <QueryClientProvider client={queryClient}>
-        <RouterProvider router={router} />
-      </QueryClientProvider>,
-    );
-
-    await waitFor(() => {
-      expect(router.state.location.pathname).toBe("/suppliers");
+      expect(router.state.location.pathname).toBe("/customers");
     });
   });
 
   it("replaces the history entry (not pushes) on Reset, so Back leaves the page instead of undoing one filter", async () => {
-    fetchMeMock.mockResolvedValueOnce(buildMe(["suppliers.manage"]));
-    const { router, queryClient } = buildRouter("/suppliers?q=acme");
+    fetchMeMock.mockResolvedValueOnce(buildMe([]));
+    const { router, queryClient } = buildRouter("/customers?q=jane");
     render(
       <QueryClientProvider client={queryClient}>
         <RouterProvider router={router} />
       </QueryClientProvider>,
     );
     await waitFor(() => {
-      expect(router.state.location.pathname).toBe("/suppliers");
+      expect(router.state.location.pathname).toBe("/customers");
     });
 
     const replaceSpy = vi.spyOn(router.history, "replace");
@@ -133,11 +119,11 @@ describe("suppliersRoute beforeLoad", () => {
   });
 });
 
-describe("suppliersRoute validateSearch", () => {
-  const validateSearch = validateSuppliersSearch;
+describe("customersRoute validateSearch", () => {
+  const validateSearch = validateCustomersSearch;
 
   it("keeps a valid, non-empty trimmed q", () => {
-    expect(validateSearch({ q: "  acme  " })).toEqual({ q: "acme" });
+    expect(validateSearch({ q: "  jane  " })).toEqual({ q: "jane" });
   });
 
   it("defaults q to undefined when the search is empty", () => {
