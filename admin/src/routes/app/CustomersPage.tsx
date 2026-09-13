@@ -15,10 +15,11 @@ import {
   Tag,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { useAuth } from "../../auth/AuthContext";
+import { FilterBar } from "../../components/FilterBar";
 import {
   type Customer,
   type CustomerCreate,
@@ -30,6 +31,8 @@ import {
 } from "../../customers/api";
 import { applyApiErrorToForm, notifyApiError } from "../../lib/errors";
 import { useCursorList } from "../../lib/useCursorList";
+import { useDebouncedValue } from "../../lib/useDebouncedValue";
+import type { CustomersSearch } from "./customersRoute";
 
 /** Matches `SuppliersPage`'s search minimum (`docs/05-API.md` §
  * Conventions: free-text search is ILIKE/trigram). */
@@ -44,6 +47,17 @@ interface CustomerFormValues {
   tags?: string[];
 }
 
+export interface CustomersPageProps {
+  /** Validated filter state from the route's search params
+   * (`customersRoute`'s `validateSearch`). */
+  search: CustomersSearch;
+  /** Replaces the filter state — the caller (`customersRoute`) turns this
+   * into a `navigate({ search, replace: true })` call so reload and share
+   * restore it, while Back leaves the page instead of undoing the search
+   * one keystroke at a time (D-124). */
+  onSearchChange: (next: CustomersSearch) => void;
+}
+
 /**
  * List, search, create, edit and soft-delete customers (`docs/04-DATA-MODEL.md`
  * § 7: cashier+ may create/read, manager+ may edit/delete — the server
@@ -52,7 +66,7 @@ interface CustomerFormValues {
  * `catalog.write` gating). Each row links to `CustomerDetailPage` for that
  * customer's purchase history.
  */
-export function CustomersPage() {
+export function CustomersPage({ search, onSearchChange }: CustomersPageProps) {
   const { t } = useTranslation();
   const { notification } = App.useApp();
   const { can } = useAuth();
@@ -66,19 +80,36 @@ export function CustomersPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
 
-  const [rawQuery, setRawQuery] = useState("");
-  const [debouncedQuery, setDebouncedQuery] = useState("");
+  // The input stays local state for typing responsiveness; only the
+  // debounced value is pushed into the route's search params. `lastPushedQ`
+  // tells the sync-from-url effect below apart an external change (Reset,
+  // browser Back, reload) from the round-trip of our own push, so it does
+  // not clobber what the user is still typing.
+  const [rawQuery, setRawQuery] = useState(search.q ?? "");
+  const debouncedQuery = useDebouncedValue(rawQuery, SEARCH_DEBOUNCE_MS);
+  const lastPushedQ = useRef(search.q);
 
   useEffect(() => {
-    const trimmed = rawQuery.trim();
+    if (search.q !== lastPushedQ.current) {
+      lastPushedQ.current = search.q;
+      setRawQuery(search.q ?? "");
+    }
+  }, [search.q]);
+
+  useEffect(() => {
+    const trimmed = debouncedQuery.trim();
     if (trimmed.length > 0 && trimmed.length < MIN_QUERY_LENGTH) {
       return;
     }
-    const timer = setTimeout(() => setDebouncedQuery(trimmed), SEARCH_DEBOUNCE_MS);
-    return () => clearTimeout(timer);
-  }, [rawQuery]);
+    const next = trimmed.length > 0 ? trimmed : undefined;
+    if (next === search.q) {
+      return;
+    }
+    lastPushedQ.current = next;
+    onSearchChange({ ...search, q: next });
+  }, [debouncedQuery, search, onSearchChange]);
 
-  const filters = { q: debouncedQuery || undefined };
+  const filters = { q: search.q };
 
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isPending } = useCursorList(
     ["customers", filters],
@@ -210,15 +241,27 @@ export function CustomersPage() {
         </Button>
       }
     >
-      <Space style={{ marginBottom: 16 }} wrap>
-        <Input.Search
-          allowClear
-          placeholder={t("customers.searchPlaceholder")}
-          value={rawQuery}
-          onChange={(event) => setRawQuery(event.target.value)}
-          style={{ width: 240 }}
-        />
-      </Space>
+      <FilterBar
+        onReset={() => {
+          setRawQuery("");
+          lastPushedQ.current = undefined;
+          onSearchChange({ ...search, q: undefined });
+        }}
+        resultCount={customers.length}
+        hasMore={hasNextPage}
+      >
+        <FilterBar.Field label={t("common.search")}>
+          {(labelId) => (
+            <Input
+              allowClear
+              aria-labelledby={labelId}
+              placeholder={t("customers.searchPlaceholder")}
+              value={rawQuery}
+              onChange={(event) => setRawQuery(event.target.value)}
+            />
+          )}
+        </FilterBar.Field>
+      </FilterBar>
 
       <Table<Customer>
         rowKey="id"

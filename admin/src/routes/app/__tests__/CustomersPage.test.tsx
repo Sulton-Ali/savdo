@@ -2,6 +2,7 @@ import type { components } from "@savdo/api-client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { App as AntApp, ConfigProvider } from "antd";
+import { useState } from "react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const navigateMock = vi.fn();
@@ -19,6 +20,7 @@ import { AuthProvider } from "../../../auth/AuthContext";
 import { i18next } from "../../../i18n";
 import { api } from "../../../lib/api";
 import { CustomersPage } from "../CustomersPage";
+import type { CustomersSearch } from "../customersRoute";
 
 type Me = components["schemas"]["Me"];
 type Customer = components["schemas"]["Customer"];
@@ -67,19 +69,44 @@ function customer(overrides: Partial<Customer> = {}): Customer {
   };
 }
 
-function renderPage(permissions: string[] = ["customers.write"]) {
+/** Mirrors how `customersRoute`'s wrapper drives `CustomersPage`
+ * (`search`/`onSearchChange`), except the search state lives in this test
+ * harness instead of the router — `onSearchChangeSpy` observes every call
+ * the page makes while `useState` keeps the page controlled, same as a real
+ * `navigate({ search })` round-trip would (mirrors
+ * `StockMovementsPage.test.tsx`'s harness). */
+function renderPage(
+  permissions: string[] = ["customers.write"],
+  initialSearch: CustomersSearch = {},
+) {
+  const onSearchChangeSpy = vi.fn<(next: CustomersSearch) => void>();
+
+  function Harness() {
+    const [search, setSearch] = useState<CustomersSearch>(initialSearch);
+    return (
+      <CustomersPage
+        search={search}
+        onSearchChange={(next) => {
+          onSearchChangeSpy(next);
+          setSearch(next);
+        }}
+      />
+    );
+  }
+
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  const utils = render(
     <ConfigProvider theme={{ token: { motion: false } }}>
       <QueryClientProvider client={queryClient}>
         <AntApp>
           <AuthProvider me={buildMe(permissions)}>
-            <CustomersPage />
+            <Harness />
           </AuthProvider>
         </AntApp>
       </QueryClientProvider>
     </ConfigProvider>,
   );
+  return { ...utils, onSearchChangeSpy };
 }
 
 function emptyCustomersList() {
@@ -150,6 +177,62 @@ describe("CustomersPage", () => {
       },
       { timeout: 2000 },
     );
+  });
+
+  it("pushes the debounced query into the route's search params (replace, not push)", async () => {
+    const { onSearchChangeSpy } = renderPage();
+    await waitFor(() => expect(mockedApi.GET).toHaveBeenCalled());
+
+    fireEvent.change(screen.getByPlaceholderText("Search customers"), {
+      target: { value: "ja" },
+    });
+
+    await waitFor(
+      () => {
+        expect(onSearchChangeSpy).toHaveBeenCalledWith({ q: "ja" });
+      },
+      { timeout: 2000 },
+    );
+  });
+
+  it("pre-fills the input and queries with it when the route search already has ?q=", async () => {
+    renderPage(["customers.write"], { q: "jane" });
+
+    expect((screen.getByPlaceholderText("Search customers") as HTMLInputElement).value).toBe(
+      "jane",
+    );
+    await waitFor(() => {
+      const matched = mockedApi.GET.mock.calls.some(
+        (call) =>
+          call[0] === "/customers" &&
+          (call[1] as never as { params: { query: { q?: string } } })?.params?.query?.q === "jane",
+      );
+      expect(matched).toBe(true);
+    });
+  });
+
+  it("Reset clears both the search input and the route's q", async () => {
+    const { onSearchChangeSpy } = renderPage(["customers.write"], { q: "jane" });
+    expect((screen.getByPlaceholderText("Search customers") as HTMLInputElement).value).toBe(
+      "jane",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+
+    expect(onSearchChangeSpy).toHaveBeenCalledWith({ q: undefined });
+    expect((screen.getByPlaceholderText("Search customers") as HTMLInputElement).value).toBe("");
+  });
+
+  it("shows the result count line", async () => {
+    mockedApi.GET.mockResolvedValue({
+      data: { items: [customer()], nextCursor: null },
+      error: undefined,
+      response: new Response(null, { status: 200 }),
+    } as never);
+
+    renderPage();
+
+    expect(await screen.findByText("1 result")).toBeTruthy();
   });
 
   it("navigates to the customer detail page from the View action", async () => {
