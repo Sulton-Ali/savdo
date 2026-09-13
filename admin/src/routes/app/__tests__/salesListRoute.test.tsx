@@ -6,14 +6,14 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 type Me = components["schemas"]["Me"];
 
-function buildMe(permissions: string[]): Me {
+function buildMe(role: "owner" | "manager" | "cashier"): Me {
   return {
     user: {
       id: "u1",
-      username: "manager",
-      fullName: "Test Manager",
+      username: "user",
+      fullName: "Test User",
       phone: null,
-      role: permissions.length > 0 ? "manager" : "cashier",
+      role,
       locale: "en",
       isActive: true,
       lastLoginAt: null,
@@ -30,7 +30,7 @@ function buildMe(permissions: string[]): Me {
       updateCostOnPurchase: true,
       lowStockThreshold: 2,
     },
-    permissions,
+    permissions: [],
   };
 }
 
@@ -57,12 +57,12 @@ import { i18next } from "../../../i18n";
 import { rootRoute } from "../../root";
 import { authenticatedRoute } from "../authenticatedRoute";
 import { dashboardRoute } from "../dashboardRoute";
-import { purchasesRoute, validatePurchasesSearch } from "../purchasesRoute";
+import { salesListRoute, validateSalesListSearch } from "../salesListRoute";
 
 function buildRouter(initialEntry: string) {
   const queryClient = new QueryClient();
   const routeTree = rootRoute.addChildren([
-    authenticatedRoute.addChildren([dashboardRoute, purchasesRoute]),
+    authenticatedRoute.addChildren([dashboardRoute, salesListRoute]),
   ]);
   const router = createRouter({
     routeTree,
@@ -72,7 +72,7 @@ function buildRouter(initialEntry: string) {
   return { router, queryClient };
 }
 
-describe("purchasesRoute beforeLoad", () => {
+describe("salesListRoute beforeLoad", () => {
   beforeAll(async () => {
     await i18next.changeLanguage("en");
   });
@@ -81,9 +81,9 @@ describe("purchasesRoute beforeLoad", () => {
     cleanup();
   });
 
-  it("redirects to / when the user lacks stock.write", async () => {
-    fetchMeMock.mockResolvedValueOnce(buildMe([]));
-    const { router, queryClient } = buildRouter("/purchases");
+  it("loads /sales for a cashier — no permission guard, every role may list every sale (D-63)", async () => {
+    fetchMeMock.mockResolvedValueOnce(buildMe("cashier"));
+    const { router, queryClient } = buildRouter("/sales");
     render(
       <QueryClientProvider client={queryClient}>
         <RouterProvider router={router} />
@@ -91,34 +91,20 @@ describe("purchasesRoute beforeLoad", () => {
     );
 
     await waitFor(() => {
-      expect(router.state.location.pathname).toBe("/");
-    });
-  });
-
-  it("loads /purchases when the user has stock.write", async () => {
-    fetchMeMock.mockResolvedValueOnce(buildMe(["stock.write"]));
-    const { router, queryClient } = buildRouter("/purchases");
-    render(
-      <QueryClientProvider client={queryClient}>
-        <RouterProvider router={router} />
-      </QueryClientProvider>,
-    );
-
-    await waitFor(() => {
-      expect(router.state.location.pathname).toBe("/purchases");
+      expect(router.state.location.pathname).toBe("/sales");
     });
   });
 
   it("replaces the history entry (not pushes) on Reset, so Back leaves the page instead of undoing one filter", async () => {
-    fetchMeMock.mockResolvedValueOnce(buildMe(["stock.write"]));
-    const { router, queryClient } = buildRouter("/purchases?supplierId=sup1");
+    fetchMeMock.mockResolvedValueOnce(buildMe("owner"));
+    const { router, queryClient } = buildRouter("/sales?locationId=l1");
     render(
       <QueryClientProvider client={queryClient}>
         <RouterProvider router={router} />
       </QueryClientProvider>,
     );
     await waitFor(() => {
-      expect(router.state.location.pathname).toBe("/purchases");
+      expect(router.state.location.pathname).toBe("/sales");
     });
 
     const replaceSpy = vi.spyOn(router.history, "replace");
@@ -133,24 +119,62 @@ describe("purchasesRoute beforeLoad", () => {
   });
 });
 
-describe("purchasesRoute validateSearch", () => {
-  const validateSearch = validatePurchasesSearch;
+describe("salesListRoute validateSearch", () => {
+  const validateSearch = validateSalesListSearch;
 
   it("keeps every field when all are valid", () => {
-    expect(validateSearch({ status: "received", supplierId: "sup1" })).toEqual({
-      status: "received",
-      supplierId: "sup1",
+    expect(
+      validateSearch({
+        from: "2026-01-05",
+        to: "2026-01-10",
+        locationId: "l1",
+        kind: "return",
+        status: "voided",
+        cashierId: "u1",
+        customerId: "c1",
+      }),
+    ).toEqual({
+      from: "2026-01-05",
+      to: "2026-01-10",
+      locationId: "l1",
+      kind: "return",
+      status: "voided",
+      cashierId: "u1",
+      customerId: "c1",
     });
   });
 
   it("defaults every field to undefined when the search is empty", () => {
-    expect(validateSearch({})).toEqual({ status: undefined, supplierId: undefined });
+    expect(validateSearch({})).toEqual({
+      from: undefined,
+      to: undefined,
+      locationId: undefined,
+      kind: undefined,
+      status: undefined,
+      cashierId: undefined,
+      customerId: undefined,
+    });
   });
 
-  it("drops an unknown status and a non-string supplierId", () => {
-    expect(validateSearch({ status: "not_a_real_status", supplierId: 7 })).toEqual({
+  it("drops an unknown kind, an unknown status, non-string ids and malformed dates", () => {
+    expect(
+      validateSearch({
+        from: "2026/01/05",
+        to: "2026-01-32",
+        locationId: 7,
+        kind: "not_a_real_kind",
+        status: "not_a_real_status",
+        cashierId: 42,
+        customerId: "",
+      }),
+    ).toEqual({
+      from: undefined,
+      to: undefined,
+      locationId: undefined,
+      kind: undefined,
       status: undefined,
-      supplierId: undefined,
+      cashierId: undefined,
+      customerId: undefined,
     });
   });
 });
